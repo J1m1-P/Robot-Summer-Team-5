@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../../../Code/Lab 0 Blink"
+		},
+		{
+			"name": "Lab_0_ESP32_OLED",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
