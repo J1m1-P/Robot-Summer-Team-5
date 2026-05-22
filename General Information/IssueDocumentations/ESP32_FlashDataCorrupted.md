@@ -11,6 +11,7 @@ A fatal error occurred: MD5 of file does not match data in flash\!
 # Possible Cause: 
 
 - Unstable supplied voltage to the ESP32 during flashing.
+- Powering the ESP32 with both 3.3V and 5V at the same time. 
 
 # Fix: 
 
