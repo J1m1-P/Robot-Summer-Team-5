@@ -42,16 +42,4 @@ void loop() {
   display_handler.setCursor(0, 0);
   display_handler.println("Tape Detected: " + String(detected));
   display_handler.display();
-  // if (digitalRead(5) == HIGH) {
-  //   display_handler.clearDisplay();
-  //   display_handler.setCursor(0, 0);
-  //   display_handler.println("Tape Detected!");
-  //   display_handler.display();
-  // }
-  // else {
-  //   display_handler.clearDisplay();
-  //   display_handler.setCursor(0, 0);
-  //   display_handler.println("No Tape Detected");
-  //   display_handler.display();
-  // }
 }
