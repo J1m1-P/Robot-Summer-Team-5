@@ -21,28 +21,3 @@ void loop() {
   ledcWrite(pwmChannel, 2000); // writes a dutycycle to the specified pwmchannel (which in this case was linked to pin 4)
   delay(200);
 }
-
-
-// #include <Arduino.h>
-
-// #define LED_PIN 4
-
-// // put function declarations here:
-// void blinkAfterMiliseconds(int milliseconds, int ledPin);
-
-// void setup() {
-//   pinMode(LED_PIN, OUTPUT);
-// }
-
-// void loop() {
-//   blinkAfterMiliseconds(1000, LED_PIN);
-// }
-
-// // put function definitions here:
-// void blinkAfterMiliseconds(int milliseconds, int ledPin) {
-//   digitalWrite(ledPin, HIGH);
-//   delay(milliseconds);
-//   // digitalWrite(ledPin, LOW);
-//   // delay(milliseconds);
-//   return;
-// }
