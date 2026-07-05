@@ -16,8 +16,8 @@ void setup() {
 }
 
 void loop() {
-  digitalWrite(BRK_PIN, HIGH); // set brake pin to low to allow motor to run
-  digitalWrite(DIR_PIN, HIGH); // set direction pin to high to set direction of motor
-  ledcWrite(pwmChannel, 2000); // writes a dutycycle to the specified pwmchannel (which in this case was linked to pin 4)
+  digitalWrite(BRK_PIN, LOW); // set brake pin to low to allow motor to run
+  digitalWrite(DIR_PIN, HIGH); // set direction pin to low to set direction of motor
+  ledcWrite(pwmChannel, 5000); // writes a dutycycle to the specified pwmchannel (which in this case was linked to pin 4)
   delay(200);
 }
