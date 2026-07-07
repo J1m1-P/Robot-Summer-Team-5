@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Motor Driver Configuration Structure (Compile time data)
 typedef struct {
     uint8_t pwm_pin;            // Pin for PWM control
@@ -43,3 +47,8 @@ bool motor_driver_is_initialized(const MotorDriver *motor);     // Check if the 
 bool motor_driver_is_enabled(const MotorDriver *motor);         // Check if the motor driver is enabled
 bool motor_driver_is_coasting(const MotorDriver *motor);        // Check if the motor is currently coasting
 float motor_driver_get_current_duty(const MotorDriver *motor);  // Get the current duty cycle of the motor
+
+
+#ifdef __cplusplus
+}
+#endif
