@@ -1,70 +1,80 @@
-// #pragma once 
+#pragma once 
 
-// #include <stdint.h>
-// #include <stdbool.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-// #include "driver/gpio.h"
-// #include "driver/pcnt.h"
-// #include "esp_err.h"
+#include "driver/gpio.h"
+#include "driver/pcnt.h"
+#include "esp_err.h"
 
-// typedef enum {
-//     FL_ENCODER = 0,
-//     FR_ENCODER,
-//     BL_ENCODER,
-//     BR_ENCODER, 
-//     ENCODER_ID_MAX
-// } EncoderId;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// typedef struct {
-//     EncoderId id;
 
-//     pcnt_unit_t pcnt_unit;
-//     pcnt_channel_t pcnt_channel_a;
-//     pcnt_channel_t pcnt_channel_b;
+typedef enum {
+    FL_ENCODER = 0,
+    FR_ENCODER,
+    BL_ENCODER,
+    BR_ENCODER, 
+    ENCODER_ID_MAX
+} EncoderId;
 
-//     gpio_num_t a_pin;
-//     gpio_num_t b_pin;
+typedef struct {
+    EncoderId id;
 
-//     bool direction_inverted;
+    pcnt_unit_t pcnt_unit;
+    pcnt_channel_t pcnt_channel_a;
+    pcnt_channel_t pcnt_channel_b;
 
-//     uint32_t counts_per_revolution;
-//     float wheel_diameter_m;
+    gpio_num_t a_pin;
+    gpio_num_t b_pin;
 
-//     int16_t high_limit;
-//     int16_t low_limit;
+    bool direction_inverted;
 
-//     uint32_t glitch_filter_ns;
-// } EncoderDriverConfig;
+    uint32_t counts_per_revolution;
+    float wheel_diameter_m;
 
-// typedef struct {
-//     EncoderDriverConfig config;
+    int16_t high_limit;
+    int16_t low_limit;
 
-//     int32_t last_count;
-//     int64_t last_timestamp_us;
+    uint32_t glitch_filter_ns;
+} EncoderDriverConfig;
 
-//     float velocity_mps;
-//     float velocity_rps;
+typedef struct {
+    EncoderDriverConfig config;
 
-//     bool initialized;
-//     bool enabled;
-// } EncoderDriver;
+    int32_t last_count;
+    int64_t last_timestamp_us;
 
-// // Initialization
-// esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config);
+    float velocity_mps;
+    float velocity_rps;
 
-// // Counter Control
-// esp_err_t encoder_driver_start(EncoderDriver *encoder);
-// esp_err_t encoder_driver_stop(EncoderDriver *encoder);
-// esp_err_t encoder_driver_reset(EncoderDriver *encoder);
+    bool initialized;
+    bool enabled;
+} EncoderDriver;
 
-// esp_err_t encoder_driver_get_count(EncoderDriver *encoder, int32_t *count);
-// esp_err_t encoder_driver_get_revolution(EncoderDriver *encoder, float *revolutions);
-// esp_err_t encoder_driver_get_distance_m(EncoderDriver *encoder, float *distance_m);
+// Initialization
+esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config);
 
-// esp_err_t encoder_driver_update_velocity(EncoderDriver *encoder);
+// Counter Control
+esp_err_t encoder_driver_start(EncoderDriver *encoder);
+esp_err_t encoder_driver_stop(EncoderDriver *encoder);
+esp_err_t encoder_driver_reset(EncoderDriver *encoder);
 
-// // Status
-// bool encoder_driver_is_initialized(const EncoderDriver *encoder);
-// bool encoder_driver_is_enabled(const EncoderDriver *encoder);
-// float encoder_driver_get_velocity_rps(EncoderDriver *encoder);
-// float encoder_driver_get_velocity_mps(EncoderDriver *encoder);
+esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count);
+esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *revolutions);
+esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *distance_m);
+
+esp_err_t encoder_driver_update_velocity(EncoderDriver *encoder);
+
+// Status
+bool encoder_driver_is_initialized(const EncoderDriver *encoder);
+bool encoder_driver_is_enabled(const EncoderDriver *encoder);
+float encoder_driver_get_velocity_rps(const EncoderDriver *encoder);
+float encoder_driver_get_velocity_mps(const EncoderDriver *encoder);
+
+
+#ifdef __cplusplus
+}
+#endif
