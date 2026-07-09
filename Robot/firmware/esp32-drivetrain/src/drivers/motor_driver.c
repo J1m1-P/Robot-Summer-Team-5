@@ -120,22 +120,26 @@ bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
     return true;
 }
 
-void motor_driver_enable(MotorDriver *motor) {
-    if (motor == NULL || !motor->initialized) return;
+esp_err_t motor_driver_enable(MotorDriver *motor) {
+    if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
 
     motor->enabled = true; 
+
+    return ESP_OK;
 }
 
-void motor_driver_disable(MotorDriver *motor) {
-    if (motor == NULL || !motor->initialized) return;
+esp_err_t motor_driver_disable(MotorDriver *motor) {
+    if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
 
     motor_driver_coast(motor);
     motor->enabled = false; 
+
+    return ESP_OK;
 }
 
-void motor_driver_set_duty(MotorDriver *motor, float duty) {
-    if (motor == NULL || !motor->initialized || !motor->enabled) return;
-    if (!isfinite(duty)) return;
+esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
+    if (motor == NULL || !motor->initialized || !motor->enabled) return ESP_ERR_INVALID_ARG;
+    if (!isfinite(duty)) return ESP_ERR_INVALID_ARG;
 
     duty = clamp_f(
         duty, 
@@ -158,15 +162,19 @@ void motor_driver_set_duty(MotorDriver *motor, float duty) {
     // Record changes
     motor->current_duty = duty;
     motor->coasting = false;
+
+    return ESP_OK;
 }
 
-void motor_driver_coast(MotorDriver *motor) {
-    if (motor == NULL || !motor->initialized) return;
+esp_err_t motor_driver_coast(MotorDriver *motor) {
+    if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
     
     motor_driver_set_pwm(motor, 0.0f);
 
     motor->current_duty = 0.0f;
     motor->coasting = true; 
+
+    return ESP_OK;
 }
 
 bool motor_driver_is_initialized(const MotorDriver *motor) {

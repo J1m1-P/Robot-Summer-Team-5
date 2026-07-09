@@ -283,7 +283,7 @@ esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *dis
     return ESP_OK;
 }
 
-esp_err_t encoder_driver_update_velocity(EncoderDriver *encoder) {
+esp_err_t encoder_driver_update(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
     int64_t current_timestamp_us = esp_timer_get_time();

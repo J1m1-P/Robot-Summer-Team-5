@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "esp_err.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,12 +37,12 @@ typedef struct {
 
 // Initialization
 bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config);
-void motor_driver_enable(MotorDriver *motor);
-void motor_driver_disable(MotorDriver *motor);
+esp_err_t motor_driver_enable(MotorDriver *motor);
+esp_err_t motor_driver_disable(MotorDriver *motor);
 
 // Motor Control
-void motor_driver_set_duty(MotorDriver *motor, float duty);         // Set the motor duty cycle (-max_duty to +max_duty), determines speed 
-void motor_driver_coast(MotorDriver *motor);                        // Set the motor pwm to 0 and let it coast
+esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty);         // Set the motor duty cycle (-max_duty to +max_duty), determines speed 
+esp_err_t motor_driver_coast(MotorDriver *motor);                        // Set the motor pwm to 0 and let it coast
 
 // Status 
 bool motor_driver_is_initialized(const MotorDriver *motor);     // Check if the motor driver is initialized

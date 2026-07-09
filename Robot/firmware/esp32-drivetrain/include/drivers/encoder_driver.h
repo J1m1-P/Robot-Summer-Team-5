@@ -66,7 +66,7 @@ esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count)
 esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *revolutions);
 esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *distance_m);
 
-esp_err_t encoder_driver_update_velocity(EncoderDriver *encoder);
+esp_err_t encoder_driver_update(EncoderDriver *encoder);
 
 // Status
 bool encoder_driver_is_initialized(const EncoderDriver *encoder);

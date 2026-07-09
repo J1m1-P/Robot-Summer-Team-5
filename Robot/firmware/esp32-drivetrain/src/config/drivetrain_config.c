@@ -1,5 +1,6 @@
 #include "config/drivetrain_config.h"
 
+#include "config/pin_map.h"
 #include "config/motor_config.h"
 #include "config/encoder_config.h"
 
@@ -24,5 +25,7 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
     }, 
 
     .max_duty = MAX_DUTY, 
-    .wheel_angle_rad = DEG_TO_RAD(WHEEL_ANGLE)
+    .wheel_angle_rad = DEG_TO_RAD(WHEEL_ANGLE), 
+
+    .brk_pin = PIN_M_BRK
 };
