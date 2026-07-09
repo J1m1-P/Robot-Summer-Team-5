@@ -7,6 +7,8 @@
 #define MOTOR_MAX_DUTY          1.0f       // 80% duty cycle
 
 const MotorDriverConfig FL_MOTOR_CONFIG = {
+    .id = FL_MOTOR,
+
     .pwm_pin = PIN_M1_PWM, 
     .dir_pin = PIN_M1_DIR, 
 
@@ -20,6 +22,8 @@ const MotorDriverConfig FL_MOTOR_CONFIG = {
 };
 
 const MotorDriverConfig FR_MOTOR_CONFIG = {
+    .id = FR_MOTOR, 
+
     .pwm_pin = PIN_M2_PWM, 
     .dir_pin = PIN_M2_DIR, 
 
@@ -33,6 +37,8 @@ const MotorDriverConfig FR_MOTOR_CONFIG = {
 };
 
 const MotorDriverConfig BL_MOTOR_CONFIG = {
+    .id = BL_MOTOR, 
+
     .pwm_pin = PIN_M3_PWM, 
     .dir_pin = PIN_M3_DIR, 
 
@@ -46,6 +52,8 @@ const MotorDriverConfig BL_MOTOR_CONFIG = {
 };
 
 const MotorDriverConfig BR_MOTOR_CONFIG = {
+    .id = BR_MOTOR, 
+
     .pwm_pin = PIN_M4_PWM, 
     .dir_pin = PIN_M4_DIR, 
 
