@@ -2,9 +2,9 @@
 #include "config/motor_config.h"
 
 // Change these
-#define MOTOR_PWM_FREQUENCY     20000       // 20kHz
-#define MOTOR_PWM_RESOLURION    8           // 2**8 resolution
-#define MOTOR_MAX_DUTY          0.60f       // 60% duty cycle
+#define MOTOR_PWM_FREQUENCY     9000       // 9kHz
+#define MOTOR_PWM_RESOLURION    12           // 2**12 resolution
+#define MOTOR_MAX_DUTY          1.0f       // 80% duty cycle
 
 const MotorDriverConfig FL_MOTOR_CONFIG = {
     .pwm_pin = PIN_M1_PWM, 

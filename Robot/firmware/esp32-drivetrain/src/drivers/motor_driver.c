@@ -20,11 +20,17 @@ static float clamp_f(float value, float min, float max) {
 
 // Precondition: duty must be non-negative and clamped
 static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
+
+    // duty = (1.0f - duty);       // Account for the unknown PWM fliped behaviour
+
     uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
     return (uint32_t)(duty * (float)max_count);
 }
 
 // Precondition: duty must be non-negative and clamped
+
+// For some unknow reason, the pwm duty logic is inversed, now HIGHER = SLOWER, so we need to invert it 
+
 static void motor_driver_set_pwm(MotorDriver *motor, float duty) {
     uint32_t duty_count = duty_to_ledc_count(motor, duty);
 

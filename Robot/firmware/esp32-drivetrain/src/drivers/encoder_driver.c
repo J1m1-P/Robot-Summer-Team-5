@@ -81,6 +81,70 @@ static esp_err_t encoder_driver_configure_channel_b(const EncoderDriverConfig *c
     return pcnt_unit_config(&pcnt_config);
 }
 
+static esp_err_t encoder_driver_read_raw_delta(const EncoderDriver *encoder, int32_t *delta_count) {
+    if (encoder == NULL || delta_count == NULL) return ESP_ERR_INVALID_ARG;
+
+    int16_t raw_count = 0;
+
+    esp_err_t err = pcnt_get_counter_value(encoder->config.pcnt_unit, &raw_count);
+    if (err != ESP_OK) return err;
+
+    int32_t adjusted_count = (int32_t)raw_count;
+
+    if (encoder->config.direction_inverted) adjusted_count = -adjusted_count;
+
+    *delta_count = adjusted_count;
+
+    return ESP_OK;
+}
+
+static esp_err_t encoder_driver_flush_delta(EncoderDriver *encoder, int32_t *delta_count) {
+    if (encoder == NULL || delta_count == NULL) return ESP_ERR_INVALID_ARG;
+
+    pcnt_unit_t unit = encoder->config.pcnt_unit;
+
+    esp_err_t err;
+    bool enabled = encoder->enabled;
+
+    if (enabled) {
+        err = pcnt_counter_pause(unit);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    int32_t delta = 0;
+
+    err = encoder_driver_read_raw_delta(encoder, &delta);
+    if (err != ESP_OK) {
+        if (enabled) {
+            pcnt_counter_resume(unit);
+        }
+        return err;
+    }
+
+    err = pcnt_counter_clear(unit);
+    if (err != ESP_OK) {
+        if (enabled) {
+            pcnt_counter_resume(unit);
+        }
+        return err;
+    }
+
+    if (enabled) {
+        err = pcnt_counter_resume(unit);
+        if (err != ESP_OK) {
+            encoder->enabled = false;
+            return err;
+        }
+    }
+
+    encoder->accumulated_count += delta;
+    *delta_count = delta;
+
+    return ESP_OK;
+}
+
 // Public Functions
 esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config) {
     if (encoder == NULL || !encoder_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
@@ -128,15 +192,10 @@ esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig 
 esp_err_t encoder_driver_start(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
-    int32_t current_count = 0;
-    esp_err_t err = encoder_driver_get_count(encoder, &current_count);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_counter_resume(encoder->config.pcnt_unit);
+    esp_err_t err = pcnt_counter_resume(encoder->config.pcnt_unit);
     if (err != ESP_OK) return err;
 
     encoder->enabled = true;
-    encoder->last_count = current_count;
     encoder->last_timestamp_us = esp_timer_get_time();
 
     return ESP_OK;
@@ -156,18 +215,20 @@ esp_err_t encoder_driver_stop(EncoderDriver *encoder) {
 esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
+    bool was_enabled = encoder->enabled;
+
     esp_err_t err;
     err = pcnt_counter_pause(encoder->config.pcnt_unit); 
     if (err != ESP_OK) return err;
     err = pcnt_counter_clear(encoder->config.pcnt_unit);
     if (err != ESP_OK) return err;
 
-    encoder->last_count = 0;
+    encoder->accumulated_count = 0;
     encoder->last_timestamp_us = esp_timer_get_time();
     encoder->velocity_mps = 0.0f;
     encoder->velocity_rps = 0.0f;
 
-    if (encoder->enabled) {
+    if (was_enabled) {
         err = pcnt_counter_resume(encoder->config.pcnt_unit);
         if (err != ESP_OK) {
             encoder->enabled = false;
@@ -175,21 +236,21 @@ esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
         }
     }
 
+    encoder->enabled = was_enabled;
+
     return ESP_OK;
 }
 
 esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count) {
     if (encoder == NULL || !encoder->initialized || count == NULL) return ESP_ERR_INVALID_ARG;
 
-    int16_t raw_count = 0;
+    int32_t pending_delta = 0;
 
-    esp_err_t err = pcnt_get_counter_value(encoder->config.pcnt_unit, &raw_count);
+    esp_err_t err = encoder_driver_read_raw_delta(encoder, &pending_delta);
     if (err != ESP_OK) return err;
 
-    int32_t adjusted_count = (int32_t)raw_count;
-    if (encoder->config.direction_inverted) adjusted_count = -adjusted_count;
 
-    *count = adjusted_count;
+    *count = encoder->accumulated_count + pending_delta;
 
     return ESP_OK;
 }
@@ -225,26 +286,21 @@ esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *dis
 esp_err_t encoder_driver_update_velocity(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
-    int32_t current_count = 0;
+    int64_t current_timestamp_us = esp_timer_get_time();
+    int64_t delta_time_us = current_timestamp_us - encoder->last_timestamp_us;
+    if (delta_time_us <= 0) return ESP_ERR_INVALID_STATE;
+    float delta_time_s = (float)delta_time_us / 1000000.0f;
 
-    esp_err_t err = encoder_driver_get_count(encoder, &current_count);
+    int32_t delta_count = 0;
+    esp_err_t err = encoder_driver_flush_delta(encoder, &delta_count);
     if (err != ESP_OK) return err;
 
-    int64_t current_timestamp_us = esp_timer_get_time();
-
-    int32_t delta_count = current_count - encoder->last_count;
-    int64_t delta_time_us = current_timestamp_us - encoder->last_timestamp_us;
-
-    if (delta_time_us <= 0) return ESP_ERR_INVALID_STATE;
-
-    float delta_time_s = (float)delta_time_us / 1000000.0f;
     float delta_revolutions = (float)delta_count / (float)encoder->config.counts_per_revolution;
     float circumference_m = ENCODER_PI * encoder->config.wheel_diameter_m;
 
     encoder->velocity_rps = delta_revolutions / delta_time_s;
     encoder->velocity_mps = circumference_m * encoder->velocity_rps;
 
-    encoder->last_count = current_count;
     encoder->last_timestamp_us = current_timestamp_us;
 
     return ESP_OK;

@@ -44,7 +44,7 @@ typedef struct {
 typedef struct {
     EncoderDriverConfig config;
 
-    int32_t last_count;
+    int32_t accumulated_count;
     int64_t last_timestamp_us;
 
     float velocity_mps;

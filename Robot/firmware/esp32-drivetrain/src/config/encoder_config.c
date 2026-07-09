@@ -10,24 +10,28 @@
  * quadrature decoding = 4x
  *
  * counts_per_revolution = 11 * 30 * 4 = 1320
+ * 
+ * 3200U was got from testing
  */
 
- #define ENCODER_COUNTS_PER_REVOLUTION 1320U
+ #define ENCODER_COUNTS_PER_REVOLUTION 3200U
 
  /*
  * Example wheel diameter:
  * 65 mm = 0.065 m
+ * 
+ * 0.070f was got from datasheet
  */
 
- #define ENCODER_WHEEL_DIAMETER_M 0.065f
+ #define ENCODER_WHEEL_DIAMETER_M 0.070f
 
  /*
  * Legacy PCNT counter is signed 16-bit.
  * Keep these inside roughly -32768 to 32767.
  */
 
-#define ENCODER_PCNT_HIGH_LIMIT 30000
-#define ENCODER_PCNT_LOW_LIMIT  -30000
+#define ENCODER_PCNT_HIGH_LIMIT 32000
+#define ENCODER_PCNT_LOW_LIMIT  -32000
 
 /*
  * Your driver converts this from ns to APB cycles.
