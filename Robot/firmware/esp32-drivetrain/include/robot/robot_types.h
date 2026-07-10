@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Common data structures that the systems would be using to communicate
+// Common robot-level data structures shared between modules.
 
 #ifdef __cplusplus
 extern "C" {

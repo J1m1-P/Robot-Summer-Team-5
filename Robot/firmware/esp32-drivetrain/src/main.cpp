@@ -1,48 +1,159 @@
+// #include <Arduino.h>
+// #include <string.h>
+
+// #include "communication/uart/packet_link.h"
+// #include "config/packet_link_config.h"
+
+// typedef struct {
+//     uint32_t sequence;
+//     float x_m;
+//     float y_m;
+//     float heading_rad;
+// } TestOdometryData;
+
+// static_assert(
+//     sizeof(TestOdometryData) <= PACKET_MAX_PAYLOAD_SIZE,
+//     "TestOdometryData is too large"
+// );
+
+// static PacketLink packet_link = {0};
+// static uint32_t sequence = 0U;
+
+// void setup()
+// {
+//     Serial.begin(115200);
+//     delay(1000);
+
+//     esp_err_t err = packet_link_init(
+//         &packet_link,
+//         &TOP_ESP_PACKET_LINK_CONFIG
+//     );
+
+//     if (err != ESP_OK) {
+//         Serial.printf(
+//             "Packet link init failed: %s\n",
+//             esp_err_to_name(err)
+//         );
+//         return;
+//     }
+
+//     Serial.println("Sender ready");
+// }
+
+// void loop()
+// {
+//     TestOdometryData data = {
+//         .sequence = sequence,
+//         .x_m = sequence * 0.10f,
+//         .y_m = sequence * 0.05f,
+//         .heading_rad = sequence * 0.01f
+//     };
+
+//     esp_err_t err = packet_link_send(
+//         &packet_link,
+//         PACKET_TYPE_ODOMETRY,
+//         (const uint8_t *)&data,
+//         (uint8_t)sizeof(data)
+//     );
+
+//     if (err == ESP_OK) {
+//         Serial.printf(
+//             "Sent %lu: x=%.2f, y=%.2f, heading=%.2f\n",
+//             (unsigned long)data.sequence,
+//             data.x_m,
+//             data.y_m,
+//             data.heading_rad
+//         );
+
+//         sequence++;
+//     } else {
+//         Serial.printf(
+//             "Send failed: %s\n",
+//             esp_err_to_name(err)
+//         );
+//     }
+
+//     delay(500);
+// }
+
 #include <Arduino.h>
-#include "esp_log.h"
-#include "esp_err.h"
+#include <string.h>
 
-#include "config/motor_config.h"
-#include "config/encoder_config.h"
+#include "communication/uart/packet_link.h"
+#include "config/packet_link_config.h"
 
-#include "drivers/motor_driver.h"
-#include "drivers/encoder_driver.h"
+typedef struct {
+    uint32_t sequence;
+    float x_m;
+    float y_m;
+    float heading_rad;
+} TestOdometryData;
 
-#include "debug/app_log.h"
-
-static MotorDriver motor = {0};
-static EncoderDriver encoder;
+static PacketLink packet_link = {0};
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
-    app_log_init();
 
-    encoder_driver_init(&encoder, &FL_ENCODER_CONFIG);
-    ESP_LOGI("Encoder", "Encoder initialized with ID: %d", encoder.config.id);
+    esp_err_t err = packet_link_init(
+        &packet_link,
+        &TOP_ESP_PACKET_LINK_CONFIG
+    );
 
-    encoder_driver_start(&encoder);
-    ESP_LOGI("Encoder", "Encoder started with ID: %d", encoder.config.id);
+    if (err != ESP_OK) {
+        Serial.printf(
+            "Packet link init failed: %s\n",
+            esp_err_to_name(err)
+        );
+        return;
+    }
 
-    motor_driver_init(&motor, &FL_MOTOR_CONFIG);
-    ESP_LOGI("Motor", "Motor initialized: PWM Pin: %d, Direction Pin: %d", motor.config->pwm_pin, motor.config->dir_pin);
-
-    motor_driver_enable(&motor);
-    ESP_LOGI("Motor", "Motor enabled");
-
-    // motor_driver_set_duty(&motor, 0.2f);
-    // ESP_LOGI("Motor", "Motor duty cycle set to 0.2");
-
+    Serial.println("Receiver ready");
 }
 
 void loop()
-{   
-    encoder_driver_update_velocity(&encoder);
-    float mps = encoder_driver_get_velocity_mps(&encoder);
-    float rps = encoder_driver_get_velocity_rps(&encoder);
-    ESP_LOGI("Encoder current velocity mps", "%f", mps);
-    ESP_LOGI("Encoder current velocity rps", "%f", rps);
-    motor_driver_set_duty(&motor, 0.1f);
+{
+    esp_err_t err = packet_link_update(&packet_link);
 
+    if (err != ESP_OK) {
+        Serial.printf(
+            "Update failed: %s\n",
+            esp_err_to_name(err)
+        );
+        delay(100);
+        return;
+    }
+
+    PacketFrame packet;
+
+    if (packet_link_take_packet(&packet_link, &packet) == ESP_OK) {
+        if (packet.message_type == PACKET_TYPE_ODOMETRY &&
+            packet.payload_len == sizeof(TestOdometryData)) {
+
+            TestOdometryData data;
+
+            memcpy(
+                &data,
+                packet.payload,
+                sizeof(data)
+            );
+
+            Serial.printf(
+                "Received %lu: x=%.2f, y=%.2f, heading=%.2f\n",
+                (unsigned long)data.sequence,
+                data.x_m,
+                data.y_m,
+                data.heading_rad
+            );
+        } else {
+            Serial.printf(
+                "Unexpected packet: type=%u, length=%u\n",
+                packet.message_type,
+                packet.payload_len
+            );
+        }
+    }
+
+    delay(1);
 }
