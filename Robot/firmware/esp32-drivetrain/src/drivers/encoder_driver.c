@@ -86,12 +86,12 @@ static esp_err_t encoder_driver_read_raw_delta(const EncoderDriver *encoder, int
 
     int16_t raw_count = 0;
 
-    esp_err_t err = pcnt_get_counter_value(encoder->config.pcnt_unit, &raw_count);
+    esp_err_t err = pcnt_get_counter_value(encoder->config->pcnt_unit, &raw_count);
     if (err != ESP_OK) return err;
 
     int32_t adjusted_count = (int32_t)raw_count;
 
-    if (encoder->config.direction_inverted) adjusted_count = -adjusted_count;
+    if (encoder->config->direction_inverted) adjusted_count = -adjusted_count;
 
     *delta_count = adjusted_count;
 
@@ -101,7 +101,7 @@ static esp_err_t encoder_driver_read_raw_delta(const EncoderDriver *encoder, int
 static esp_err_t encoder_driver_flush_delta(EncoderDriver *encoder, int32_t *delta_count) {
     if (encoder == NULL || delta_count == NULL) return ESP_ERR_INVALID_ARG;
 
-    pcnt_unit_t unit = encoder->config.pcnt_unit;
+    pcnt_unit_t unit = encoder->config->pcnt_unit;
 
     esp_err_t err;
     bool enabled = encoder->enabled;
@@ -150,7 +150,7 @@ esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig 
     if (encoder == NULL || !encoder_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
 
     memset(encoder, 0, sizeof(*encoder));
-    encoder->config = *config;
+    encoder->config = config;
 
     esp_err_t err;
 
@@ -192,7 +192,7 @@ esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig 
 esp_err_t encoder_driver_start(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
-    esp_err_t err = pcnt_counter_resume(encoder->config.pcnt_unit);
+    esp_err_t err = pcnt_counter_resume(encoder->config->pcnt_unit);
     if (err != ESP_OK) return err;
 
     encoder->enabled = true;
@@ -204,7 +204,7 @@ esp_err_t encoder_driver_start(EncoderDriver *encoder) {
 esp_err_t encoder_driver_stop(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
-    esp_err_t err = pcnt_counter_pause(encoder->config.pcnt_unit);
+    esp_err_t err = pcnt_counter_pause(encoder->config->pcnt_unit);
     if (err != ESP_OK) return err;
 
     encoder->enabled = false;
@@ -218,9 +218,9 @@ esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     bool was_enabled = encoder->enabled;
 
     esp_err_t err;
-    err = pcnt_counter_pause(encoder->config.pcnt_unit); 
+    err = pcnt_counter_pause(encoder->config->pcnt_unit); 
     if (err != ESP_OK) return err;
-    err = pcnt_counter_clear(encoder->config.pcnt_unit);
+    err = pcnt_counter_clear(encoder->config->pcnt_unit);
     if (err != ESP_OK) return err;
 
     encoder->accumulated_count = 0;
@@ -229,7 +229,7 @@ esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     encoder->velocity_rps = 0.0f;
 
     if (was_enabled) {
-        err = pcnt_counter_resume(encoder->config.pcnt_unit);
+        err = pcnt_counter_resume(encoder->config->pcnt_unit);
         if (err != ESP_OK) {
             encoder->enabled = false;
             return err;
@@ -263,7 +263,7 @@ esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *re
     esp_err_t err = encoder_driver_get_count(encoder, &count);
     if (err != ESP_OK) return err;
 
-    *revolutions = (float)count / (float)encoder->config.counts_per_revolution;
+    *revolutions = (float)count / (float)encoder->config->counts_per_revolution;
 
     return ESP_OK;
 }
@@ -276,7 +276,7 @@ esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *dis
     esp_err_t err = encoder_driver_get_revolutions(encoder, &revolutions);
     if (err != ESP_OK) return err;
 
-    float circumference_m = ENCODER_PI * encoder->config.wheel_diameter_m;
+    float circumference_m = ENCODER_PI * encoder->config->wheel_diameter_m;
 
     *distance_m = revolutions * circumference_m;
 
@@ -295,8 +295,8 @@ esp_err_t encoder_driver_update(EncoderDriver *encoder) {
     esp_err_t err = encoder_driver_flush_delta(encoder, &delta_count);
     if (err != ESP_OK) return err;
 
-    float delta_revolutions = (float)delta_count / (float)encoder->config.counts_per_revolution;
-    float circumference_m = ENCODER_PI * encoder->config.wheel_diameter_m;
+    float delta_revolutions = (float)delta_count / (float)encoder->config->counts_per_revolution;
+    float circumference_m = ENCODER_PI * encoder->config->wheel_diameter_m;
 
     encoder->velocity_rps = delta_revolutions / delta_time_s;
     encoder->velocity_mps = circumference_m * encoder->velocity_rps;

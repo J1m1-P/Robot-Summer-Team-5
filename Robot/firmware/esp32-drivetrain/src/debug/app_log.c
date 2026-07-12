@@ -5,6 +5,7 @@ static const char *LOG_TAGS[LOG_TAG_MAX] = {
     [LOG_TAG_MOTOR] = "motor", 
     [LOG_TAG_ENCODER] = "encoder", 
     [LOG_TAG_DRIVETRAIN] = "drivetrain", 
+    [LOG_TAG_I2C] = "i2c"
 };
 
 const char *app_log_tag(LogTag tag) {

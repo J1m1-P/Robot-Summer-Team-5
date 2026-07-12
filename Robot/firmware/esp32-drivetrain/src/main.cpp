@@ -1,159 +1,68 @@
-// #include <Arduino.h>
-// #include <string.h>
-
-// #include "communication/uart/packet_link.h"
-// #include "config/packet_link_config.h"
-
-// typedef struct {
-//     uint32_t sequence;
-//     float x_m;
-//     float y_m;
-//     float heading_rad;
-// } TestOdometryData;
-
-// static_assert(
-//     sizeof(TestOdometryData) <= PACKET_MAX_PAYLOAD_SIZE,
-//     "TestOdometryData is too large"
-// );
-
-// static PacketLink packet_link = {0};
-// static uint32_t sequence = 0U;
-
-// void setup()
-// {
-//     Serial.begin(115200);
-//     delay(1000);
-
-//     esp_err_t err = packet_link_init(
-//         &packet_link,
-//         &TOP_ESP_PACKET_LINK_CONFIG
-//     );
-
-//     if (err != ESP_OK) {
-//         Serial.printf(
-//             "Packet link init failed: %s\n",
-//             esp_err_to_name(err)
-//         );
-//         return;
-//     }
-
-//     Serial.println("Sender ready");
-// }
-
-// void loop()
-// {
-//     TestOdometryData data = {
-//         .sequence = sequence,
-//         .x_m = sequence * 0.10f,
-//         .y_m = sequence * 0.05f,
-//         .heading_rad = sequence * 0.01f
-//     };
-
-//     esp_err_t err = packet_link_send(
-//         &packet_link,
-//         PACKET_TYPE_ODOMETRY,
-//         (const uint8_t *)&data,
-//         (uint8_t)sizeof(data)
-//     );
-
-//     if (err == ESP_OK) {
-//         Serial.printf(
-//             "Sent %lu: x=%.2f, y=%.2f, heading=%.2f\n",
-//             (unsigned long)data.sequence,
-//             data.x_m,
-//             data.y_m,
-//             data.heading_rad
-//         );
-
-//         sequence++;
-//     } else {
-//         Serial.printf(
-//             "Send failed: %s\n",
-//             esp_err_to_name(err)
-//         );
-//     }
-
-//     delay(500);
-// }
-
 #include <Arduino.h>
-#include <string.h>
 
-#include "communication/uart/packet_link.h"
-#include "config/packet_link_config.h"
+#include "esp_err.h"
+#include "debug/app_log.h"
 
-typedef struct {
-    uint32_t sequence;
-    float x_m;
-    float y_m;
-    float heading_rad;
-} TestOdometryData;
+#include "communication/i2c/i2c_bus.h"
+#include "config/i2c_bus_config.h"
 
-static PacketLink packet_link = {0};
+static I2cBus i2c_bus = {0};
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
 
-    esp_err_t err = packet_link_init(
-        &packet_link,
-        &TOP_ESP_PACKET_LINK_CONFIG
+    Serial.println("1. Serial started");
+
+    app_log_init();
+    Serial.println("2. App log initialized");
+
+    APP_LOGI(LOG_TAG_I2C, "Starting I2C bus");
+    Serial.println("3. First APP_LOGI completed");
+
+    esp_err_t err = i2c_bus_init(
+        &i2c_bus,
+        &SENSOR_I2C_BUS_CONFIG
+    );
+
+    Serial.printf(
+        "4. i2c_bus_init returned: %s\n",
+        esp_err_to_name(err)
     );
 
     if (err != ESP_OK) {
-        Serial.printf(
-            "Packet link init failed: %s\n",
+        APP_LOGE(
+            LOG_TAG_I2C,
+            "I2C initialization failed: %s",
             esp_err_to_name(err)
         );
         return;
     }
 
-    Serial.println("Receiver ready");
+    Serial.println("5. I2C initialized");
+
+    uint32_t devices_found = 0;
+
+    for (uint8_t address = 0x08; address <= 0x77; address++) {
+        err = i2c_bus_probe(&i2c_bus, address);
+
+        if (err == ESP_OK) {
+            Serial.printf(
+                "Found device at address 0x%02X\n",
+                address
+            );
+            devices_found++;
+        }
+    }
+
+    Serial.printf(
+        "Scan complete. Found %lu device(s)\n",
+        (unsigned long)devices_found
+    );
 }
 
 void loop()
 {
-    esp_err_t err = packet_link_update(&packet_link);
-
-    if (err != ESP_OK) {
-        Serial.printf(
-            "Update failed: %s\n",
-            esp_err_to_name(err)
-        );
-        delay(100);
-        return;
-    }
-
-    PacketFrame packet;
-
-    if (packet_link_take_packet(&packet_link, &packet) == ESP_OK) {
-        if (packet.message_type == PACKET_TYPE_ODOMETRY &&
-            packet.payload_len == sizeof(TestOdometryData)) {
-
-            TestOdometryData data;
-
-            memcpy(
-                &data,
-                packet.payload,
-                sizeof(data)
-            );
-
-            Serial.printf(
-                "Received %lu: x=%.2f, y=%.2f, heading=%.2f\n",
-                (unsigned long)data.sequence,
-                data.x_m,
-                data.y_m,
-                data.heading_rad
-            );
-        } else {
-            Serial.printf(
-                "Unexpected packet: type=%u, length=%u\n",
-                packet.message_type,
-                packet.payload_len
-            );
-        }
-    }
-
-    delay(1);
+    delay(1000);
 }

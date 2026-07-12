@@ -42,7 +42,7 @@ typedef struct {
 } EncoderDriverConfig;
 
 typedef struct {
-    EncoderDriverConfig config;
+    EncoderDriverConfig *config;
 
     int32_t accumulated_count;
     int64_t last_timestamp_us;

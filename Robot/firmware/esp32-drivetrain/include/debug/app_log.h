@@ -12,6 +12,7 @@ typedef enum {
     LOG_TAG_ENCODER,
     LOG_TAG_DRIVETRAIN,
     LOG_TAG_UART,
+    LOG_TAG_I2C, 
     LOG_TAG_MAX
 } LogTag;
 
