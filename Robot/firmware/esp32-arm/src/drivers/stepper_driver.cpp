@@ -1,5 +1,3 @@
-// lib/stepper-driver/src/stepper-driver.cpp
-
 #include "drivers/stepper_driver.h"
 
 const float stepAngle = 1.8;
@@ -7,6 +5,7 @@ const float beltPitchMM = 2.0;
 const uint8_t pulleyTeeth = 20;
 const float stepsPerRev = 360/stepAngle; 
 
+// initialize stepper
 void stepper_begin(StepperDriver *driver, StepperConfig config) {
     driver->stepPin = config.stepPin;
     driver->dirPin = config.dirPin;
@@ -22,12 +21,12 @@ void stepper_begin(StepperDriver *driver, StepperConfig config) {
 
 // Set the direction of the stepper by setting true or false.
 // The actual direction needs to be physically verified. 
-void stepper_set_direction(StepperDriver *driver, bool direction) {
+void static stepper_set_direction(StepperDriver *driver, bool direction) {
     digitalWrite(driver->dirPin, direction ? HIGH : LOW);
 }
 
-// Drive the stepper by one step. 
-void stepper_step(StepperDriver *driver) {
+// Drive the stepper by one step in the set direction. 
+void static stepper_step(StepperDriver *driver) {
     digitalWrite(driver->stepPin, HIGH);
     delayMicroseconds(driver->stepPulseUs);
 
@@ -36,9 +35,17 @@ void stepper_step(StepperDriver *driver) {
 }
 
 // Drive the stepper by a number of steps. 
+// Negative steps will move in the opposite direction.
 void stepper_move_steps(StepperDriver *driver, long steps) {
     if (steps == 0) {
         return;
+    }
+
+    if (steps < 0) {
+        stepper_set_direction(driver, false);
+        steps = -steps;
+    } else {
+        stepper_set_direction(driver, true);
     }
 
     for (long i = 0; i < steps; i++) {
@@ -46,21 +53,31 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
     }
 }
 
-// Drive the stepper by a number of steps. 
+// Drive the stepper by a distance in millimeters.
+// Negative distance will move in the opposite direction.
 void stepper_move_distanceMM(StepperDriver *driver, long distanceMM) {
     if (distanceMM == 0) {
         return;
     }
-    
+
+    if (distanceMM < 0) {
+        stepper_set_direction(driver, false);
+        distanceMM = -distanceMM;
+    } else {
+        stepper_set_direction(driver, true);
+    }
+
     // Calculate number of steps for a distance
     long steps = distanceMM * (stepsPerRev / (beltPitchMM * pulleyTeeth));
     stepper_move_steps(driver, steps);
 }
 
+// Set step_pulse
 void stepper_set_pulse_us(StepperDriver *driver, uint32_t pulseUs) {
     driver->stepPulseUs = pulseUs;
 }
 
+// Set step_delay
 void stepper_set_delay_us(StepperDriver *driver, uint32_t delayUs) {
     driver->stepDelayUs = delayUs;
 }
