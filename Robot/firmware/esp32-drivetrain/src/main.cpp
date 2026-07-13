@@ -1,48 +1,68 @@
 #include <Arduino.h>
-#include "esp_log.h"
+
 #include "esp_err.h"
-
-#include "config/motor_config.h"
-#include "config/encoder_config.h"
-
-#include "drivers/motor_driver.h"
-#include "drivers/encoder_driver.h"
-
 #include "debug/app_log.h"
 
-static MotorDriver motor = {0};
-static EncoderDriver encoder;
+#include "communication/i2c/i2c_bus.h"
+#include "config/i2c_bus_config.h"
+
+static I2cBus i2c_bus = {0};
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
+
+    Serial.println("1. Serial started");
+
     app_log_init();
+    Serial.println("2. App log initialized");
 
-    encoder_driver_init(&encoder, &FL_ENCODER_CONFIG);
-    ESP_LOGI("Encoder", "Encoder initialized with ID: %d", encoder.config.id);
+    APP_LOGI(LOG_TAG_I2C, "Starting I2C bus");
+    Serial.println("3. First APP_LOGI completed");
 
-    encoder_driver_start(&encoder);
-    ESP_LOGI("Encoder", "Encoder started with ID: %d", encoder.config.id);
+    esp_err_t err = i2c_bus_init(
+        &i2c_bus,
+        &SENSOR_I2C_BUS_CONFIG
+    );
 
-    motor_driver_init(&motor, &FL_MOTOR_CONFIG);
-    ESP_LOGI("Motor", "Motor initialized: PWM Pin: %d, Direction Pin: %d", motor.config->pwm_pin, motor.config->dir_pin);
+    Serial.printf(
+        "4. i2c_bus_init returned: %s\n",
+        esp_err_to_name(err)
+    );
 
-    motor_driver_enable(&motor);
-    ESP_LOGI("Motor", "Motor enabled");
+    if (err != ESP_OK) {
+        APP_LOGE(
+            LOG_TAG_I2C,
+            "I2C initialization failed: %s",
+            esp_err_to_name(err)
+        );
+        return;
+    }
 
-    // motor_driver_set_duty(&motor, 0.2f);
-    // ESP_LOGI("Motor", "Motor duty cycle set to 0.2");
+    Serial.println("5. I2C initialized");
 
+    uint32_t devices_found = 0;
+
+    for (uint8_t address = 0x08; address <= 0x77; address++) {
+        err = i2c_bus_probe(&i2c_bus, address);
+
+        if (err == ESP_OK) {
+            Serial.printf(
+                "Found device at address 0x%02X\n",
+                address
+            );
+            devices_found++;
+        }
+    }
+
+    Serial.printf(
+        "Scan complete. Found %lu device(s)\n",
+        (unsigned long)devices_found
+    );
 }
 
 void loop()
-{   
-    encoder_driver_update_velocity(&encoder);
-    float mps = encoder_driver_get_velocity_mps(&encoder);
-    float rps = encoder_driver_get_velocity_rps(&encoder);
-    ESP_LOGI("Encoder current velocity mps", "%f", mps);
-    ESP_LOGI("Encoder current velocity rps", "%f", rps);
-    motor_driver_set_duty(&motor, 0.1f);
-
+{
+    delay(1000);
 }

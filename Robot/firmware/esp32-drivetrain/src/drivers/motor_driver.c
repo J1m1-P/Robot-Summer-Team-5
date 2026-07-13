@@ -148,8 +148,7 @@ esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
     );
 
     if (duty == 0.0f) {
-        motor_driver_coast(motor);
-        return;
+        return motor_driver_coast(motor);
     }
 
     bool forward = duty > 0.0f;
