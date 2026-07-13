@@ -17,3 +17,11 @@ const TapeSensorConfig TAPE_SENSOR_LEFT = {
 const TapePidSensorConfig FRONT_PID_WEIGHTS = {
     .weights = { -3, -1, 1, 3 }
 };
+
+const TapePidSensorConfig BACK_PID_WEIGHTS = {
+    .weights = { -3, -1, 1, 3 }
+};
+
+const TapePidSensorConfig LEFT_PID_WEIGHTS = {
+    .weights = { -3, -1, 1, 3 }
+};
