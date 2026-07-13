@@ -13,7 +13,7 @@
 
 // UART link to esp32-drivetrain (the main control board -- owns
 // motors/encoders and does the actual encoder/optical slip-detection
-// fusion; this board only streams DELTA,... to it). Placeholder pins --
+// fusion; this board exchanges framed UART packets with it). Placeholder pins --
 // esp32-drivetrain's own PIN_TOP_ESP32_UART_RX/TX (GPIO 47/48 on that
 // board) are a different chip's pins, not these; confirm actual wiring
 // once this board's harness is built.

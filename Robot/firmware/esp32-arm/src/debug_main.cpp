@@ -52,7 +52,9 @@ void setup() {
     FusionConfig config;
     fusion_ready = static_calibration_load(&config);
     if (fusion_ready) {
-        pmw3610_fusion_configure(&fusion, &config);
+        fusion_ready = pmw3610_fusion_configure(&fusion, &config);
+    }
+    if (fusion_ready) {
         pmw3610_pose_init(&pose);
         Serial.println("--- raw diagnostics + fused delta/pose stream ---");
     } else {

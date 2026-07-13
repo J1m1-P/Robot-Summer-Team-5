@@ -1,13 +1,22 @@
 #include "config/pmw3610_config.h"
 
+#include <math.h>
+
 static float s_cpi = PMW3610_DEFAULT_CPI;
 
 uint8_t pmw3610_cpi_to_res_step(float cpi) {
-    return (uint8_t)(cpi / 200.0f);
+    if (!isfinite(cpi) || cpi < 200.0f || cpi > 3200.0f) return 0U;
+
+    float step = cpi / 200.0f;
+    float rounded_step = roundf(step);
+    if (fabsf(step - rounded_step) > 1e-6f) return 0U;
+    return (uint8_t)rounded_step;
 }
 
-void pmw3610_set_cpi(float cpi) {
+bool pmw3610_set_cpi(float cpi) {
+    if (pmw3610_cpi_to_res_step(cpi) == 0U) return false;
     s_cpi = cpi;
+    return true;
 }
 
 float pmw3610_get_cpi(void) {

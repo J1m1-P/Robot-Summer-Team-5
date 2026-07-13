@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 // Decoded MOTION register (address 0x02) bits -- the burst read's first
-// byte -- plus SQUAL from the same burst. OVF, LSR_FAULT, and SQUAL are
+// byte -- plus SQUAL from the same burst. OVF, LP_VALID, LSR_FAULT, and SQUAL are
 // what's actually useful for telling a genuinely-zero reading apart from a
 // bad one: OVF means the 12-bit delta counters overflowed this cycle
 // (dx/dy not reliable this cycle); SQUAL below PMW3610_SQUAL_MIN means the
@@ -30,11 +30,12 @@ typedef struct {
     bool overflow;            // bit4 OVF: delta counters overflowed -- dx/dy invalid this cycle
     bool laser_power_valid;   // bit3 LP_VALID
     bool laser_fault;         // bit2 LSR_FAULT: VCSEL shorted to GND/VDD
-    bool reset_triggered;     // bit0 RST_FLAG
+    bool reset_triggered;     // bit0 RST_FLAG; latched power-up/reset indication, not sample validity
     uint8_t squal;            // surface quality / feature count -- see PMW3610_SQUAL_MIN
 } Pmw3610Status;
 
-// Whether this cycle's dx/dy should be trusted at all.
+// Whether this cycle's dx/dy should be trusted at all. RST_FLAG is deliberately
+// excluded: it remains asserted after power-up on this sensor.
 bool pmw3610_status_valid(const Pmw3610Status *status);
 
 // Optional extra fields available from a full (10-byte) burst read, for
@@ -110,10 +111,17 @@ typedef struct {
     // is unaffected.
     bool smart_disabled_l;
     bool smart_disabled_r;
+    bool reset_seen_l;
+    bool reset_seen_r;
     uint16_t poll_count;
 } DualPmw3610;
 
 void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins);
+
+// Updates both sensors and the software CPI setting. CPI must be from 200
+// through 3200 in increments of 200. Reconfigure fusion afterward because
+// its count/mm matrices were calculated using the previous CPI.
+bool dual_pmw3610_set_cpi(DualPmw3610 *dual, float cpi);
 
 // l_valid/r_valid are hardware-confirmed (OVF/LSR_FAULT/SQUAL derived --
 // see pmw3610_status_valid()) validity for this cycle's dx/dy -- callers

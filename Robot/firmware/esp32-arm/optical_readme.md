@@ -70,45 +70,135 @@ For sensor bring-up or surface diagnostics, use
 status, SQUAL, shutter, and pixel min/average/max values. This full burst is
 for diagnostics rather than the timing-sensitive normal polling loop.
 
-### Fused UART data format
+### Fused UART packet format
 
 To convert raw counts into body-frame motion, configure
 `Pmw3610Fusion` with the static matrix data and pass each poll result to
-`pmw3610_fusion_process()`. `uart_link_send_delta()` then writes one ASCII line
-per cycle:
+`pmw3610_fusion_process()`. `delta_pose_packet_send()` serializes that result
+as a `PACKET_TYPE_ODOMETRY` payload and sends it through the generic framed
+UART link.
 
 ```text
-DELTA,<forward_mm>,<lateral_mm>,<dtheta_deg>,<valid>\n
+offset  size  field
+0       4     forward displacement (float, mm)
+4       4     lateral displacement (float, mm)
+8       4     heading change (float, radians)
+12      1     valid (0 or 1)
 ```
 
-`forward_mm` and `lateral_mm` are per-cycle displacement values; `dtheta_deg`
-is the per-cycle heading change in degrees; and `valid` is `1` only when both
-sensor readings are valid. The current formatter emits the three numeric
-values with four digits after the decimal point. For example:
+The generic UART frame supplies the `0xAA 0x55` magic, protocol version,
+message type, payload length, and XOR checksum. `forward_mm` and `lateral_mm`
+remain per-cycle displacement values, and `valid` is `1` only when both sensor
+readings are valid. `delta_pose_packet_decode()` performs the inverse operation
+on a received odometry frame.
+
+### Generic UART link format
+
+Every message sent by `uart_link_send()` has this wire format:
 
 ```text
-DELTA,0.1250,-0.0040,0.0312,1
+byte(s)  field
+0-1      magic: 0xAA, 0x55
+2        protocol version: 0x01
+3        PacketMessageType
+4        payload length: 0-64
+5...     payload bytes
+last     XOR(version, message type, length, every payload byte)
 ```
+
+The UART layer treats the payload as opaque bytes. Packet-specific modules are
+responsible for encoding and decoding those bytes. To send an arbitrary packet:
+
+```cpp
+static UartLink uart_link = {0};
+
+void setup() {
+    esp_err_t error = uart_link_init(&uart_link, &DRIVETRAIN_UART_LINK_CONFIG);
+    if (error != ESP_OK) {
+        // UART is unavailable; handle the initialization failure.
+    }
+}
+
+void send_status() {
+    const uint8_t status_payload[] = {1U, 2U, 3U};
+    esp_err_t error = uart_link_send(
+        &uart_link,
+        PACKET_TYPE_STATUS,
+        status_payload,
+        (uint8_t)sizeof(status_payload)
+    );
+    if (error != ESP_OK) {
+        // The packet was not fully queued or transmitted.
+    }
+}
+```
+
+Call `uart_link_update()` regularly to drain the hardware RX buffer and feed
+the frame parser. A complete valid frame becomes available through
+`uart_link_take_packet()`:
+
+```cpp
+void receive_packets() {
+    if (uart_link_update(&uart_link) != ESP_OK) {
+        return;
+    }
+
+    PacketFrame packet;
+    if (uart_link_take_packet(&uart_link, &packet) != ESP_OK) {
+        return;
+    }
+
+    switch ((PacketMessageType)packet.message_type) {
+        case PACKET_TYPE_ODOMETRY: {
+            DeltaPose delta;
+            bool valid;
+            if (delta_pose_packet_decode(&packet, &delta, &valid) == ESP_OK) {
+                // Consume the decoded optical-motion delta.
+            }
+            break;
+        }
+
+        case PACKET_TYPE_COMMAND:
+            // Decode with the command packet module.
+            break;
+
+        case PACKET_TYPE_STATUS:
+            // Decode with the status packet module.
+            break;
+
+        default:
+            break;
+    }
+}
+```
+
+The link stores only the latest complete packet. If another packet arrives
+before the current one is taken, `packets_overwritten` increments. The other
+runtime counters are `packets_sent`, `packets_received`, `checksum_errors`, and
+`parse_errors`.
 
 ### Complete fused-data example
 
 This is the normal application shape when the static calibration loader and
-UART link are enabled. It sends one `DELTA` line per poll cycle; invalid sensor
-cycles are still sent with `valid=0` so the receiver can discard them without
-mistaking them for zero motion.
+UART link are enabled. It sends one odometry packet per poll cycle; invalid
+sensor cycles are still sent with `valid=0` so the receiver can discard them
+without mistaking them for zero motion.
 
 ```cpp
 #include <Arduino.h>
 
+#include "comm/packets/delta_pose_packet.h"
 #include "comm/uart_link.h"
 #include "config/fusion_config.h"
 #include "config/pin_map.h"
 #include "config/static_calibration.h"
+#include "config/uart_link_config.h"
 #include "drivers/pmw3610_driver.h"
 #include "sensing/pmw3610_fusion.h"
 
 static DualPmw3610 sensors;
 static Pmw3610Fusion fusion;
+static UartLink uart_link = {0};
 static bool fusion_ready = false;
 
 void setup() {
@@ -126,8 +216,13 @@ void setup() {
         // Do not transmit uncalibrated motion.
         return;
     }
-    pmw3610_fusion_configure(&fusion, &config);
-    uart_link_init(PIN_DRIVETRAIN_UART_TX, PIN_DRIVETRAIN_UART_RX, 115200);
+    if (!pmw3610_fusion_configure(&fusion, &config)) {
+        fusion_ready = false;
+        return;
+    }
+    if (uart_link_init(&uart_link, &DRIVETRAIN_UART_LINK_CONFIG) != ESP_OK) {
+        fusion_ready = false;
+    }
 }
 
 void loop() {
@@ -141,7 +236,8 @@ void loop() {
     dual_pmw3610_poll(&sensors, &ldx, &ldy, &l_valid, &rdx, &rdy, &r_valid);
 
     const DeltaPose delta = pmw3610_fusion_process(&fusion, ldx, ldy, rdx, rdy);
-    uart_link_send_delta(&delta, l_valid && r_valid);
+    delta_pose_packet_send(&uart_link, &delta, l_valid && r_valid);
+    uart_link_update(&uart_link);
     delay(10);
 }
 ```

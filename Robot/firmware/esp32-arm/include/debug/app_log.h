@@ -10,6 +10,7 @@ typedef enum {
     LOG_TAG_MAIN = 0,
     LOG_TAG_PMW3610,
     LOG_TAG_FUSION,
+    LOG_TAG_UART,
     LOG_TAG_MAX
 } LogTag;
 

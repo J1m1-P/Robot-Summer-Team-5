@@ -8,7 +8,7 @@
 // Pose Manager: owns the canonical cumulative pose for this board's
 // bench-testing output only. The main-control board (esp32-drivetrain)
 // owns real fault policy from the per-cycle `valid` flag on the
-// DELTA,... UART line; a fault here just resets pose to the origin (see
+// odometry UART packet; a fault here just resets pose to the origin (see
 // pmw3610_pose_zero()) and resumes integrating on the next valid cycle --
 // no latch.
 

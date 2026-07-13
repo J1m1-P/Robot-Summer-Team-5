@@ -71,7 +71,6 @@ static void pmw3610_write_byte(uint8_t value) {
 }
 
 static uint8_t pmw3610_read_byte(void) {
-    pmw3610_gpio_set_input(s_sdio_pin);
     uint8_t value = 0;
     for (int8_t i = 7; i >= 0; i--) {
         gpio_set_level((gpio_num_t)s_sclk_pin, 1);  // sensor shifts new bit out after prior LOW
@@ -109,6 +108,7 @@ void pmw3610_bus_init(uint8_t sdio_pin, uint8_t sclk_pin) {
 uint8_t pmw3610_bus_read_register(uint8_t ncs_pin, uint8_t addr) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(addr & 0x7F);  // MSB=0 for read
+    pmw3610_gpio_set_input(s_sdio_pin);
     esp_rom_delay_us(5);              // required turnaround
     uint8_t val = pmw3610_read_byte();
     gpio_set_level((gpio_num_t)ncs_pin, 1);
@@ -127,6 +127,7 @@ void pmw3610_bus_write_register(uint8_t ncs_pin, uint8_t addr, uint8_t value) {
 void pmw3610_bus_burst_read_motion(uint8_t ncs_pin, int16_t *dx, int16_t *dy, Pmw3610Status *status) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(PMW3610_REG_BURST_READ);
+    pmw3610_gpio_set_input(s_sdio_pin);
     esp_rom_delay_us(5);
     uint8_t motion = pmw3610_read_byte();
     uint8_t dx_l = pmw3610_read_byte();
@@ -149,6 +150,7 @@ void pmw3610_bus_burst_read_motion(uint8_t ncs_pin, int16_t *dx, int16_t *dy, Pm
 Pmw3610Diagnostics pmw3610_bus_burst_read_diagnostics(uint8_t ncs_pin) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(PMW3610_REG_BURST_READ);
+    pmw3610_gpio_set_input(s_sdio_pin);
     esp_rom_delay_us(5);
     uint8_t motion = pmw3610_read_byte();
     uint8_t dx_l = pmw3610_read_byte();
@@ -249,6 +251,7 @@ void pmw3610_bus_init_sensor(uint8_t ncs_pin, const char *label) {
     // Explicit resolution -- removes reliance on the unconfirmed power-on default.
     uint8_t res_step = pmw3610_get_res_step();
     pmw3610_bus_set_resolution(ncs_pin, res_step);
+
     APP_LOGI(LOG_TAG_PMW3610, "[%s] Resolution set to 0x%02X (%.0f CPI)", label, res_step,
              pmw3610_get_cpi());
 }
@@ -261,6 +264,15 @@ void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins) {
     pmw3610_bus_init(pins->sdio_pin, pins->sclk_pin);
     pmw3610_bus_init_sensor(pins->ncs_l_pin, "L");
     pmw3610_bus_init_sensor(pins->ncs_r_pin, "R");
+}
+
+bool dual_pmw3610_set_cpi(DualPmw3610 *dual, float cpi) {
+    if (dual == NULL || !pmw3610_set_cpi(cpi)) return false;
+
+    uint8_t resolution_step = pmw3610_get_res_step();
+    pmw3610_bus_set_resolution(dual->pins.ncs_l_pin, resolution_step);
+    pmw3610_bus_set_resolution(dual->pins.ncs_r_pin, resolution_step);
+    return true;
 }
 
 void dual_pmw3610_poll(DualPmw3610 *dual, int16_t *ldx, int16_t *ldy, bool *l_valid, int16_t *rdx,
@@ -276,6 +288,15 @@ void dual_pmw3610_poll(DualPmw3610 *dual, int16_t *ldx, int16_t *ldy, bool *l_va
     dual->left_first = !dual->left_first;
     *l_valid = pmw3610_status_valid(&l_status);
     *r_valid = pmw3610_status_valid(&r_status);
+
+    if (l_status.reset_triggered && !dual->reset_seen_l) {
+        pmw3610_bus_init_sensor(dual->pins.ncs_l_pin, "L");
+    }
+    if (r_status.reset_triggered && !dual->reset_seen_r) {
+        pmw3610_bus_init_sensor(dual->pins.ncs_r_pin, "R");
+    }
+    dual->reset_seen_l = l_status.reset_triggered;
+    dual->reset_seen_r = r_status.reset_triggered;
 
     // Surface-coverage Smart-mode: a separate, lower-cadence check (see
     // PMW3610_SMART_MODE_CHECK_INTERVAL) rather than every cycle, so this
