@@ -1,0 +1,18 @@
+#pragma once
+
+#include <Arduino.h>
+#include "drivers/stepper_driver.h"
+
+struct StepperConfig {
+    uint8_t stepPin;
+    uint8_t dirPin;
+
+    uint32_t stepPulseUs;
+    uint32_t stepDelayUs;
+};
+
+// stepPin, dirPin, stepPulseUs, stepDelayUs
+inline StepperConfig towerXConfig {42, 41, 3, 1000};
+inline StepperConfig towerZConfig {15, 16, 3, 1000};
+inline StepperConfig habitatXConfig {17, 18, 3, 1000};
+inline StepperConfig habitatZConfig {21, 40, 3, 1000};
