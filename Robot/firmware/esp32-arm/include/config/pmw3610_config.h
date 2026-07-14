@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -16,14 +17,13 @@ typedef struct {
     uint8_t ncs_r_pin;
 } PmwPinConfig;
 
-// Operating CPI is a runtime variable, not a compile-time constant --
-// changeable without recompiling (e.g. from a serial command in any of
-// the three mains). pmw3610_get_res_step() derives the sensor's RES_STEP
-// register value from whatever CPI is currently set; RES_STEP steps are
-// 200 CPI apart (0x1=200 ... 0x10=3200).
+// Operating CPI is configurable without recompiling. Set it before sensor
+// initialization, or use dual_pmw3610_set_cpi() to update initialized sensor
+// registers. Fusion must be reconfigured after any runtime CPI change.
+// RES_STEP values are 200 CPI apart (0x1=200 ... 0x10=3200).
 #define PMW3610_DEFAULT_CPI 3200.0f
 
-void pmw3610_set_cpi(float cpi);
+bool pmw3610_set_cpi(float cpi);
 float pmw3610_get_cpi(void);
 uint8_t pmw3610_cpi_to_res_step(float cpi);
 uint8_t pmw3610_get_res_step(void);

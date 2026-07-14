@@ -115,6 +115,11 @@ typedef struct {
 
 void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins);
 
+// Updates both sensors and the software CPI setting. CPI must be from 200
+// through 3200 in increments of 200. Reconfigure fusion afterward because
+// its count/mm matrices were calculated using the previous CPI.
+bool dual_pmw3610_set_cpi(DualPmw3610 *dual, float cpi);
+
 // l_valid/r_valid are hardware-confirmed (OVF/LSR_FAULT/SQUAL derived --
 // see pmw3610_status_valid()) validity for this cycle's dx/dy -- callers
 // should discard/hold last-good rather than integrate a cycle whose valid

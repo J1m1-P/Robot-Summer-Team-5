@@ -216,7 +216,10 @@ void setup() {
         // Do not transmit uncalibrated motion.
         return;
     }
-    pmw3610_fusion_configure(&fusion, &config);
+    if (!pmw3610_fusion_configure(&fusion, &config)) {
+        fusion_ready = false;
+        return;
+    }
     if (uart_link_init(&uart_link, &DRIVETRAIN_UART_LINK_CONFIG) != ESP_OK) {
         fusion_ready = false;
     }

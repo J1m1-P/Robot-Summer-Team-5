@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "config/fusion_config.h"
@@ -28,11 +29,12 @@ typedef struct {
     float inv_l[2][2];
     float inv_r[2][2];
     float baseline_mm;
+    bool configured;
 } Pmw3610Fusion;
 
 // baseline_mm is the physical sensor separation (a direct caliper
 // measurement, not fitted).
-void pmw3610_fusion_configure(Pmw3610Fusion *fusion, const FusionConfig *config);
+bool pmw3610_fusion_configure(Pmw3610Fusion *fusion, const FusionConfig *config);
 
 // d_theta = (dx_R - dx_L) / baseline (dx is forward, dy is lateral --
 // confirmed against real hardware). Pure function of this cycle's raw
