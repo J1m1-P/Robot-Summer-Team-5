@@ -7,6 +7,8 @@ struct StepperConfig {
     uint8_t stepPin;
     uint8_t dirPin;
 
+    // Step pulse is the time the step pin is held high in microseconds.
+    // Step delay is the time between steps in microseconds.
     uint32_t stepPulseUs;
     uint32_t stepDelayUs;
 };
