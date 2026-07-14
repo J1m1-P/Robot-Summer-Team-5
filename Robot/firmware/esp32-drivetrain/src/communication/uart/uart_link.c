@@ -1,4 +1,4 @@
-#include "communication/uart/packet_link.h"
+#include "communication/uart/uart_link.h"
 
 #include <string.h>
 #include <limits.h>
@@ -11,8 +11,8 @@
 #define PACKET_VERSION              0x01U
 #define PACKET_FRAME_OVERHEAD       6U
 #define PACKET_MAX_FRAME_SIZE (PACKET_MAX_PAYLOAD_SIZE + PACKET_FRAME_OVERHEAD)
-#define PACKET_LINK_READ_CHUNK_SIZE 256U
-#define PACKET_LINK_MAX_READ_BATCHES 4U
+#define UART_LINK_READ_CHUNK_SIZE 256U
+#define UART_LINK_MAX_READ_BATCHES 4U
 
 _Static_assert(
     PACKET_MAX_PAYLOAD_SIZE <= UINT8_MAX,
@@ -45,7 +45,7 @@ static void parser_reset(PacketParser *parser) {
     parser->state = PACKET_PARSE_MAGIC_0;
 }
 
-static void parser_finish_packet(PacketLink *link) {
+static void parser_finish_packet(UartLink *link) {
     PacketParser *parser = &link->parser;
     PacketFrame *frame = &link->latest_packet;
 
@@ -69,7 +69,7 @@ static void parser_finish_packet(PacketLink *link) {
     link->packets_received++;
 }
 
-static void parser_process_byte(PacketLink *link, uint8_t byte) {
+static void parser_process_byte(UartLink *link, uint8_t byte) {
     PacketParser *parser = &link->parser;
 
     switch(parser->state) {
@@ -168,7 +168,7 @@ static void parser_process_byte(PacketLink *link, uint8_t byte) {
 }
 
 // Lifecyle
-esp_err_t packet_link_init(PacketLink *link, const PacketLinkConfig *config) {
+esp_err_t uart_link_init(UartLink *link, const UartLinkConfig *config) {
     if (link == NULL || config == NULL) return ESP_ERR_INVALID_ARG;
     if (config->baud_rate == 0U) return ESP_ERR_INVALID_ARG;
     if (config->rx_buffer_size > INT_MAX || config->tx_buffer_size > INT_MAX) return ESP_ERR_INVALID_ARG;
@@ -236,7 +236,7 @@ esp_err_t packet_link_init(PacketLink *link, const PacketLinkConfig *config) {
         return err; 
 }
 
-esp_err_t packet_link_deinit(PacketLink *link) {
+esp_err_t uart_link_deinit(UartLink *link) {
     if (link == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
 
@@ -249,7 +249,7 @@ esp_err_t packet_link_deinit(PacketLink *link) {
 }
 
 // Actions
-esp_err_t packet_link_send(PacketLink *link, PacketMessageType message_type, const uint8_t *payload, uint8_t payload_len) {
+esp_err_t uart_link_send(UartLink *link, PacketMessageType message_type, const uint8_t *payload, uint8_t payload_len) {
     if (link == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
     if (message_type <= PACKET_TYPE_INVALID || message_type >= PACKET_TYPE_MAX) return ESP_ERR_INVALID_ARG;
@@ -284,7 +284,7 @@ esp_err_t packet_link_send(PacketLink *link, PacketMessageType message_type, con
     return ESP_OK;
 }
 
-esp_err_t packet_link_take_packet(PacketLink *link, PacketFrame *packet_out) {
+esp_err_t uart_link_take_packet(UartLink *link, PacketFrame *packet_out) {
     if (link == NULL || packet_out == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
     if (!link->has_new_packet) return ESP_ERR_NOT_FOUND;
@@ -295,13 +295,13 @@ esp_err_t packet_link_take_packet(PacketLink *link, PacketFrame *packet_out) {
     return ESP_OK;
 }
 
-esp_err_t packet_link_update(PacketLink *link) {
+esp_err_t uart_link_update(UartLink *link) {
     if (link == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
 
-    uint8_t read_buffer[PACKET_LINK_READ_CHUNK_SIZE];
+    uint8_t read_buffer[UART_LINK_READ_CHUNK_SIZE];
 
-    for (size_t batch = 0U; batch < PACKET_LINK_MAX_READ_BATCHES; batch++) { 
+    for (size_t batch = 0U; batch < UART_LINK_MAX_READ_BATCHES; batch++) { 
         int bytes_read = uart_read_bytes(link->config->uart_num, read_buffer, sizeof(read_buffer), 0);
 
         if (bytes_read < 0) return ESP_FAIL;
@@ -319,7 +319,7 @@ esp_err_t packet_link_update(PacketLink *link) {
 }
 
 // Status
-bool packet_link_has_packet(const PacketLink *link) {
+bool uart_link_has_packet(const UartLink *link) {
     if (link == NULL || !link->initialized) {
         return false;
     }
