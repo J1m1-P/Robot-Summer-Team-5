@@ -1,6 +1,6 @@
 """
-Teletubby Detector — Stage 1 + Stage 2 (done)
-=================================================
+Teletubby Detector — Stage 1 + Stage 2 (done), Stage 4 ML confirm (in progress)
+================================================================================
 Stage 1 (done): given an HSV mask, find the blob, draw a bounding box,
 compute normalized X error. See find_blob() / get_bbox_and_error().
 
@@ -19,6 +19,13 @@ a real problem later, a single global brightness/exposure compensation
 (shift every colour's V-bounds by the difference from practice-session
 brightness — doesn't require any Teletubby in view) would be a much
 cheaper fix than per-colour hue recalibration.
+
+Stage 4 (ML confirm — in progress): once HSV fires a candidate, an extra
+CONFIRM state runs a trained YOLO model on the same frame and cross-checks
+YOLO's own bounding box against HSV's. Only if the two boxes agree (enough
+overlap) do we commit to ALIGN; otherwise the HSV hit is treated as a false
+positive. YOLO runs ONLY in CONFIRM, never every frame, so its per-frame
+cost is paid only after HSV has already stopped the robot.
 
 Concepts you need:
 
@@ -42,6 +49,15 @@ Concepts you need:
       error = (box_center_x - frame_center_x) / frame_center_x
       Range: -1.0 (box centered at the left edge) ... 0.0 (centered)
       ... +1.0 (box centered at the right edge).
+
+  YOLO confirm + IoU cross-reference:
+      HSV is fast but fires on any background patch that merely shares a
+      colour. A trained detector keys on shape/texture instead, so running
+      it as a second opinion filters those out. It's a real detector, not a
+      crop classifier: it returns its OWN box, and we measure how much that
+      box overlaps HSV's using IoU — intersection area / union area, where
+      0.0 is no overlap and 1.0 is identical. Enough overlap means both
+      detectors agree it's the same object, so the hit is confirmed.
 """
 
 import cv2
@@ -157,7 +173,92 @@ def send(message):
     print(f"[TX] {message}")
 
 
-SEARCH, ALIGN, FLASH, DONE = "SEARCH", "ALIGN", "FLASH", "DONE"
+# ─────────────────────────────────────────────
+# STAGE 4 — YOLO confirm step (in progress)
+# ─────────────────────────────────────────────
+# After HSV fires and the robot stops, this step runs a trained YOLO model on
+# the frame to independently confirm a real Teletubby is there, then compares
+# YOLO's box against HSV's box with IoU. Enough overlap = both detectors agree
+# = we trust the hit and move to ALIGN. Runs only in CONFIRM, never per-frame.
+
+from ultralytics import YOLO   # heavy import (pulls in torch) — dev machine only for now
+
+MODEL_PATH   = "..."   # TODO: path to your trained .pt (e.g. "runs/detect/train/weights/best.pt")
+CONFIRM_CONF = 0.5     # TODO: tune — min YOLO confidence for a detection to count
+CONFIRM_IOU  = 0.3     # TODO: tune — min overlap with the HSV box to call it the same object
+
+# Load the weights ONCE here, not inside the loop — re-reading them every
+# frame would be enormously slow.
+model = YOLO(MODEL_PATH)   # TODO: set MODEL_PATH above before running this file
+
+
+def iou(box_a, box_b):
+    """
+    Intersection-over-Union of two boxes in (x1, y1, x2, y2) corner form.
+    0.0 = no overlap, 1.0 = identical. This is the number we threshold on to
+    decide whether HSV's box and YOLO's box describe the same object.
+    """
+    # TODO:
+    #   inter_x1 = max of the two left edges;   inter_y1 = max of the two tops
+    #   inter_x2 = min of the two right edges;  inter_y2 = min of the two bottoms
+    #   inter_w  = max(0, inter_x2 - inter_x1); inter_h = max(0, inter_y2 - inter_y1)
+    #   intersection = inter_w * inter_h
+    #   area_a, area_b = each box's width * height
+    #   union = area_a + area_b - intersection
+    #   return intersection / union   (guard union == 0 -> return 0.0)
+    ...
+
+    inter_x1 = max(box_a[0], box_b[0])
+    inter_y1 = max(box_a[1], box_b[1])
+    inter_x2 = min(box_a[2], box_b[2])
+    inter_y2 = min(box_a[3], box_b[3])
+
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_h = max(0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - intersection
+
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
+def yolo_confirm(frame, hsv_bbox, conf=CONFIRM_CONF, min_iou=CONFIRM_IOU):
+    """
+    Run YOLO on the full BGR `frame` and decide whether it agrees with HSV.
+    `hsv_bbox` is (x, y, w, h) from get_bbox_and_error / boundingRect. Returns
+    True if some YOLO detection overlaps HSV's box by at least min_iou.
+
+    NOTE: ultralytics takes BGR numpy arrays directly, so pass `frame` (the
+    raw camera image), NOT the hsv-converted one.
+    """
+    # Convert HSV's (x, y, w, h) top-left+size box into (x1, y1, x2, y2) corners
+    # so it's in the same format as YOLO's boxes for iou().
+    # TODO: hsv_corners = (x, y, x + w, y + h)
+    x, y, w, h = hsv_bbox
+    hsv_corners = (x, y, x + w, y + h)
+    results = model(frame, conf=conf, verbose=False)   # returns a list; use results[0]
+    yolo_boxes = results[0].boxes.xyxy.cpu().numpy()  # (N, 4) corner boxes
+    yolo_confs = results[0].boxes.conf.cpu().numpy()   # (N,) confidences
+    #   results[0].boxes.xyxy -> tensor (N, 4) corner boxes
+    #   results[0].boxes.conf -> tensor (N,)   confidences
+    #   call .cpu().numpy() on a tensor before using it as plain numbers
+
+    # TODO:
+    #   if there are no boxes -> return False
+    #   for each yolo box: compute iou(yolo_box, hsv_corners)
+    #   return True if the best iou >= min_iou, else False
+    if len(yolo_boxes) == 0:
+        return False
+    else:
+        best_iou = max(iou(yolo_box, hsv_corners) for yolo_box in yolo_boxes)
+        return best_iou >= min_iou
+
+
+SEARCH, CONFIRM, ALIGN, FLASH, DONE = "SEARCH", "CONFIRM", "ALIGN", "FLASH", "DONE"
 
 # Mutable control-loop state. generate_frames() is the only place reading
 # the camera, so it's also the only place that advances the state machine.
@@ -215,9 +316,35 @@ def generate_frames():
                 print("SEARCH saw:", list(detections.keys()))
                 target_name = next(iter(detections))
                 send("STOP")
-                state = ALIGN
+                state = CONFIRM   # was ALIGN — now YOLO gets a say first
             else:
                 send("TURN:0.3")  # placeholder constant scan speed
+
+        elif state == CONFIRM:
+            # Robot is already stopped. Re-detect the target colour on THIS
+            # frame to get a fresh HSV box, then ask YOLO for a second opinion
+            # on the same frame so the two boxes are directly comparable.
+            mask = build_mask(hsv, COLOR_RANGES[target_name])
+            contour = find_blob(mask)
+            if contour is None:
+                # HSV lost the candidate while stopping — nothing to confirm.
+                send("STOP")
+                target_name = None
+                state = SEARCH
+            else:
+                current_bbox_error = get_bbox_and_error(contour, frame_w)
+                x, y, w, h, _ = current_bbox_error
+                if yolo_confirm(frame, (x, y, w, h)):
+                    # Both detectors agree -> trust it, start centring.
+                    state = ALIGN
+                else:
+                    # TODO: false positive. Dropping straight back to SEARCH will
+                    # re-fire on this same patch next frame (SEARCH<->CONFIRM
+                    # ping-pong). Decide how to break out — e.g. send a small TURN
+                    # to sweep the patch out of view before resuming SEARCH.
+                    send("TURN")  # sweep the patch out of view
+                    target_name = None
+                    state = SEARCH
 
         elif state == ALIGN:
             mask = build_mask(hsv, COLOR_RANGES[target_name])
