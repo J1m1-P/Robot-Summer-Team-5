@@ -39,13 +39,13 @@ shared odometry protocol and driver safety behavior are agreed upon.
   motor command.
 - Float `clamp()` is provided once by `robot-common` and reused by the drivetrain
   and motor driver.
+- Cumulative odometry packet encoding and decoding are shared through
+  `robot-common`, including a sequence number and validity flag.
 
 ### Still Incomplete
 
 - Arm production `main.cpp` is still an Arduino stub.
 - Drivetrain production `main.cpp` is still a single-motor bench program.
-- The odometry packet is not shared; the arm owns `delta_pose_packet.*`, while the
-  drivetrain's `odometry_packet.*` files are empty.
 - No drivetrain-side odometry receiver exists.
 - Stepper movement is blocking and the stepper module has header/configuration
   problems.
@@ -53,21 +53,19 @@ shared odometry protocol and driver safety behavior are agreed upon.
 - UART diagnostic counters exist but are not surfaced periodically.
 - The drivetrain PlatformIO configuration contains a machine-specific upload port.
 
-## Adopted Drivetrain Decisions
+## Adopted Architecture Decisions
 
-The drivetrain implementation now uses these decisions:
+The implementation now uses these decisions:
 
 1. Startup and failure rollback engage the brake. Normal duty setters cannot
    release it; movement resumes through `drivetrain_enable()` or an explicit coast.
 2. Motor commands time out after 250 ms and cause the drivetrain to coast.
-
-The following communication choices still require confirmation:
-
-1. The shared odometry protocol carries cumulative pose rather than per-cycle
+3. The shared odometry protocol carries cumulative pose rather than per-cycle
    deltas.
-2. The odometry payload includes a sequence number for dropped-packet and reset
+4. The odometry payload includes a sequence number for dropped-packet and reset
    detection.
-3. Odometry becomes stale after 100 ms without a valid decoded packet.
+
+The 100 ms drivetrain-side odometry freshness timeout remains to be implemented.
 
 ## Session 1: Drivetrain Safety and State (Implemented)
 
@@ -162,14 +160,15 @@ For `drivetrain_set_all_motor_duty()`:
   `ESP_ERR_INVALID_STATE`.
 - Hardware errors propagate unchanged.
 
-## Session 2: Shared Odometry Protocol
+## Session 2: Shared Odometry Protocol (Packet Implemented)
 
-### 1. Replace the Arm-Specific Packet
+### 1. Shared Packet (Implemented)
 
-Do not move `delta_pose_packet.*` into the common library unchanged. It depends on
-the arm-only `DeltaPose` sensing type.
+The old arm-specific `delta_pose_packet.*` was not moved because it depended on the
+arm-only `DeltaPose` sensing type. It was replaced by a transport-only packet in
+`robot-common`.
 
-Create instead:
+Current structure:
 
 ```text
 Robot/firmware/lib/robot-common/
@@ -177,7 +176,7 @@ Robot/firmware/lib/robot-common/
 └── src/odometry_packet.c
 ```
 
-The shared wire type should depend only on common types:
+The shared wire type depends only on common types:
 
 ```c
 typedef struct {
@@ -189,7 +188,7 @@ typedef struct {
 } OdometryPacket;
 ```
 
-Provide:
+The module provides:
 
 ```c
 esp_err_t odometry_packet_send(UartLink *link, const OdometryPacket *packet);
@@ -198,14 +197,11 @@ esp_err_t odometry_packet_decode(const PacketFrame *frame,
                                  OdometryPacket *packet_out);
 ```
 
-Serialize each field explicitly. Do not transmit a C struct directly because struct
-padding is compiler-dependent.
+Each field is serialized explicitly in little-endian order. The C struct is not
+transmitted directly because struct padding is compiler-dependent.
 
-After both projects use the shared packet:
-
-- Remove arm `delta_pose_packet.*`.
-- Remove the empty drivetrain `odometry_packet.*` placeholders.
-- Confirm that packet encoding and decoding exist only in `robot-common`.
+The arm-specific packet files and empty drivetrain placeholders have been removed.
+Packet encoding and decoding now exist only in `robot-common`.
 
 ### 2. Arm-Side Cumulative Pose
 

@@ -70,27 +70,26 @@ For sensor bring-up or surface diagnostics, use
 status, SQUAL, shutter, and pixel min/average/max values. This full burst is
 for diagnostics rather than the timing-sensitive normal polling loop.
 
-### Fused UART packet format
+### Cumulative odometry UART packet format
 
-To convert raw counts into body-frame motion, configure
-`Pmw3610Fusion` with the static matrix data and pass each poll result to
-`pmw3610_fusion_process()`. `delta_pose_packet_send()` serializes that result
-as a `PACKET_TYPE_ODOMETRY` payload and sends it through the generic framed
-UART link.
+To convert raw counts into body-frame motion, configure `Pmw3610Fusion`, pass
+each poll result to `pmw3610_fusion_process()`, and integrate valid deltas with
+`Pmw3610PoseManager`. The shared `odometry_packet_send()` function serializes
+the cumulative pose as a `PACKET_TYPE_ODOMETRY` payload.
 
 ```text
 offset  size  field
-0       4     forward displacement (float, mm)
-4       4     lateral displacement (float, mm)
-8       4     heading change (float, radians)
-12      1     valid (0 or 1)
+0       4     cumulative x position (float, mm, little-endian)
+4       4     cumulative y position (float, mm, little-endian)
+8       4     cumulative heading (float, radians, little-endian)
+12      4     packet sequence (uint32, little-endian)
+16      1     valid (0 or 1)
 ```
 
 The generic UART frame supplies the `0xAA 0x55` magic, protocol version,
-message type, payload length, and XOR checksum. `forward_mm` and `lateral_mm`
-remain per-cycle displacement values, and `valid` is `1` only when both sensor
-readings are valid. `delta_pose_packet_decode()` performs the inverse operation
-on a received odometry frame.
+message type, payload length, and XOR checksum. `valid` is `1` only when both
+sensor readings are valid. Invalid cycles retain the previous cumulative pose.
+`odometry_packet_decode()` performs the inverse operation on a received frame.
 
 ### Generic UART link format
 
@@ -150,10 +149,9 @@ void receive_packets() {
 
     switch ((PacketMessageType)packet.message_type) {
         case PACKET_TYPE_ODOMETRY: {
-            DeltaPose delta;
-            bool valid;
-            if (delta_pose_packet_decode(&packet, &delta, &valid) == ESP_OK) {
-                // Consume the decoded optical-motion delta.
+            OdometryPacket odometry;
+            if (odometry_packet_decode(&packet, &odometry) == ESP_OK) {
+                // Consume cumulative pose and inspect odometry.valid.
             }
             break;
         }
@@ -187,7 +185,7 @@ without mistaking them for zero motion.
 ```cpp
 #include <Arduino.h>
 
-#include "comm/packets/delta_pose_packet.h"
+#include <robot_common/odometry_packet.h>
 #include <robot_common/uart_link.h>
 #include "config/fusion_config.h"
 #include "config/pin_map.h"
@@ -195,11 +193,14 @@ without mistaking them for zero motion.
 #include "config/uart_link_config.h"
 #include "drivers/pmw3610_driver.h"
 #include "sensing/pmw3610_fusion.h"
+#include "sensing/pmw3610_pose.h"
 
 static DualPmw3610 sensors;
 static Pmw3610Fusion fusion;
+static Pmw3610PoseManager pose;
 static UartLink uart_link = {0};
 static bool fusion_ready = false;
+static uint32_t sequence = 0;
 
 void setup() {
     const PmwPinConfig pins = {
@@ -209,6 +210,7 @@ void setup() {
         .ncs_r_pin = PIN_PMW_NCS_R,
     };
     dual_pmw3610_init(&sensors, &pins);
+    pmw3610_pose_init(&pose);
 
     FusionConfig config;
     fusion_ready = static_calibration_load(&config);
@@ -236,7 +238,17 @@ void loop() {
     dual_pmw3610_poll(&sensors, &ldx, &ldy, &l_valid, &rdx, &rdy, &r_valid);
 
     const DeltaPose delta = pmw3610_fusion_process(&fusion, ldx, ldy, rdx, rdy);
-    delta_pose_packet_send(&uart_link, &delta, l_valid && r_valid);
+    const bool valid = l_valid && r_valid;
+    pmw3610_pose_update(&pose, &delta, l_valid, r_valid);
+
+    const OdometryPacket packet = {
+        .x_mm = pose.x_mm,
+        .y_mm = pose.y_mm,
+        .theta_rad = pose.theta_rad,
+        .sequence = sequence++,
+        .valid = valid,
+    };
+    odometry_packet_send(&uart_link, &packet);
     uart_link_update(&uart_link);
     delay(10);
 }
