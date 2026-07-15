@@ -14,10 +14,6 @@ void pmw3610_pose_update(Pmw3610PoseManager *pm, const DeltaPose *delta, bool l_
         pm->last_fault = (!l_valid && !r_valid)   ? FAULT_BOTH_SENSORS_INVALID
                           : !l_valid              ? FAULT_LEFT_SENSOR_INVALID
                                                    : FAULT_RIGHT_SENSOR_INVALID;
-        // This board is bench-testing only -- the main-control MCU owns
-        // real fault policy over UART, so just reset to origin here
-        // instead of latching output off.
-        pmw3610_pose_zero(pm);
         return;
     }
     pm->output_killed = false;

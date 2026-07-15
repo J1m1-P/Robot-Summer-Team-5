@@ -7,15 +7,24 @@
 #include "driver/ledc.h"
 #include "esp_err.h"
 
+#include <robot_common/math_utils.h>
+
 #define MOTOR_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define MOTOR_LEDC_TIMER LEDC_TIMER_0
 
 
-// Helper Functions
-static float clamp_f(float value, float min, float max) {
-    if (value > max) return max;
-    if (value < min) return min;
-    return value;
+bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
+    if (config == NULL) return false;
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(config->pwm_pin)) return false;
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(config->dir_pin)) return false;
+    if (config->pwm_pin == config->dir_pin) return false;
+    if (!isfinite(config->max_duty) || config->max_duty <= 0.0f || config->max_duty > 1.0f) {
+        return false;
+    }
+    if (config->pwm_resolution == 0 || config->pwm_resolution > 20) return false;
+    if (config->pwm_frequency == 0) return false;
+    if (config->pwm_channel >= LEDC_CHANNEL_MAX) return false;
+    return true;
 }
 
 // Precondition: duty must be non-negative and clamped
@@ -31,23 +40,24 @@ static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
 
 // For some unknow reason, the pwm duty logic is inversed, now HIGHER = SLOWER, so we need to invert it 
 
-static void motor_driver_set_pwm(MotorDriver *motor, float duty) {
+static esp_err_t motor_driver_set_pwm(MotorDriver *motor, float duty) {
     uint32_t duty_count = duty_to_ledc_count(motor, duty);
 
-    ledc_set_duty(
+    esp_err_t err = ledc_set_duty(
         MOTOR_LEDC_MODE, 
         (ledc_channel_t)motor->config->pwm_channel, 
         duty_count
     );
+    if (err != ESP_OK) return err;
 
-    ledc_update_duty(
+    return ledc_update_duty(
         MOTOR_LEDC_MODE, 
         (ledc_channel_t)motor->config->pwm_channel
     );
 }
 
 // true = forward, false = backward
-static void motor_driver_set_dir(MotorDriver *motor, bool dir) {
+static esp_err_t motor_driver_set_dir(MotorDriver *motor, bool dir) {
     bool pin_level;
 
     if (motor->config->direction_inverted) {
@@ -57,17 +67,13 @@ static void motor_driver_set_dir(MotorDriver *motor, bool dir) {
         pin_level = dir;
     }
 
-    gpio_set_level((gpio_num_t)motor->config->dir_pin, pin_level);
+    return gpio_set_level((gpio_num_t)motor->config->dir_pin, pin_level);
 }
 
 
 // Public API
 esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
-    if (motor == NULL || config == NULL) return ESP_ERR_INVALID_ARG;
-    if (config->max_duty < 0.0f || config->max_duty > 1.0f) return ESP_ERR_INVALID_ARG;
-    if (config->pwm_resolution == 0 || config->pwm_resolution > 20) return ESP_ERR_INVALID_ARG;
-    if (config->pwm_frequency == 0) return ESP_ERR_INVALID_ARG;
-    if (config->pwm_channel >= LEDC_CHANNEL_MAX) return ESP_ERR_INVALID_ARG; 
+    if (motor == NULL || !motor_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
 
     motor->config = config;
     motor->initialized = false;
@@ -123,8 +129,11 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
     }
 
     //Set default states
-    motor_driver_set_dir(motor, true);
-    motor_driver_set_pwm(motor, 0.0f);
+    err = motor_driver_set_dir(motor, true);
+    if (err != ESP_OK) return err;
+
+    err = motor_driver_set_pwm(motor, 0.0f);
+    if (err != ESP_OK) return err;
 
     motor->initialized = true;
 
@@ -142,7 +151,9 @@ esp_err_t motor_driver_enable(MotorDriver *motor) {
 esp_err_t motor_driver_disable(MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
 
-    motor_driver_coast(motor);
+    esp_err_t err = motor_driver_coast(motor);
+    if (err != ESP_OK) return err;
+
     motor->enabled = false; 
 
     return ESP_OK;
@@ -152,7 +163,7 @@ esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
     if (motor == NULL || !motor->initialized || !motor->enabled) return ESP_ERR_INVALID_ARG;
     if (!isfinite(duty)) return ESP_ERR_INVALID_ARG;
 
-    duty = clamp_f(
+    duty = clamp(
         duty, 
         -motor->config->max_duty, 
         motor->config->max_duty
@@ -166,8 +177,11 @@ esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
     float pos_duty = fabsf(duty);
 
     // Make changes
-    motor_driver_set_dir(motor, forward);
-    motor_driver_set_pwm(motor, pos_duty);
+    esp_err_t err = motor_driver_set_dir(motor, forward);
+    if (err != ESP_OK) return err;
+
+    err = motor_driver_set_pwm(motor, pos_duty);
+    if (err != ESP_OK) return err;
 
     // Record changes
     motor->current_duty = duty;
@@ -179,7 +193,8 @@ esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
 esp_err_t motor_driver_coast(MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
     
-    motor_driver_set_pwm(motor, 0.0f);
+    esp_err_t err = motor_driver_set_pwm(motor, 0.0f);
+    if (err != ESP_OK) return err;
 
     motor->current_duty = 0.0f;
     motor->coasting = true; 

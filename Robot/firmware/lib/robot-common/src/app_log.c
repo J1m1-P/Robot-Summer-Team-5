@@ -12,7 +12,7 @@ static const char *LOG_TAGS[LOG_TAG_MAX] = {
 };
 
 const char *app_log_tag(LogTag tag) {
-    if (tag < 0 || tag >= LOG_TAG_MAX) {
+    if (tag < 0 || tag >= LOG_TAG_MAX || LOG_TAGS[tag] == NULL) {
         return "unknown";
     }
 

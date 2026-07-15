@@ -55,6 +55,8 @@ typedef struct {
     PacketFrame latest_packet;
 } UartLink;
 
+// Zero-initialize the runtime object before its first init call:
+// UartLink link = {0};
 esp_err_t uart_link_init(UartLink *link, const UartLinkConfig *config);
 esp_err_t uart_link_deinit(UartLink *link);
 

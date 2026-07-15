@@ -37,6 +37,8 @@ typedef struct {
 } I2cDevice;
 
 // Bus Management
+// Zero-initialize the runtime object before its first init call:
+// I2cBus bus = {0};
 esp_err_t i2c_bus_init(I2cBus *bus, const I2cBusConfig *config); 
 
 esp_err_t i2c_bus_deinit(I2cBus *bus);

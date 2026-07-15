@@ -36,6 +36,7 @@ typedef struct {
 } MotorDriver;
 
 // Initialization
+bool motor_driver_config_is_valid(const MotorDriverConfig *config);
 esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config);
 esp_err_t motor_driver_enable(MotorDriver *motor);
 esp_err_t motor_driver_disable(MotorDriver *motor);

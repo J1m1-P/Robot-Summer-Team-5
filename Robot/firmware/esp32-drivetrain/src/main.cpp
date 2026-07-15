@@ -7,6 +7,7 @@
 #include "config/motor_config.h"
 
 static MotorDriver motor1 = {0};
+static bool motor_ready = false;
 
 void setup()
 {
@@ -22,21 +23,31 @@ void setup()
 
     err = motor_driver_init(&motor1, &FL_MOTOR_CONFIG);
     if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor initlization");
+        APP_LOGE(LOG_TAG_MOTOR, "Failed motor initialization: %s", esp_err_to_name(err));
+        return;
     }
-    APP_LOGI(LOG_TAG_MOTOR, "Motor intialized");
+    APP_LOGI(LOG_TAG_MOTOR, "Motor initialized");
 
     err = motor_driver_enable(&motor1);
     if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable");
+        APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable: %s", esp_err_to_name(err));
+        return;
     }
     APP_LOGI(LOG_TAG_MOTOR, "Motor enabled");
-
+    motor_ready = true;
 }
 
 void loop()
 {
-    motor_driver_set_duty(&motor1, 0.5);
-    delay(100);
+    if (!motor_ready) {
+        delay(100);
+        return;
+    }
 
+    esp_err_t err = motor_driver_set_duty(&motor1, 0.5f);
+    if (err != ESP_OK) {
+        APP_LOGE(LOG_TAG_MOTOR, "Failed to set motor duty: %s", esp_err_to_name(err));
+        motor_ready = false;
+    }
+    delay(100);
 }

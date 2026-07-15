@@ -1,5 +1,6 @@
 #include "drivers/encoder_driver.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -10,15 +11,23 @@
 #define ENCODER_PCNT_FILTER_MAX_CYCLES 1023
 
 // Helper Functions
-static bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
+bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
     if (config == NULL) return false;
     if (config->id < 0 || config->id >= ENCODER_ID_MAX) return false;
+    if (config->pcnt_unit < 0 || config->pcnt_unit >= PCNT_UNIT_MAX) return false;
+    if (config->pcnt_channel_a < 0 || config->pcnt_channel_a >= PCNT_CHANNEL_MAX) return false;
+    if (config->pcnt_channel_b < 0 || config->pcnt_channel_b >= PCNT_CHANNEL_MAX) return false;
+    if (!GPIO_IS_VALID_GPIO(config->a_pin) || !GPIO_IS_VALID_GPIO(config->b_pin)) return false;
     if (config->a_pin == config->b_pin) return false;
     if (config->pcnt_channel_a == config->pcnt_channel_b) return false;
     if (config->counts_per_revolution == 0) return false;
-    if (config->wheel_diameter_m <= 0.0f) return false;
+    if (!isfinite(config->wheel_diameter_m) || config->wheel_diameter_m <= 0.0f) return false;
     if (config->high_limit <= 0 || config->low_limit >= 0) return false;
     if (config->low_limit >= config->high_limit) return false;
+    uint64_t filter_cycles =
+        ((uint64_t)config->glitch_filter_ns * ENCODER_APB_CLK_HZ + 999999999ULL) /
+        1000000000ULL;
+    if (filter_cycles > ENCODER_PCNT_FILTER_MAX_CYCLES) return false;
     return true;
 }
 

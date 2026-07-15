@@ -55,6 +55,7 @@ typedef struct {
 } EncoderDriver;
 
 // Initialization
+bool encoder_driver_config_is_valid(const EncoderDriverConfig *config);
 esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config);
 
 // Counter Control
