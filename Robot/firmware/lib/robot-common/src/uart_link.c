@@ -1,9 +1,9 @@
-#include "comm/uart_link.h"
+#include <robot_common/uart_link.h>
 
 #include <limits.h>
 #include <string.h>
 
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 
 #define PACKET_MAGIC_0 0xAAU
 #define PACKET_MAGIC_1 0x55U

@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 #include "config/pin_map.h"
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 #include "drivers/pmw3610_driver.h"
 
 // Calibration-only firmware: it publishes raw deltas for the laptop helper

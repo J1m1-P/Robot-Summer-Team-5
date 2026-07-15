@@ -7,7 +7,7 @@
 #include <math.h>
 #include <string.h>
 
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 
 
 // Helper Functions
@@ -357,3 +357,8 @@ float drivetrain_get_encoder_velocity_mps(const Drivetrain *drivetrain, Drivetra
     return drivetrain->encoders[motor_id].velocity_mps;
 }
 
+
+// // Watch Dog
+// esp_err_t drivetrain_tick(Drivetrain *drivetrain, int64_t now_us) {
+//     if (drivetrain->enabled && now_us - drivetrain->)
+// }

@@ -1,9 +1,7 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
-
-// Common robot-level data structures shared between modules.
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +28,6 @@ typedef struct {
 typedef struct {
     RobotPose2D pose;
     RobotVelocity2D velocity;
-
     uint32_t timestamp_ms;
     bool valid;
 } RobotOdometry;

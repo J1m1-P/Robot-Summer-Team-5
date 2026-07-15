@@ -63,6 +63,9 @@ esp_err_t drivetrain_encoder_update(Drivetrain *drivetrain);
 int32_t drivetrain_get_encoder_accumulated_count(const Drivetrain *drivetrain, DrivetrainMotorId motor_id);
 float drivetrain_get_encoder_velocity_mps(const Drivetrain *drivetrain, DrivetrainMotorId motor_id);
 
+// Watch Dog
+esp_err_t drivetrain_tick(Drivetrain *drivetrain, int64_t now_us);
+
 #ifdef __cplusplus
 }   
 #endif

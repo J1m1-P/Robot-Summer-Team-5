@@ -6,7 +6,7 @@
 #include "esp_rom_sys.h"
 
 #include "config/pmw3610_config.h"
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 
 // Register addresses and bit layouts are from the PMW3610DM-SUDU datasheet
 // (PMS0003-PMW3610DM-SUDU-DS-R2.4), register map on its page 20. File-local

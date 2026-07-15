@@ -62,12 +62,12 @@ static void motor_driver_set_dir(MotorDriver *motor, bool dir) {
 
 
 // Public API
-bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
-    if (motor == NULL || config == NULL) return false;
-    if (config->max_duty < 0.0f || config->max_duty > 1.0f) return false;
-    if (config->pwm_resolution == 0 || config->pwm_resolution > 20) return false;
-    if (config->pwm_frequency == 0) return false;
-    if (config->pwm_channel >= LEDC_CHANNEL_MAX) return false; 
+esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
+    if (motor == NULL || config == NULL) return ESP_ERR_INVALID_ARG;
+    if (config->max_duty < 0.0f || config->max_duty > 1.0f) return ESP_ERR_INVALID_ARG;
+    if (config->pwm_resolution == 0 || config->pwm_resolution > 20) return ESP_ERR_INVALID_ARG;
+    if (config->pwm_frequency == 0) return ESP_ERR_INVALID_ARG;
+    if (config->pwm_channel >= LEDC_CHANNEL_MAX) return ESP_ERR_INVALID_ARG; 
 
     motor->config = config;
     motor->initialized = false;
@@ -84,7 +84,13 @@ bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
         .intr_type = GPIO_INTR_DISABLE
     };
 
-    if (gpio_config(&dir_gpio_config) != ESP_OK) return false;
+    esp_err_t err; 
+
+    err = gpio_config(&dir_gpio_config);
+
+    if (err != ESP_OK) {
+        return err;
+    }
 
     // Configure PWM timer
     ledc_timer_config_t pwm_timer_config = {
@@ -95,7 +101,10 @@ bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
         .clk_cfg = LEDC_AUTO_CLK
     };
 
-    if (ledc_timer_config(&pwm_timer_config) != ESP_OK) return false;
+    err = ledc_timer_config(&pwm_timer_config);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     // Configure PWM channel
     ledc_channel_config_t pwm_channel_config = {
@@ -108,8 +117,10 @@ bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
         .hpoint = 0
     };
 
-    if (ledc_channel_config(&pwm_channel_config) != ESP_OK) return false; 
-
+    err = ledc_channel_config(&pwm_channel_config);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     //Set default states
     motor_driver_set_dir(motor, true);
@@ -117,7 +128,7 @@ bool motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
 
     motor->initialized = true;
 
-    return true;
+    return ESP_OK;
 }
 
 esp_err_t motor_driver_enable(MotorDriver *motor) {

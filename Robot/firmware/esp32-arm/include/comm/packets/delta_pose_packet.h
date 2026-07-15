@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#include "comm/uart_link.h"
+#include <robot_common/uart_link.h>
 #include "sensing/pmw3610_fusion.h"
 
 #ifdef __cplusplus

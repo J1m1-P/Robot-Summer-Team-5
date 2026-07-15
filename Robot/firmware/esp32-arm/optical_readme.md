@@ -188,7 +188,7 @@ without mistaking them for zero motion.
 #include <Arduino.h>
 
 #include "comm/packets/delta_pose_packet.h"
-#include "comm/uart_link.h"
+#include <robot_common/uart_link.h>
 #include "config/fusion_config.h"
 #include "config/pin_map.h"
 #include "config/static_calibration.h"

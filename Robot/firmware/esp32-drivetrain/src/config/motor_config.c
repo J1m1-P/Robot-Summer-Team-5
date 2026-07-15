@@ -3,8 +3,8 @@
 
 // Change these
 #define MOTOR_PWM_FREQUENCY     9000       // 9kHz
-#define MOTOR_PWM_RESOLURION    12           // 2**12 resolution
-#define MOTOR_MAX_DUTY          1.0f       // 80% duty cycle
+#define MOTOR_PWM_RESOLUTION    12           // 2**12 resolution
+#define MOTOR_MAX_DUTY          1.0f       // 100% duty cycle
 
 const MotorDriverConfig FL_MOTOR_CONFIG = {
     .pwm_pin = PIN_M1_PWM, 
@@ -12,7 +12,7 @@ const MotorDriverConfig FL_MOTOR_CONFIG = {
 
     .pwm_channel = 0, 
     .pwm_frequency = MOTOR_PWM_FREQUENCY, 
-    .pwm_resolution = MOTOR_PWM_RESOLURION, 
+    .pwm_resolution = MOTOR_PWM_RESOLUTION, 
 
     .direction_inverted = false, 
     
@@ -25,7 +25,7 @@ const MotorDriverConfig FR_MOTOR_CONFIG = {
 
     .pwm_channel = 1, 
     .pwm_frequency = MOTOR_PWM_FREQUENCY, 
-    .pwm_resolution = MOTOR_PWM_RESOLURION, 
+    .pwm_resolution = MOTOR_PWM_RESOLUTION, 
 
     .direction_inverted = false, 
     
@@ -38,7 +38,7 @@ const MotorDriverConfig BL_MOTOR_CONFIG = {
 
     .pwm_channel = 2, 
     .pwm_frequency = MOTOR_PWM_FREQUENCY, 
-    .pwm_resolution = MOTOR_PWM_RESOLURION, 
+    .pwm_resolution = MOTOR_PWM_RESOLUTION, 
 
     .direction_inverted = false, 
     
@@ -51,7 +51,7 @@ const MotorDriverConfig BR_MOTOR_CONFIG = {
 
     .pwm_channel = 3, 
     .pwm_frequency = MOTOR_PWM_FREQUENCY, 
-    .pwm_resolution = MOTOR_PWM_RESOLURION, 
+    .pwm_resolution = MOTOR_PWM_RESOLUTION, 
 
     .direction_inverted = false, 
     

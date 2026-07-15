@@ -8,14 +8,17 @@ extern "C" {
 
 typedef enum {
     LOG_TAG_MAIN = 0,
+    LOG_TAG_UART,
+    LOG_TAG_I2C,
+    LOG_TAG_MOTOR,
+    LOG_TAG_ENCODER,
+    LOG_TAG_DRIVETRAIN,
     LOG_TAG_PMW3610,
     LOG_TAG_FUSION,
-    LOG_TAG_UART,
     LOG_TAG_MAX
 } LogTag;
 
 void app_log_init(void);
-
 const char *app_log_tag(LogTag tag);
 
 #ifdef __cplusplus

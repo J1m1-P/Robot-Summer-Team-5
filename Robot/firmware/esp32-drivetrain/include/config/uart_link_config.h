@@ -1,6 +1,6 @@
 #pragma once
 
-#include "communication/uart/uart_link.h"
+#include <robot_common/uart_link.h>
 
 #ifdef __cplusplus
 extern "C" {

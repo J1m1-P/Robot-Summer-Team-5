@@ -4,7 +4,7 @@
 #include "config/pin_map.h"
 #include "config/pmw3610_config.h"
 #include "config/static_calibration.h"
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 #include "drivers/pmw3610_driver.h"
 #include "sensing/pmw3610_fusion.h"
 #include "sensing/pmw3610_pose.h"

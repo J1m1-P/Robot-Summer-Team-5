@@ -1,0 +1,7 @@
+{
+    "name": "robot-common",
+    "version": "1.0.0",
+    "description": "Shared types, communication protocol, and logging for the robot firmware",
+    "frameworks": "arduino",
+    "platforms": "espressif32"
+}
