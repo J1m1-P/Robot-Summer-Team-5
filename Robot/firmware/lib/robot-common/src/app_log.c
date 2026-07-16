@@ -1,5 +1,10 @@
+/*
+ * Implements shared log tag lookup and default ESP-IDF log levels.
+ * Invalid tags are mapped to a safe fallback label.
+ */
 #include <robot_common/app_log.h>
 
+// Maps each LogTag value to the label shown in log output.
 static const char *LOG_TAGS[LOG_TAG_MAX] = {
     [LOG_TAG_MAIN] = "main",
     [LOG_TAG_UART] = "uart",
@@ -11,6 +16,7 @@ static const char *LOG_TAGS[LOG_TAG_MAX] = {
     [LOG_TAG_FUSION] = "fusion",
 };
 
+// Looks up the printable label for a subsystem log tag.
 const char *app_log_tag(LogTag tag) {
     if (tag < 0 || tag >= LOG_TAG_MAX || LOG_TAGS[tag] == NULL) {
         return "unknown";
@@ -19,6 +25,7 @@ const char *app_log_tag(LogTag tag) {
     return LOG_TAGS[tag];
 }
 
+// Sets the default log level and enables debug output for known subsystems.
 void app_log_init(void) {
     esp_log_level_set("*", ESP_LOG_INFO);
 

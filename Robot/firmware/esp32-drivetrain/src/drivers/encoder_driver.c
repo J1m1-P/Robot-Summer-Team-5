@@ -1,3 +1,4 @@
+/* Implements ESP32 pulse-counter quadrature tracking and velocity estimation. */
 #include "drivers/encoder_driver.h"
 
 #include <math.h>
@@ -6,11 +7,12 @@
 
 #include "esp_timer.h"
 
+// Constants used for wheel-distance conversion and PCNT glitch filtering.
 #define ENCODER_PI 3.14159265358979323846f
 #define ENCODER_APB_CLK_HZ 80000000UL
 #define ENCODER_PCNT_FILTER_MAX_CYCLES 1023
 
-// Helper Functions
+// Checks encoder IDs, pins, PCNT resources, geometry, limits, and filter range.
 bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
     if (config == NULL) return false;
     if (config->id < 0 || config->id >= ENCODER_ID_MAX) return false;
@@ -31,6 +33,7 @@ bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
     return true;
 }
 
+// Converts a nanosecond glitch filter duration to bounded APB clock cycles.
 static esp_err_t encoder_driver_glitch_ns_to_cycles(uint32_t glitch_filter_ns, uint16_t *cycles_out) {
     if (cycles_out == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -50,6 +53,7 @@ static esp_err_t encoder_driver_glitch_ns_to_cycles(uint32_t glitch_filter_ns, u
     return ESP_OK;
 }
 
+// Configures channel A for full quadrature decoding using channel B as control.
 static esp_err_t encoder_driver_configure_channel_a(const EncoderDriverConfig *config) {
     pcnt_config_t pcnt_config = {
         .pulse_gpio_num = config->a_pin, 
@@ -70,6 +74,7 @@ static esp_err_t encoder_driver_configure_channel_a(const EncoderDriverConfig *c
     return pcnt_unit_config(&pcnt_config);
 }
 
+// Configures channel B for full quadrature decoding using channel A as control.
 static esp_err_t encoder_driver_configure_channel_b(const EncoderDriverConfig *config) {
     pcnt_config_t pcnt_config = {
         .pulse_gpio_num = config->b_pin, 
@@ -90,6 +95,7 @@ static esp_err_t encoder_driver_configure_channel_b(const EncoderDriverConfig *c
     return pcnt_unit_config(&pcnt_config);
 }
 
+// Reads the signed hardware counter and applies configured direction inversion.
 static esp_err_t encoder_driver_read_raw_delta(const EncoderDriver *encoder, int32_t *delta_count) {
     if (encoder == NULL || delta_count == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -107,6 +113,7 @@ static esp_err_t encoder_driver_read_raw_delta(const EncoderDriver *encoder, int
     return ESP_OK;
 }
 
+// Atomically transfers the hardware counter delta into the accumulated count.
 static esp_err_t encoder_driver_flush_delta(EncoderDriver *encoder, int32_t *delta_count) {
     if (encoder == NULL || delta_count == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -154,7 +161,7 @@ static esp_err_t encoder_driver_flush_delta(EncoderDriver *encoder, int32_t *del
     return ESP_OK;
 }
 
-// Public Functions
+// Configures both PCNT channels and the optional glitch filter for one encoder.
 esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config) {
     if (encoder == NULL || !encoder_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
 
@@ -198,6 +205,7 @@ esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig 
     return ESP_OK;
 }
 
+// Clears and resumes the hardware counter for an initialized encoder.
 esp_err_t encoder_driver_start(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -210,6 +218,7 @@ esp_err_t encoder_driver_start(EncoderDriver *encoder) {
     return ESP_OK;
 }
 
+// Pauses the hardware counter and marks the encoder disabled.
 esp_err_t encoder_driver_stop(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -221,6 +230,7 @@ esp_err_t encoder_driver_stop(EncoderDriver *encoder) {
     return ESP_OK;
 }
 
+// Clears hardware count, accumulated count, timestamps, and velocity estimates.
 esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -250,6 +260,7 @@ esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     return ESP_OK;
 }
 
+// Returns accumulated count plus the current unflushed hardware delta.
 esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count) {
     if (encoder == NULL || !encoder->initialized || count == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -264,6 +275,7 @@ esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count)
     return ESP_OK;
 }
 
+// Converts the current total count into wheel revolutions.
 esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *revolutions) {
     if (encoder == NULL || revolutions == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -277,6 +289,7 @@ esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *re
     return ESP_OK;
 }
 
+// Converts wheel revolutions into signed linear travel in meters.
 esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *distance_m) {
     if (encoder == NULL || distance_m == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -292,6 +305,7 @@ esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *dis
     return ESP_OK;
 }
 
+// Flushes the latest delta and updates angular and linear velocity estimates.
 esp_err_t encoder_driver_update(EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -315,24 +329,28 @@ esp_err_t encoder_driver_update(EncoderDriver *encoder) {
     return ESP_OK;
 }
 
+// Returns the latest angular velocity estimate or zero when unavailable.
 float encoder_driver_get_velocity_rps(const EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return 0.0f;
 
     return encoder->velocity_rps;
 }
 
+// Returns the latest linear velocity estimate or zero when unavailable.
 float encoder_driver_get_velocity_mps(const EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return 0.0f;
 
     return encoder->velocity_mps;
 }
 
+// Reports whether the encoder completed initialization.
 bool encoder_driver_is_initialized(const EncoderDriver *encoder) {
     if (encoder == NULL) return false;
 
     return encoder->initialized;
 }
 
+// Reports whether the encoder hardware counter is running.
 bool encoder_driver_is_enabled(const EncoderDriver *encoder) {
     if (encoder == NULL || !encoder->initialized) return false;
 

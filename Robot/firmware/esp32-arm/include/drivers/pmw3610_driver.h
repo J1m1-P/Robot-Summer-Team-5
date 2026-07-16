@@ -1,3 +1,4 @@
+/* Declares the shared-bus PMW3610 optical sensor driver and dual-sensor wrapper. */
 #pragma once
 
 #include <stdbool.h>
@@ -57,7 +58,10 @@ typedef struct {
 // explicitly so the bus can serve however many sensors share it.
 void pmw3610_bus_init(uint8_t sdio_pin, uint8_t sclk_pin);
 
+// Reads one register from the sensor selected by its chip-select pin.
 uint8_t pmw3610_bus_read_register(uint8_t ncs_pin, uint8_t addr);
+
+// Writes one register on the sensor selected by its chip-select pin.
 void pmw3610_bus_write_register(uint8_t ncs_pin, uint8_t addr, uint8_t value);
 
 // Fast path: motion + 3 delta bytes + SQUAL (5 of the burst's 10 bytes;
@@ -90,6 +94,8 @@ void pmw3610_bus_set_resolution(uint8_t ncs_pin, uint8_t res_value);
 // skips those reads for callers that already fetched shutter some other
 // way (e.g. a full diagnostics burst already includes it).
 void pmw3610_bus_update_smart_surface_mode(uint8_t ncs_pin, bool *smart_disabled);
+
+// Applies Smart-mode hysteresis using a shutter value already read by the caller.
 void pmw3610_bus_apply_smart_surface_mode(uint8_t ncs_pin, uint16_t shutter, bool *smart_disabled);
 
 // Runs the datasheet SPI-port reset sequence, product-ID read, self-test,
@@ -116,6 +122,7 @@ typedef struct {
     uint16_t poll_count;
 } DualPmw3610;
 
+// Initializes the shared bus and both sensors from an explicit pin configuration.
 void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins);
 
 // Updates both sensors and the software CPI setting. CPI must be from 200

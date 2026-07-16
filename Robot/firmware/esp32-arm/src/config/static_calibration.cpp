@@ -1,3 +1,4 @@
+/* Loads and validates fixed PMW3610 calibration matrices from LittleFS JSON. */
 #include "config/static_calibration.h"
 
 #include <ArduinoJson.h>
@@ -8,6 +9,7 @@
 
 namespace {
 
+// Reads one matrix from JSON and rejects missing, non-finite, or singular values.
 bool read_matrix(JsonObjectConst json, SensorCalibration *matrix) {
     if (json.isNull()) return false;
 
@@ -21,12 +23,14 @@ bool read_matrix(JsonObjectConst json, SensorCalibration *matrix) {
            isfinite(matrix->m11) && isfinite(determinant) && fabsf(determinant) > 1e-6f;
 }
 
+// Checks that a stored matrix represents rotation without an embedded scale.
 bool rotation_only(const SensorCalibration *matrix) {
     const float scale = hypotf(matrix->m00, matrix->m10);
     return fabsf(scale - 1.0f) < 0.01f && fabsf(matrix->m00 - matrix->m11) < 0.01f &&
            fabsf(matrix->m01 + matrix->m10) < 0.01f;
 }
 
+// Applies the current CPI-derived scale to a unit rotation matrix.
 void apply_counts_per_mm(SensorCalibration *matrix, float counts_per_mm) {
     matrix->m00 *= counts_per_mm;
     matrix->m01 *= counts_per_mm;
@@ -36,6 +40,7 @@ void apply_counts_per_mm(SensorCalibration *matrix, float counts_per_mm) {
 
 }  // namespace
 
+// Loads, validates, scales, and returns the deployed calibration document.
 bool static_calibration_load(FusionConfig *config) {
     // Do not format on failure: the JSON is a required deployment artifact.
     if (config == nullptr || !LittleFS.begin(false)) return false;

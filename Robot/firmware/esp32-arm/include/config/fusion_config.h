@@ -1,3 +1,4 @@
+/* Defines calibration matrices and geometry used to fuse both optical sensors. */
 #pragma once
 
 #ifdef __cplusplus
@@ -14,6 +15,7 @@ typedef struct {
     float m00, m01, m10, m11;
 } SensorCalibration;
 
+// Combines both sensor calibrations with their physical separation.
 typedef struct {
     SensorCalibration cal_left;
     SensorCalibration cal_right;

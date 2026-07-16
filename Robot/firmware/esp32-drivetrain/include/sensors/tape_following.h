@@ -1,3 +1,4 @@
+/* Declares multiplexed tape sensor initialization and channel sampling. */
 #ifndef TAPE_FOLLOWING_H
 #define TAPE_FOLLOWING_H
 
@@ -10,6 +11,7 @@
 extern "C" {
 #endif
 
+// Number of tape sensor modules sampled through the shared channel selector.
 #define TAPE_MODULE_COUNT 3
 
 /* 
@@ -29,6 +31,7 @@ typedef struct {
     bool sensor_3;
 } TapeSensor;
 
+// Identifies the four multiplexer channels available on each tape module.
 typedef enum {
     TAPE_CH_0 = 0,
     TAPE_CH_1 = 1,

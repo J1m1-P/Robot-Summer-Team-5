@@ -1,3 +1,6 @@
+/*
+ * Declares small mathematical helpers shared by the robot firmware.
+ */
 #pragma once
 
 #ifdef __cplusplus

@@ -1,3 +1,4 @@
+/* Implements coordinated drivetrain lifecycle, motor commands, encoders, and safety. */
 #include "control/drivetrain.h"
 #include "control/drivetrain_kinematics.h"
 
@@ -10,17 +11,20 @@
 #include <robot_common/app_log.h>
 #include <robot_common/math_utils.h>
 
+// Validates a motor identifier before it is used as an array index.
 static esp_err_t check_motor_id(DrivetrainMotorId id) {
     if (id < 0 || id >= DRIVETRAIN_MOTOR_MAX) return ESP_ERR_INVALID_ARG;
     return ESP_OK;
 }
 
+// Preserves the first cleanup error while allowing later cleanup steps to run.
 static void record_first_error(esp_err_t *first_error, esp_err_t error) {
     if (*first_error == ESP_OK && error != ESP_OK) {
         *first_error = error;
     }
 }
 
+// Stores the latest successfully applied duty for each wheel.
 static void drivetrain_save_last_duties(Drivetrain *drivetrain, float fl_duty,
                                          float fr_duty, float bl_duty, float br_duty) {
     drivetrain->last_duty[DRIVETRAIN_MOTOR_FL] = fl_duty;
@@ -29,11 +33,13 @@ static void drivetrain_save_last_duties(Drivetrain *drivetrain, float fl_duty,
     drivetrain->last_duty[DRIVETRAIN_MOTOR_BR] = br_duty;
 }
 
+// Refreshes the command watchdog after a successful motor command.
 static void drivetrain_record_command(Drivetrain *drivetrain) {
     drivetrain->last_command_us = esp_timer_get_time();
     drivetrain->command_timeout_active = false;
 }
 
+// Validates hardware assignments, geometry, limits, and cross-device uniqueness.
 static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
     if (config == NULL) return false;
     if (!GPIO_IS_VALID_OUTPUT_GPIO(config->brk_pin)) return false;
@@ -83,6 +89,7 @@ static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
     return true;
 }
 
+// Stops initialized devices, engages the brake, and clears state after failed setup.
 static void drivetrain_cleanup_failed_init(Drivetrain *drivetrain) {
     for (int index = DRIVETRAIN_MOTOR_MAX - 1; index >= 0; index--) {
         EncoderDriver *encoder = &drivetrain->encoders[index];
@@ -116,6 +123,7 @@ static void drivetrain_cleanup_failed_init(Drivetrain *drivetrain) {
     memset(drivetrain, 0, sizeof(*drivetrain));
 }
 
+// Disables partially enabled motors and restores a braked state.
 static void drivetrain_cleanup_failed_enable(Drivetrain *drivetrain,
                                               int enabled_motor_count) {
     for (int index = enabled_motor_count - 1; index >= 0; index--) {
@@ -140,6 +148,7 @@ static void drivetrain_cleanup_failed_enable(Drivetrain *drivetrain,
     drivetrain_save_last_duties(drivetrain, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
+// Validates and initializes the brake, all motors, and all encoders with rollback.
 esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config) {
     if (drivetrain == NULL || !drivetrain_config_is_valid(config)) {
         return ESP_ERR_INVALID_ARG;
@@ -209,6 +218,7 @@ esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config
     return ESP_OK;
 }
 
+// Enables every motor before releasing the shared brake.
 esp_err_t drivetrain_enable(Drivetrain *drivetrain) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
@@ -244,6 +254,7 @@ esp_err_t drivetrain_enable(Drivetrain *drivetrain) {
     return ESP_OK;
 }
 
+// Brakes the drivetrain and leaves motor commands disabled.
 esp_err_t drivetrain_disable(Drivetrain *drivetrain) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
@@ -251,6 +262,7 @@ esp_err_t drivetrain_disable(Drivetrain *drivetrain) {
     return drivetrain_brake(drivetrain);
 }
 
+// Zeros wheel PWM, engages the hardware brake, and disables all motors.
 esp_err_t drivetrain_brake(Drivetrain *drivetrain) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
@@ -289,6 +301,7 @@ esp_err_t drivetrain_brake(Drivetrain *drivetrain) {
     return ESP_OK;
 }
 
+// Zeros wheel PWM and releases the brake for free movement.
 esp_err_t drivetrain_coast(Drivetrain *drivetrain) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
@@ -316,6 +329,7 @@ esp_err_t drivetrain_coast(Drivetrain *drivetrain) {
     return ESP_OK;
 }
 
+// Clamps and applies one wheel duty, then refreshes the command watchdog.
 esp_err_t drivetrain_set_motor_duty(Drivetrain *drivetrain,
                                      DrivetrainMotorId motor_id, float duty) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
@@ -344,6 +358,7 @@ esp_err_t drivetrain_set_motor_duty(Drivetrain *drivetrain,
     return ESP_OK;
 }
 
+// Applies a four-wheel command and brakes if any individual update fails.
 esp_err_t drivetrain_set_all_motor_duty(Drivetrain *drivetrain, float fl_duty,
                                          float fr_duty, float bl_duty,
                                          float br_duty) {
@@ -383,6 +398,7 @@ esp_err_t drivetrain_set_all_motor_duty(Drivetrain *drivetrain, float fl_duty,
     return ESP_OK;
 }
 
+// Converts a body-axis command through X-drive kinematics and applies it.
 esp_err_t drivetrain_set_body_duty(Drivetrain *drivetrain, float x_duty,
                                     float y_duty, float turn_duty) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
@@ -413,18 +429,22 @@ esp_err_t drivetrain_set_body_duty(Drivetrain *drivetrain, float x_duty,
         drivetrain, wheels.fl, wheels.fr, wheels.bl, wheels.br);
 }
 
+// Applies a pure forward or reverse body command.
 esp_err_t drivetrain_set_forward_duty(Drivetrain *drivetrain, float duty) {
     return drivetrain_set_body_duty(drivetrain, 0.0f, duty, 0.0f);
 }
 
+// Applies a pure turning body command.
 esp_err_t drivetrain_set_turn_duty(Drivetrain *drivetrain, float duty) {
     return drivetrain_set_body_duty(drivetrain, 0.0f, 0.0f, duty);
 }
 
+// Applies a pure lateral body command.
 esp_err_t drivetrain_set_strafe_duty(Drivetrain *drivetrain, float duty) {
     return drivetrain_set_body_duty(drivetrain, duty, 0.0f, 0.0f);
 }
 
+// Updates every wheel encoder and returns the first error encountered.
 esp_err_t drivetrain_encoder_update(Drivetrain *drivetrain) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
@@ -441,6 +461,7 @@ esp_err_t drivetrain_encoder_update(Drivetrain *drivetrain) {
     return ESP_OK;
 }
 
+// Returns a wheel's accumulated encoder count or zero for invalid input.
 int32_t drivetrain_get_encoder_accumulated_count(
     const Drivetrain *drivetrain, DrivetrainMotorId motor_id) {
     if (drivetrain == NULL || !drivetrain->initialized) return 0;
@@ -448,6 +469,7 @@ int32_t drivetrain_get_encoder_accumulated_count(
     return drivetrain->encoders[motor_id].accumulated_count;
 }
 
+// Returns a wheel's latest linear velocity or zero for invalid input.
 float drivetrain_get_encoder_velocity_mps(const Drivetrain *drivetrain,
                                            DrivetrainMotorId motor_id) {
     if (drivetrain == NULL || !drivetrain->initialized) return 0.0f;
@@ -455,6 +477,7 @@ float drivetrain_get_encoder_velocity_mps(const Drivetrain *drivetrain,
     return drivetrain->encoders[motor_id].velocity_mps;
 }
 
+// Coasts the drivetrain once when the enabled command watchdog expires.
 esp_err_t drivetrain_tick(Drivetrain *drivetrain, int64_t now_us) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;

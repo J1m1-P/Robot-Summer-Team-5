@@ -1,3 +1,4 @@
+/* Implements ESP32 GPIO and LEDC control for one bidirectional DC motor. */
 #include "drivers/motor_driver.h"
 
 #include <stddef.h>
@@ -9,10 +10,12 @@
 
 #include <robot_common/math_utils.h>
 
+// Shared LEDC speed mode and timer used by all drivetrain motor channels.
 #define MOTOR_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define MOTOR_LEDC_TIMER LEDC_TIMER_0
 
 
+// Validates GPIOs, PWM settings, duty limits, and channel range.
 bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
     if (config == NULL) return false;
     if (!GPIO_IS_VALID_OUTPUT_GPIO(config->pwm_pin)) return false;
@@ -27,7 +30,7 @@ bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
     return true;
 }
 
-// Precondition: duty must be non-negative and clamped
+// Converts a non-negative, clamped duty fraction into an LEDC counter value.
 static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
 
     // duty = (1.0f - duty);       // Account for the unknown PWM fliped behaviour
@@ -36,10 +39,7 @@ static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
     return (uint32_t)(duty * (float)max_count);
 }
 
-// Precondition: duty must be non-negative and clamped
-
-// For some unknow reason, the pwm duty logic is inversed, now HIGHER = SLOWER, so we need to invert it 
-
+// Applies a non-negative, clamped duty to the configured PWM channel.
 static esp_err_t motor_driver_set_pwm(MotorDriver *motor, float duty) {
     uint32_t duty_count = duty_to_ledc_count(motor, duty);
 
@@ -56,7 +56,7 @@ static esp_err_t motor_driver_set_pwm(MotorDriver *motor, float duty) {
     );
 }
 
-// true = forward, false = backward
+// Applies a logical direction while honoring the motor's inversion setting.
 static esp_err_t motor_driver_set_dir(MotorDriver *motor, bool dir) {
     bool pin_level;
 
@@ -71,7 +71,7 @@ static esp_err_t motor_driver_set_dir(MotorDriver *motor, bool dir) {
 }
 
 
-// Public API
+// Configures direction GPIO and the shared LEDC timer and channel.
 esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config) {
     if (motor == NULL || !motor_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
 
@@ -140,6 +140,7 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
     return ESP_OK;
 }
 
+// Enables duty commands for an initialized motor.
 esp_err_t motor_driver_enable(MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -148,6 +149,7 @@ esp_err_t motor_driver_enable(MotorDriver *motor) {
     return ESP_OK;
 }
 
+// Zeros PWM and disables future duty commands until re-enabled.
 esp_err_t motor_driver_disable(MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
 
@@ -159,6 +161,7 @@ esp_err_t motor_driver_disable(MotorDriver *motor) {
     return ESP_OK;
 }
 
+// Clamps and applies signed motor duty through direction and PWM outputs.
 esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
     if (motor == NULL || !motor->initialized || !motor->enabled) return ESP_ERR_INVALID_ARG;
     if (!isfinite(duty)) return ESP_ERR_INVALID_ARG;
@@ -190,6 +193,7 @@ esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty) {
     return ESP_OK;
 }
 
+// Zeros PWM and records that the motor is in a coasting state.
 esp_err_t motor_driver_coast(MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return ESP_ERR_INVALID_ARG;
     
@@ -202,21 +206,25 @@ esp_err_t motor_driver_coast(MotorDriver *motor) {
     return ESP_OK;
 }
 
+// Reports whether motor initialization completed.
 bool motor_driver_is_initialized(const MotorDriver *motor) {
     if (motor == NULL) return false; 
     return motor->initialized;
 }
 
+// Reports whether the motor currently accepts duty commands.
 bool motor_driver_is_enabled(const MotorDriver *motor) {
     if (motor == NULL) return false;
     return motor->enabled;
 }
 
+// Reports whether the last motor action requested coasting.
 bool motor_driver_is_coasting(const MotorDriver *motor) {
     if (motor == NULL) return false; 
     return motor->coasting;
 }
 
+// Returns the most recently applied signed duty or zero for a null motor.
 float motor_driver_get_current_duty(const MotorDriver *motor) {
     if (motor == NULL || !motor->initialized) return 0.0f; 
     return motor->current_duty;

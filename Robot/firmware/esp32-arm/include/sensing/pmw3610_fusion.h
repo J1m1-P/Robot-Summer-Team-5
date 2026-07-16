@@ -1,3 +1,4 @@
+/* Declares conversion and fusion of two PMW3610 motion samples into body motion. */
 #pragma once
 
 #include <stdbool.h>
@@ -25,6 +26,7 @@ typedef struct {
     float dtheta_rad;
 } DeltaPose;
 
+// Stores inverse calibration matrices and geometry for configured fusion.
 typedef struct {
     float inv_l[2][2];
     float inv_r[2][2];

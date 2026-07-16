@@ -1,11 +1,13 @@
+/* Defines PWM and direction settings for all four drivetrain motors. */
 #include "config/pin_map.h"
 #include "config/motor_config.h"
 
-// Change these
+// Shared PWM timing and maximum duty settings for every drivetrain motor.
 #define MOTOR_PWM_FREQUENCY     9000       // 9kHz
 #define MOTOR_PWM_RESOLUTION    12           // 2**12 resolution
 #define MOTOR_MAX_DUTY          1.0f       // 100% duty cycle
 
+// Front-left motor pin, PWM channel, and direction configuration.
 const MotorDriverConfig FL_MOTOR_CONFIG = {
     .pwm_pin = PIN_M1_PWM, 
     .dir_pin = PIN_M1_DIR, 
@@ -19,6 +21,7 @@ const MotorDriverConfig FL_MOTOR_CONFIG = {
     .max_duty = MOTOR_MAX_DUTY
 };
 
+// Front-right motor pin, PWM channel, and direction configuration.
 const MotorDriverConfig FR_MOTOR_CONFIG = {
     .pwm_pin = PIN_M2_PWM, 
     .dir_pin = PIN_M2_DIR, 
@@ -32,6 +35,7 @@ const MotorDriverConfig FR_MOTOR_CONFIG = {
     .max_duty = MOTOR_MAX_DUTY
 };
 
+// Back-left motor pin, PWM channel, and direction configuration.
 const MotorDriverConfig BL_MOTOR_CONFIG = {
     .pwm_pin = PIN_M3_PWM, 
     .dir_pin = PIN_M3_DIR, 
@@ -45,6 +49,7 @@ const MotorDriverConfig BL_MOTOR_CONFIG = {
     .max_duty = MOTOR_MAX_DUTY
 };
 
+// Back-right motor pin, PWM channel, and direction configuration.
 const MotorDriverConfig BR_MOTOR_CONFIG = {
     .pwm_pin = PIN_M4_PWM, 
     .dir_pin = PIN_M4_DIR, 

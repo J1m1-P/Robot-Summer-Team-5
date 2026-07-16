@@ -1,8 +1,10 @@
+/* Implements calibrated conversion and fusion of dual optical motion samples. */
 #include "sensing/pmw3610_fusion.h"
 
 #include <math.h>
 #include <string.h>
 
+// Inverts a validated 2-by-2 sensor calibration matrix.
 static void pmw3610_fusion_invert2x2(const SensorCalibration *m, float inv[2][2]) {
     float det = m->m00 * m->m11 - m->m01 * m->m10;
     inv[0][0] = m->m11 / det;
@@ -11,6 +13,7 @@ static void pmw3610_fusion_invert2x2(const SensorCalibration *m, float inv[2][2]
     inv[1][1] = m->m00 / det;
 }
 
+// Checks that a calibration matrix is finite and non-singular.
 static bool pmw3610_fusion_matrix_valid(const SensorCalibration *matrix) {
     if (matrix == NULL || !isfinite(matrix->m00) || !isfinite(matrix->m01) ||
         !isfinite(matrix->m10) || !isfinite(matrix->m11)) {
@@ -21,12 +24,14 @@ static bool pmw3610_fusion_matrix_valid(const SensorCalibration *matrix) {
     return isfinite(determinant) && fabsf(determinant) > 1e-6f;
 }
 
+// Converts one sensor's raw counts into forward and lateral millimeters.
 static void pmw3610_fusion_apply_matrix(const float inv[2][2], int16_t dx, int16_t dy,
                                          float *forward_mm, float *lateral_mm) {
     *forward_mm = inv[0][0] * dx + inv[0][1] * dy;
     *lateral_mm = inv[1][0] * dx + inv[1][1] * dy;
 }
 
+// Validates calibration, precomputes both inverses, and enables fusion.
 bool pmw3610_fusion_configure(Pmw3610Fusion *fusion, const FusionConfig *config) {
     if (fusion == NULL) return false;
     memset(fusion, 0, sizeof(*fusion));
@@ -44,6 +49,7 @@ bool pmw3610_fusion_configure(Pmw3610Fusion *fusion, const FusionConfig *config)
     return true;
 }
 
+// Converts and combines one pair of sensor samples into body-frame incremental motion.
 DeltaPose pmw3610_fusion_process(const Pmw3610Fusion *fusion, int16_t ldx, int16_t ldy, int16_t rdx,
                                   int16_t rdy) {
     DeltaPose d = {0};

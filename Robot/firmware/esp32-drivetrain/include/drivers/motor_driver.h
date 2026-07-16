@@ -1,3 +1,4 @@
+/* Declares PWM motor setup, duty control, enablement, and coasting state. */
 #pragma once
 
 #include <stdint.h>
@@ -35,21 +36,35 @@ typedef struct {
     float current_duty;                 // Current duty cycle for the motor (-max_duty to +max_duty)
 } MotorDriver;
 
-// Initialization
+// Checks whether a motor configuration is safe and internally consistent.
 bool motor_driver_config_is_valid(const MotorDriverConfig *config);
+
+// Configures the motor's direction GPIO and LEDC PWM channel.
 esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config);
+
+// Enables duty commands for an initialized motor.
 esp_err_t motor_driver_enable(MotorDriver *motor);
+
+// Sets duty to zero and rejects further commands until re-enabled.
 esp_err_t motor_driver_disable(MotorDriver *motor);
 
-// Motor Control
-esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty);         // Set the motor duty cycle (-max_duty to +max_duty), determines speed 
-esp_err_t motor_driver_coast(MotorDriver *motor);                        // Set the motor pwm to 0 and let it coast
+// Applies a signed duty command between negative and positive max_duty.
+esp_err_t motor_driver_set_duty(MotorDriver *motor, float duty);
 
-// Status 
-bool motor_driver_is_initialized(const MotorDriver *motor);     // Check if the motor driver is initialized
-bool motor_driver_is_enabled(const MotorDriver *motor);         // Check if the motor driver is enabled
-bool motor_driver_is_coasting(const MotorDriver *motor);        // Check if the motor is currently coasting
-float motor_driver_get_current_duty(const MotorDriver *motor);  // Get the current duty cycle of the motor
+// Sets PWM to zero while leaving the motor free to coast.
+esp_err_t motor_driver_coast(MotorDriver *motor);
+
+// Reports whether motor initialization completed.
+bool motor_driver_is_initialized(const MotorDriver *motor);
+
+// Reports whether the motor currently accepts duty commands.
+bool motor_driver_is_enabled(const MotorDriver *motor);
+
+// Reports whether the most recent action requested coasting.
+bool motor_driver_is_coasting(const MotorDriver *motor);
+
+// Returns the most recently applied signed duty.
+float motor_driver_get_current_duty(const MotorDriver *motor);
 
 
 #ifdef __cplusplus

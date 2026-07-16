@@ -1,3 +1,4 @@
+/* Declares cumulative pose integration and fault status for fused optical motion. */
 #pragma once
 
 #include <stdbool.h>
@@ -32,11 +33,13 @@ typedef enum {
     FAULT_BOTH_SENSORS_INVALID,
 } FaultReason;
 
+// Reports whether output is faulted and which sensor caused the latest fault.
 typedef struct {
     bool output_killed;
     FaultReason last_fault;
 } PoseStatus;
 
+// Holds cumulative pose and the latest optical-sensor fault state.
 typedef struct {
     float theta_rad;  // kept in radians internally; see pmw3610_pose_get()
     float x_mm;
@@ -46,6 +49,7 @@ typedef struct {
     FaultReason last_fault;
 } Pmw3610PoseManager;
 
+// Clears a pose manager to the origin with no active fault.
 void pmw3610_pose_init(Pmw3610PoseManager *pm);
 
 // Feed one cycle's fused delta plus that cycle's raw hardware validity
@@ -54,7 +58,10 @@ void pmw3610_pose_init(Pmw3610PoseManager *pm);
 // next valid cycle resumes integrating from that pose.
 void pmw3610_pose_update(Pmw3610PoseManager *pm, const DeltaPose *delta, bool l_valid, bool r_valid);
 
+// Returns the cumulative pose with heading converted to degrees.
 Pose pmw3610_pose_get(const Pmw3610PoseManager *pm);
+
+// Returns the current output and fault status.
 PoseStatus pmw3610_pose_get_status(const Pmw3610PoseManager *pm);
 
 // Resets cumulative pose to the origin when explicitly requested.

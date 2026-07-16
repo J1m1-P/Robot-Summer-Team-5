@@ -1,13 +1,16 @@
+/* Implements cumulative pose integration and invalid-sample fault tracking. */
 #include "sensing/pmw3610_pose.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+// Clears all pose and fault state.
 void pmw3610_pose_init(Pmw3610PoseManager *pm) {
     memset(pm, 0, sizeof(*pm));
 }
 
+// Integrates a valid delta at the midpoint heading or records an invalid-sensor fault.
 void pmw3610_pose_update(Pmw3610PoseManager *pm, const DeltaPose *delta, bool l_valid, bool r_valid) {
     if (!l_valid || !r_valid) {
         pm->output_killed = true;
@@ -27,6 +30,7 @@ void pmw3610_pose_update(Pmw3610PoseManager *pm, const DeltaPose *delta, bool l_
     pm->theta_rad += delta->dtheta_rad;
 }
 
+// Returns the accumulated position and converts internal heading to degrees.
 Pose pmw3610_pose_get(const Pmw3610PoseManager *pm) {
     Pose p;
     p.x_mm = pm->x_mm;
@@ -35,6 +39,7 @@ Pose pmw3610_pose_get(const Pmw3610PoseManager *pm) {
     return p;
 }
 
+// Returns a snapshot of the current output and fault state.
 PoseStatus pmw3610_pose_get_status(const Pmw3610PoseManager *pm) {
     PoseStatus s;
     s.output_killed = pm->output_killed;
@@ -42,17 +47,20 @@ PoseStatus pmw3610_pose_get_status(const Pmw3610PoseManager *pm) {
     return s;
 }
 
+// Resets cumulative position and heading without changing fault state.
 void pmw3610_pose_zero(Pmw3610PoseManager *pm) {
     pm->theta_rad = 0.0f;
     pm->x_mm = 0.0f;
     pm->y_mm = 0.0f;
 }
 
+// Clears the displayed fault without modifying cumulative pose.
 void pmw3610_pose_clear_fault(Pmw3610PoseManager *pm) {
     pm->output_killed = false;
     pm->last_fault = FAULT_NONE;
 }
 
+// Formats the current pose as comma-separated values when the buffer is large enough.
 int pmw3610_pose_to_csv(const Pmw3610PoseManager *pm, char *buf, size_t buf_len) {
     Pose p = pmw3610_pose_get(pm);
     int written = snprintf(buf, buf_len, "%.2f,%.2f,%.2f", p.x_mm, p.y_mm, p.heading_deg);

@@ -1,3 +1,7 @@
+/*
+ * Public interface for sending and receiving framed packets over an ESP32 UART.
+ * The module owns the parser state and basic link diagnostics.
+ */
 #pragma once
 
 #include <stdbool.h>
@@ -13,6 +17,7 @@
 extern "C" {
 #endif
 
+// Identifies the byte currently expected by the packet parser.
 typedef enum {
     PACKET_PARSE_MAGIC_0 = 0,
     PACKET_PARSE_MAGIC_1,
@@ -23,6 +28,7 @@ typedef enum {
     PACKET_PARSE_CHECKSUM
 } PacketParserState;
 
+// Stores an in-progress packet while bytes arrive from the UART.
 typedef struct {
     PacketParserState state;
     uint8_t version;
@@ -33,6 +39,7 @@ typedef struct {
     uint8_t payload[PACKET_MAX_PAYLOAD_SIZE];
 } PacketParser;
 
+// Defines the UART peripheral, pins, speed, and driver buffer sizes for a link.
 typedef struct {
     uart_port_t uart_num;
     gpio_num_t tx_pin;
@@ -42,6 +49,7 @@ typedef struct {
     size_t tx_buffer_size;
 } UartLinkConfig;
 
+// Holds the runtime state, latest packet, and diagnostic counters for a UART link.
 typedef struct {
     const UartLinkConfig *config;
     PacketParser parser;
@@ -55,16 +63,24 @@ typedef struct {
     PacketFrame latest_packet;
 } UartLink;
 
-// Zero-initialize the runtime object before its first init call:
-// UartLink link = {0};
+// Installs and configures the UART driver. The link must be zero-initialized before its first call.
+// Example: UartLink link = {0};
 esp_err_t uart_link_init(UartLink *link, const UartLinkConfig *config);
+
+// Removes the UART driver and clears the link's runtime state.
 esp_err_t uart_link_deinit(UartLink *link);
 
+// Reads available UART bytes and advances the packet parser without blocking.
 esp_err_t uart_link_update(UartLink *link);
+
+// Encodes and writes one framed packet to the configured UART.
 esp_err_t uart_link_send(UartLink *link, PacketMessageType message_type, const uint8_t *payload,
                          uint8_t payload_len);
+
+// Copies out the latest complete packet and marks it as consumed.
 esp_err_t uart_link_take_packet(UartLink *link, PacketFrame *packet_out);
 
+// Reports whether a complete packet is waiting to be consumed.
 bool uart_link_has_packet(const UartLink *link);
 
 #ifdef __cplusplus

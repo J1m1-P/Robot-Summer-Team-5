@@ -1,3 +1,4 @@
+/* Declares loading of fixed optical-sensor calibration from LittleFS. */
 #pragma once
 
 #include <stdbool.h>

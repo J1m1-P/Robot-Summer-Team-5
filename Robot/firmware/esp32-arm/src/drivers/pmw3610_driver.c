@@ -1,3 +1,4 @@
+/* Implements bit-banged PMW3610 communication and dual-sensor polling. */
 #include "drivers/pmw3610_driver.h"
 
 #include <string.h>
@@ -33,9 +34,11 @@
 #define PMW3610_REG_RES_STEP         0x85  // page-1 only: CPI + SWAPXY/INV_X/INV_Y
 #define PMW3610_REG_SMART_MODE       0x32
 
+// Stores the shared bit-banged bus pins configured during bus initialization.
 static uint8_t s_sdio_pin = 0;
 static uint8_t s_sclk_pin = 0;
 
+// Reconfigures a bus pin as an output without pulls or interrupts.
 static void pmw3610_gpio_set_output(uint8_t pin) {
     gpio_config_t config = {
         .pin_bit_mask = (1ULL << pin),
@@ -47,6 +50,7 @@ static void pmw3610_gpio_set_output(uint8_t pin) {
     gpio_config(&config);
 }
 
+// Reconfigures a bus pin as an input without pulls or interrupts.
 static void pmw3610_gpio_set_input(uint8_t pin) {
     gpio_config_t config = {
         .pin_bit_mask = (1ULL << pin),
@@ -58,6 +62,7 @@ static void pmw3610_gpio_set_input(uint8_t pin) {
     gpio_config(&config);
 }
 
+// Clocks one byte to the sensor most-significant bit first.
 static void pmw3610_write_byte(uint8_t value) {
     pmw3610_gpio_set_output(s_sdio_pin);
     for (int8_t i = 7; i >= 0; i--) {
@@ -70,6 +75,7 @@ static void pmw3610_write_byte(uint8_t value) {
     }
 }
 
+// Clocks one byte from the sensor most-significant bit first.
 static uint8_t pmw3610_read_byte(void) {
     uint8_t value = 0;
     for (int8_t i = 7; i >= 0; i--) {
@@ -82,6 +88,7 @@ static uint8_t pmw3610_read_byte(void) {
     return value;
 }
 
+// Converts the raw motion byte and surface quality into named status fields.
 static Pmw3610Status pmw3610_decode_status(uint8_t motion_byte, uint8_t squal) {
     Pmw3610Status s;
     s.motion = motion_byte & 0x80;
@@ -93,11 +100,13 @@ static Pmw3610Status pmw3610_decode_status(uint8_t motion_byte, uint8_t squal) {
     return s;
 }
 
+// Accepts a motion sample only when tracking quality and laser state are valid.
 bool pmw3610_status_valid(const Pmw3610Status *status) {
     return !status->overflow && status->laser_power_valid && !status->laser_fault &&
            status->squal >= PMW3610_SQUAL_MIN;
 }
 
+// Stores and initializes the shared SDIO and clock pins.
 void pmw3610_bus_init(uint8_t sdio_pin, uint8_t sclk_pin) {
     s_sdio_pin = sdio_pin;
     s_sclk_pin = sclk_pin;
@@ -105,6 +114,7 @@ void pmw3610_bus_init(uint8_t sdio_pin, uint8_t sclk_pin) {
     gpio_set_level((gpio_num_t)s_sclk_pin, 0);
 }
 
+// Performs one register read from the selected sensor.
 uint8_t pmw3610_bus_read_register(uint8_t ncs_pin, uint8_t addr) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(addr & 0x7F);  // MSB=0 for read
@@ -116,6 +126,7 @@ uint8_t pmw3610_bus_read_register(uint8_t ncs_pin, uint8_t addr) {
     return val;
 }
 
+// Performs one register write to the selected sensor.
 void pmw3610_bus_write_register(uint8_t ncs_pin, uint8_t addr, uint8_t value) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(addr | 0x80);  // MSB=1 for write
@@ -124,6 +135,7 @@ void pmw3610_bus_write_register(uint8_t ncs_pin, uint8_t addr, uint8_t value) {
     esp_rom_delay_us(2);
 }
 
+// Reads the fast motion burst and reconstructs signed 12-bit deltas.
 void pmw3610_bus_burst_read_motion(uint8_t ncs_pin, int16_t *dx, int16_t *dy, Pmw3610Status *status) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(PMW3610_REG_BURST_READ);
@@ -147,6 +159,7 @@ void pmw3610_bus_burst_read_motion(uint8_t ncs_pin, int16_t *dx, int16_t *dy, Pm
     *dy = y;
 }
 
+// Reads and decodes the complete diagnostic burst from one sensor.
 Pmw3610Diagnostics pmw3610_bus_burst_read_diagnostics(uint8_t ncs_pin) {
     gpio_set_level((gpio_num_t)ncs_pin, 0);
     pmw3610_write_byte(PMW3610_REG_BURST_READ);
@@ -182,6 +195,7 @@ Pmw3610Diagnostics pmw3610_bus_burst_read_diagnostics(uint8_t ncs_pin) {
     return d;
 }
 
+// Uses the required page-switch sequence to update sensor resolution.
 void pmw3610_bus_set_resolution(uint8_t ncs_pin, uint8_t res_value) {
     // Datasheet page 36: RES_STEP (0x85) lives on SPI page 1, requiring the
     // documented clock-enable + page-switch sequence around the write.
@@ -193,6 +207,7 @@ void pmw3610_bus_set_resolution(uint8_t ncs_pin, uint8_t res_value) {
     pmw3610_bus_write_register(ncs_pin, PMW3610_REG_SPI_CLK_ON_REQ, 0xB5);  // disable SPI clock
 }
 
+// Applies datasheet Smart-mode hysteresis using a supplied shutter reading.
 void pmw3610_bus_apply_smart_surface_mode(uint8_t ncs_pin, uint16_t shutter, bool *smart_disabled) {
     // Datasheet page 19 pseudocode, applied literally: only acts when the
     // shutter high byte is exactly zero (i.e. shutter < 256).
@@ -214,6 +229,7 @@ void pmw3610_bus_apply_smart_surface_mode(uint8_t ncs_pin, uint16_t shutter, boo
     }
 }
 
+// Reads shutter registers and updates Smart mode for the selected sensor.
 void pmw3610_bus_update_smart_surface_mode(uint8_t ncs_pin, bool *smart_disabled) {
     uint8_t shutter_hi = pmw3610_bus_read_register(ncs_pin, PMW3610_REG_SHUTTER_HIGHER);
     uint8_t shutter_lo = pmw3610_bus_read_register(ncs_pin, PMW3610_REG_SHUTTER_LOWER);
@@ -221,6 +237,7 @@ void pmw3610_bus_update_smart_surface_mode(uint8_t ncs_pin, bool *smart_disabled
     pmw3610_bus_apply_smart_surface_mode(ncs_pin, shutter, smart_disabled);
 }
 
+// Resets, verifies, configures, and reports one sensor during startup.
 void pmw3610_bus_init_sensor(uint8_t ncs_pin, const char *label) {
     pmw3610_gpio_set_output(ncs_pin);
     gpio_set_level((gpio_num_t)ncs_pin, 1);
@@ -256,6 +273,7 @@ void pmw3610_bus_init_sensor(uint8_t ncs_pin, const char *label) {
              pmw3610_get_cpi());
 }
 
+// Clears dual-sensor state and initializes the bus and both devices.
 void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins) {
     memset(dual, 0, sizeof(*dual));
     dual->pins = *pins;
@@ -266,6 +284,7 @@ void dual_pmw3610_init(DualPmw3610 *dual, const PmwPinConfig *pins) {
     pmw3610_bus_init_sensor(pins->ncs_r_pin, "R");
 }
 
+// Validates a CPI value and applies its resolution step to both sensors.
 bool dual_pmw3610_set_cpi(DualPmw3610 *dual, float cpi) {
     if (dual == NULL || !pmw3610_set_cpi(cpi)) return false;
 
@@ -275,6 +294,7 @@ bool dual_pmw3610_set_cpi(DualPmw3610 *dual, float cpi) {
     return true;
 }
 
+// Polls both sensors with alternating order, validates samples, and handles maintenance.
 void dual_pmw3610_poll(DualPmw3610 *dual, int16_t *ldx, int16_t *ldy, bool *l_valid, int16_t *rdx,
                         int16_t *rdy, bool *r_valid) {
     Pmw3610Status l_status, r_status;

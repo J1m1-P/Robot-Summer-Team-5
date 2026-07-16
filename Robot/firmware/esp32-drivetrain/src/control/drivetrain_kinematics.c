@@ -1,7 +1,9 @@
+/* Implements X-drive mixing from body-axis commands to normalized wheel duties. */
 #include "control/drivetrain_kinematics.h"
 
 #include <math.h>
 
+// Scales all wheel duties together when any magnitude exceeds the configured limit.
 static void normalize_wheel_duty(DrivetrainWheelDuty *wheels, float max_duty) {
 
     float max_mag = fabsf(wheels->fl);
@@ -19,6 +21,7 @@ static void normalize_wheel_duty(DrivetrainWheelDuty *wheels, float max_duty) {
     }
 }
 
+// Validates and mixes a body-axis duty command into normalized X-drive wheel duties.
 esp_err_t drivetrain_kinematics_body_to_wheels(const DrivetrainKinematicsConfig *config, const DrivetrainBodyDuty *body, DrivetrainWheelDuty *wheels) {
     if (config == NULL || body == NULL || wheels == NULL) return ESP_ERR_INVALID_ARG;
     if (!isfinite(body->x) || !isfinite(body->y) || !isfinite(body->turn)) return ESP_ERR_INVALID_ARG;

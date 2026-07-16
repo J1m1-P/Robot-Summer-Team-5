@@ -1,3 +1,4 @@
+/* Runs the current drivetrain motor bench-test firmware. */
 #include <Arduino.h>
 
 #include "esp_err.h"
@@ -6,9 +7,11 @@
 #include "drivers/motor_driver.h"
 #include "config/motor_config.h"
 
+// Runtime state for the single-motor bench test.
 static MotorDriver motor1 = {0};
 static bool motor_ready = false;
 
+// Initializes logging and enables the front-left motor for bench testing.
 void setup()
 {
     Serial.begin(115200);
@@ -37,6 +40,7 @@ void setup()
     motor_ready = true;
 }
 
+// Repeatedly commands a fixed duty until a motor error occurs.
 void loop()
 {
     if (!motor_ready) {

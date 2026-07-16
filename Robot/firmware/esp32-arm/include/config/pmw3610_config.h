@@ -1,3 +1,4 @@
+/* Defines PMW3610 pin assignments and configurable tracking parameters. */
 #pragma once
 
 #include <stdbool.h>
@@ -23,9 +24,16 @@ typedef struct {
 // RES_STEP values are 200 CPI apart (0x1=200 ... 0x10=3200).
 #define PMW3610_DEFAULT_CPI 3200.0f
 
+// Validates and stores a new CPI value for later sensor configuration.
 bool pmw3610_set_cpi(float cpi);
+
+// Returns the currently configured CPI value.
 float pmw3610_get_cpi(void);
+
+// Converts a valid CPI value to the PMW3610 RES_STEP register format.
 uint8_t pmw3610_cpi_to_res_step(float cpi);
+
+// Returns the RES_STEP value for the current CPI setting.
 uint8_t pmw3610_get_res_step(void);
 
 // Minimum SQUAL (surface quality / feature count) for a reading to be
