@@ -1,315 +1,243 @@
 # Firmware Fix Plan
 
-> Updated from the firmware review on 2026-07-15.
+> Re-audited on 2026-07-16 against the current repository.
 >
-> Scope: `Robot/firmware/esp32-drivetrain`, `Robot/firmware/esp32-arm`, and
-> `Robot/firmware/lib/robot-common`.
+> Scope: `Robot/firmware/esp32-drivetrain`, `Robot/firmware/esp32-arm`,
+> `Robot/firmware/lib/robot-common`, firmware configuration, calibration tooling,
+> documentation, and test directories.
 >
-> Out of scope for this plan: calibration files and FreeRTOS/task/mutex changes.
-
-## Current Status
-
-Both production `main.cpp` files are temporary test programs and are not treated as
-the final firmware entry points. Their replacement should happen only after the
-shared odometry protocol and driver safety behavior are agreed upon.
-
-### Completed Fixes
-
-- `motor_driver_init()` now returns `esp_err_t` consistently.
-- UART, packet framing, logging, and common robot types have been moved into the
-  shared `robot-common` library.
-- The shared logging tag table contains the union of tags used by both boards.
-- `app_log_tag()` now returns `"unknown"` for invalid or missing table entries.
-- PMW3610 pose faults now preserve the last valid pose, skip the invalid delta,
-  and resume from the retained pose on the next valid sample.
-- Motor direction and PWM operations now propagate errors from `gpio_set_level()`,
-  `ledc_set_duty()`, and `ledc_update_duty()`.
-- UART and I2C headers now document that runtime objects must be zero-initialized
-  before their first initialization call.
-- The temporary drivetrain `main.cpp` no longer logs initialization or enablement
-  success after a failure, and it stops issuing commands after a runtime error.
-- Drivetrain configuration is validated before hardware initialization.
-- Drivetrain initialization and enablement now roll back earlier successful steps
-  when a later motor or encoder operation fails.
-- Drivetrain startup keeps the brake engaged until enablement completes.
-- Duty setters no longer release the brake implicitly.
-- Partial motor-command failures force the entire drivetrain into a braked,
-  disabled state.
-- `drivetrain_tick()` now coasts the drivetrain after 250 ms without a successful
-  motor command.
-- Float `clamp()` is provided once by `robot-common` and reused by the drivetrain
-  and motor driver.
-- Cumulative odometry packet encoding and decoding are shared through
-  `robot-common`, including a sequence number and validity flag.
-
-### Still Incomplete
-
-- Arm production `main.cpp` is still an Arduino stub.
-- Drivetrain production `main.cpp` is still a single-motor bench program.
-- No drivetrain-side odometry receiver exists.
-- Stepper movement is blocking and the stepper module has header/configuration
-  problems.
-- Tape PID configuration and fault handling need hardening.
-- UART diagnostic counters exist but are not surfaced periodically.
-- The drivetrain PlatformIO configuration contains a machine-specific upload port.
-
-## Adopted Architecture Decisions
-
-The implementation now uses these decisions:
-
-1. Startup and failure rollback engage the brake. Normal duty setters cannot
-   release it; movement resumes through `drivetrain_enable()` or an explicit coast.
-2. Motor commands time out after 250 ms and cause the drivetrain to coast.
-3. The shared odometry protocol carries cumulative pose rather than per-cycle
-   deltas.
-4. The odometry payload includes a sequence number for dropped-packet and reset
-   detection.
-
-The 100 ms drivetrain-side odometry freshness timeout remains to be implemented.
-
-## Session 1: Drivetrain Safety and State (Implemented)
-
-### 1. Define Brake Semantics
-
-Recommended behavior:
-
-- `drivetrain_init()` engages the brake before initializing motors or encoders.
-- `drivetrain_enable()` enables all motors and releases the brake only after every
-  motor enables successfully.
-- Duty setters change duty only; they do not silently change brake state.
-- `drivetrain_brake()` sets all duties to zero and engages the brake.
-- The brake remains engaged until another explicit `drivetrain_enable()` call.
-- `drivetrain_coast()` releases the brake and sets all PWM outputs to zero because
-  free movement is part of the meaning of coasting.
-
-This keeps movement natural while ensuring that an intentional brake command cannot
-be silently undone by a later duty setter.
-
-### 2. Implement the Command Watchdog
-
-`drivetrain_tick()` is a dead-man watchdog. It must be called every main-loop cycle,
-even when no new command arrives.
-
-Add the following runtime state to `Drivetrain`:
-
-```c
-int64_t last_command_us;
-bool command_timeout_active;
-```
-
-Every successful duty command records the current timestamp. A failed command must
-not refresh the timestamp.
-
-Recommended behavior:
-
-```c
-#define DRIVETRAIN_COMMAND_TIMEOUT_US 250000
-
-esp_err_t drivetrain_tick(Drivetrain *drivetrain, int64_t now_us) {
-    if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
-    if (!drivetrain->initialized) return ESP_ERR_INVALID_STATE;
-    if (!drivetrain->enabled) return ESP_OK;
-
-    if (drivetrain->last_command_us == 0 ||
-        now_us - drivetrain->last_command_us > DRIVETRAIN_COMMAND_TIMEOUT_US) {
-        if (!drivetrain->command_timeout_active) {
-            esp_err_t err = drivetrain_coast(drivetrain);
-            if (err != ESP_OK) return err;
-            drivetrain->command_timeout_active = true;
-        }
-    }
-
-    return ESP_OK;
-}
-```
-
-A successful new command clears `command_timeout_active`.
-
-### 3. Add Initialization Rollback
-
-Before touching hardware, validate every drivetrain, motor, and encoder
-configuration.
-
-During initialization:
-
-1. Engage the brake.
-2. Track how many motors and encoders initialize or start successfully.
-3. If a later operation fails, stop all started encoders in reverse order.
-4. Coast and disable all initialized motors in reverse order.
-5. Keep the brake engaged.
-6. Clear the drivetrain runtime object.
-7. Return the original error that triggered rollback.
-
-Driver cleanup should be best effort: attempt every cleanup operation while
-retaining the first error for reporting.
-
-Use the same approach in `drivetrain_enable()`. If motor three fails to enable,
-disable motors zero through two and leave the brake engaged.
-
-For `drivetrain_set_all_motor_duty()`:
-
-- Validate and clamp every input before applying any output.
-- If one motor update fails after earlier motors changed, immediately brake or coast
-  all motors rather than leaving mixed wheel duties.
-- Return the original motor update error.
-
-### 4. Align Error Codes
-
-- Null pointers and invalid values return `ESP_ERR_INVALID_ARG`.
-- Calls made before initialization or while disabled return
-  `ESP_ERR_INVALID_STATE`.
-- Hardware errors propagate unchanged.
-
-## Session 2: Shared Odometry Protocol (Packet Implemented)
-
-### 1. Shared Packet (Implemented)
-
-The old arm-specific `delta_pose_packet.*` was not moved because it depended on the
-arm-only `DeltaPose` sensing type. It was replaced by a transport-only packet in
-`robot-common`.
-
-Current structure:
-
-```text
-Robot/firmware/lib/robot-common/
-├── include/robot_common/odometry_packet.h
-└── src/odometry_packet.c
-```
-
-The shared wire type depends only on common types:
-
-```c
-typedef struct {
-    float x_mm;
-    float y_mm;
-    float theta_rad;
-    uint32_t sequence;
-    bool valid;
-} OdometryPacket;
-```
-
-The module provides:
-
-```c
-esp_err_t odometry_packet_send(UartLink *link, const OdometryPacket *packet);
-bool odometry_packet_is(const PacketFrame *frame);
-esp_err_t odometry_packet_decode(const PacketFrame *frame,
-                                 OdometryPacket *packet_out);
-```
-
-Each field is serialized explicitly in little-endian order. The C struct is not
-transmitted directly because struct padding is compiler-dependent.
-
-The arm-specific packet files and empty drivetrain placeholders have been removed.
-Packet encoding and decoding now exist only in `robot-common`.
-
-### 2. Arm-Side Cumulative Pose
-
-The arm should:
-
-1. Poll both PMW3610 sensors.
-2. Fuse the current sample into a `DeltaPose`.
-3. Update `Pmw3610PoseManager` only when the sample is valid.
-4. Preserve the previous pose when either sensor is invalid.
-5. Increment the packet sequence number for each transmitted packet.
-6. Send cumulative pose with `valid=false` during invalid sensor samples.
-
-The private `DeltaPose` type remains in the arm sensing module. Only cumulative pose
-crosses the board boundary.
-
-### 3. Drivetrain Receiver and UART Freshness
-
-Create a drivetrain odometry receiver that owns the last decoded packet timestamp.
-Sensor validity and transport freshness should ideally be tracked separately, with
-`RobotOdometry.valid` representing both conditions.
-
-Recommended timeout implementation:
-
-```c
-#define ODOMETRY_TIMEOUT_US 100000
-
-typedef struct {
-    RobotOdometry odometry;
-    int64_t last_packet_us;
-    uint32_t last_sequence;
-    bool has_sequence;
-} OdometryReceiver;
-
-esp_err_t odometry_update(OdometryReceiver *receiver, UartLink *link) {
-    if (receiver == NULL || link == NULL) return ESP_ERR_INVALID_ARG;
-
-    esp_err_t err = uart_link_update(link);
-    if (err != ESP_OK) return err;
-
-    PacketFrame frame;
-    while (uart_link_take_packet(link, &frame) == ESP_OK) {
-        OdometryPacket packet;
-        if (odometry_packet_decode(&frame, &packet) != ESP_OK) continue;
-
-        receiver->last_packet_us = esp_timer_get_time();
-        receiver->last_sequence = packet.sequence;
-        receiver->has_sequence = true;
-
-        receiver->odometry.pose.x_m = packet.x_mm / 1000.0f;
-        receiver->odometry.pose.y_m = packet.y_mm / 1000.0f;
-        receiver->odometry.pose.theta_rad = packet.theta_rad;
-        receiver->odometry.valid = packet.valid;
-        receiver->odometry.timestamp_ms =
-            (uint32_t)(receiver->last_packet_us / 1000);
-    }
-
-    int64_t now_us = esp_timer_get_time();
-    if (receiver->last_packet_us == 0 ||
-        now_us - receiver->last_packet_us > ODOMETRY_TIMEOUT_US) {
-        receiver->odometry.valid = false;
-    }
-
-    return ESP_OK;
-}
-```
-
-Sequence gaps should increment a diagnostic counter. A sequence reset should be
-logged because it may indicate that the arm board rebooted.
-
-### 4. Surface UART Diagnostics
-
-Periodically report changes to:
-
-- `packets_received`
-- `packets_overwritten`
-- `checksum_errors`
-- `parse_errors`
-- Odometry timeout count
-- Sequence gap count
-
-Rate-limit these logs so an unhealthy link does not flood the control loop.
-
-## Session 3: Non-Blocking Stepper Drivers
-
-### 1. Repair Header and Configuration Ownership
-
-- Remove `#include "drivers/stepper_driver.h"` from `stepper_config.h`.
-- Keep `StepperConfig` in `stepper_config.h`.
-- Remove private `static` helper declarations from `stepper_driver.h`.
-- Replace inline configuration objects with `extern const` declarations.
-- Add `src/config/stepper_config.cpp` containing the definitions.
-- Use `PIN_STEP1`, `PIN_STEP1_DIR`, and the remaining pin macros from
-  `pin_map.h`; do not duplicate numeric pin values.
-
-### 2. Replace Blocking Movement
-
-Recommended runtime state:
+> This was a static code and clean-build review. Hardware behavior has not been
+> verified by this audit.
+
+## Executive Status
+
+The reusable foundations are substantially improved: shared UART and I2C
+transports exist, cumulative odometry has a defined wire format, drivetrain
+safety behavior is implemented, and the optical sensor calibration/debug tools
+build. The firmware is not production-complete because neither production
+`main.cpp` integrates those modules.
+
+The most immediate functional blocker is the deployed optical calibration file.
+`data/calibration.json` does not contain the required `baseline_mm`, so
+`static_calibration_load()` rejects it and optical fusion remains disabled.
+
+### Audit Results
+
+- Clean drivetrain production build: **passes**.
+- Clean arm production build: **passes**.
+- Clean arm `optical_debug` build: **passes**.
+- Clean arm `calibration` build: **passes**.
+- Arm builds warn that the four inline stepper configuration variables require
+  C++17, while the current build uses an older language mode.
+- `tools/calibrate_optical.py --help`: **passes**, including the `pyserial`
+  import in the current environment.
+- `data/calibration.json` parses as JSON but is missing required
+  `baseline_mm`: **fails application schema**.
+- Both PlatformIO `test/` directories contain only template READMEs: **no
+  automated firmware tests exist**.
+- Working tree was clean before this plan update.
+
+## Verified Completed Work
+
+### Shared `robot-common` Library
+
+- Logging tags and convenience macros are shared by both boards.
+- `app_log_tag()` safely returns `"unknown"` for invalid or unmapped tags.
+- Common robot state and command types are centralized.
+- Float `clamp()` has one shared implementation.
+- UART framing, parsing, checksum validation, latest-packet storage, and link
+  counters are centralized.
+- The I2C master bus and addressed-device API were moved out of the drivetrain
+  project into `robot-common`, so both ESP32 targets can use it.
+- Cumulative odometry packets are encoded and decoded explicitly in
+  little-endian order rather than transmitting a padded C struct.
+- The odometry payload includes cumulative position, heading, a sequence number,
+  and a sensor-validity flag.
+- Shared and board-specific C/C++ files now have file descriptions and concise
+  comments for functions and definitions.
+
+### Drivetrain Safety and Drivers
+
+- Motor initialization returns `esp_err_t` consistently.
+- Motor GPIO and LEDC failures propagate to callers.
+- Motor, encoder, and drivetrain configurations receive basic validation before
+  use.
+- Drivetrain initialization engages the brake before device setup.
+- Partial drivetrain initialization stops started encoders, disables initialized
+  motors, re-engages the brake, and clears runtime state.
+- Partial drivetrain enablement disables already-enabled motors and restores the
+  braked state.
+- Motor duty setters do not silently release the brake.
+- A partial four-motor command failure invokes the safe braked/disabled state.
+- `drivetrain_brake()` and `drivetrain_coast()` have distinct explicit behavior.
+- `drivetrain_tick()` implements a 250 ms command watchdog and coasts once on
+  timeout.
+- X-drive body-to-wheel mixing validates inputs and scales all wheel duties
+  together to the configured maximum.
+- Encoder accumulation avoids the legacy PCNT 16-bit range by periodically
+  flushing hardware deltas into a 32-bit software count.
+
+### Arm Optical Sensing and Calibration Support
+
+- The PMW3610 driver supports two devices on a shared bit-banged three-wire bus.
+- Poll order alternates to reduce fixed left/right timing bias.
+- Motion validity checks overflow, laser status, and surface quality.
+- Fusion uses per-sensor calibration matrices and physical sensor separation.
+- Pose integration skips invalid deltas, preserves the last valid pose, and
+  resumes on the next valid sample.
+- Separate production, optical-debug, and calibration PlatformIO environments
+  exist.
+- The calibration firmware emits machine-readable raw sensor deltas.
+- The laptop calibration helper collects multiple passes and fits unit rotation
+  matrices.
+- The optical debug firmware reports full sensor diagnostics and fused pose when
+  calibration loads successfully.
+
+## Current Critical Gaps
+
+### 1. Production Entry Points Are Still Placeholders
+
+- Arm `src/main.cpp` is the default Arduino arithmetic stub. It does not
+  initialize PMW3610 sensors, load calibration, fuse pose, send odometry, service
+  steppers, or initialize I2C lidar devices.
+- Drivetrain `src/main.cpp` directly runs one front-left motor at fixed duty. It
+  does not construct `Drivetrain`, call `drivetrain_tick()`, receive odometry,
+  update encoders, read tape sensors, or run a controller.
+- That bench loop commands `0.5` duty directly through `MotorDriver`, bypassing
+  the full drivetrain's `0.4` limit and shared brake-pin ownership.
+- The implemented drivetrain safety layer is therefore not exercised by the
+  production executable.
+
+### 2. Optical Calibration Deployment Is Invalid
+
+- `static_calibration_load()` requires a finite positive `baseline_mm`.
+- The checked-in `data/calibration.json` contains only `left` and `right`
+  matrices, so loading always fails.
+- The calibration helper prints only the two matrices. It tells the operator to
+  preserve a measured baseline, but the current file has no baseline to preserve.
+- Measure the sensor center-to-center separation, add it to the JSON, upload the
+  LittleFS image, and verify the debug environment enables fusion.
+- Consider adding a required `--baseline-mm` option to the helper so its output is
+  always a complete deployable document.
+
+### 3. End-to-End Odometry Transport Is Not Integrated
+
+- The shared packet module exists, but the arm production loop never sends it.
+- No drivetrain odometry receiver exists.
+- `RobotOdometry` is defined but unused.
+- No 100 ms transport freshness timeout is implemented.
+- Sequence gaps and arm resets are not detected or reported.
+- UART counters are collected but never surfaced periodically.
+- `UartLink` stores only the latest complete frame, not a queue. Calling
+  `uart_link_update()` can overwrite earlier frames before one
+  `uart_link_take_packet()` call. Receiver design must explicitly accept
+  latest-only semantics or change the UART layer to queue/callback delivery.
+
+### 4. Hardware Safety Is Not Yet Verified
+
+- Motor PWM polarity is still marked uncertain in the implementation.
+- Brake active level and coast/brake behavior have not been confirmed on hardware.
+- Motor and encoder direction inversion settings are unverified.
+- X-drive wheel ordering and body-command signs are unverified.
+- The 250 ms watchdog exists but has no production-loop caller or hardware test.
+
+## Remaining Workstreams
+
+### A. Repair Calibration and Documentation First
+
+1. Measure and add `baseline_mm` to `data/calibration.json`.
+2. Upload the filesystem and confirm `static_calibration_load()` succeeds.
+3. Run known forward, lateral, and in-place rotation checks in `optical_debug`.
+4. Update `optical_readme.md`: invalid optical samples preserve pose; they do not
+   reset it to zero.
+5. Update the arm `platformio.ini` comment that currently claims the production
+   environment streams odometry packets.
+6. Make the calibration helper emit or validate the complete JSON schema.
+
+### B. Integrate Arm Odometry Sending
+
+At a fixed cadence, the arm production loop must:
+
+1. Initialize logging, LittleFS calibration, both PMW3610 sensors, fusion, pose,
+   and the drivetrain UART link with checked return values.
+2. Poll both sensors.
+3. Fuse the current raw deltas.
+4. Integrate only a fully valid sample; retain prior pose otherwise.
+5. Send one cumulative `OdometryPacket` per cycle, including invalid cycles with
+   `valid=false`.
+6. Increment the sequence number for every transmitted sample.
+7. Rate-limit initialization, sensor, calibration, and transmit fault logs.
+8. Continue servicing other arm devices without blocking.
+
+Define policy for UART send failure: the loop should retain pose and continue
+sampling, while diagnostics expose the transport fault.
+
+### C. Add a Drivetrain Odometry Receiver
+
+Create a receiver module that owns:
+
+- Latest decoded `RobotOdometry`.
+- Timestamp of the last validly decoded odometry frame.
+- Last sequence number and a `has_sequence` flag.
+- Sequence-gap, sequence-reset, decode-error, and freshness-timeout counters.
+- Sensor validity separately from transport freshness.
+
+Required behavior:
+
+1. Call `uart_link_update()` every control iteration.
+2. Consume the latest available frame and ignore unrelated packet types safely.
+3. Decode odometry only through `odometry_packet_decode()`.
+4. Convert millimeters to meters at the receiver boundary.
+5. Do not refresh freshness after checksum, type, length, or payload failure.
+6. Mark odometry invalid after 100 ms without a decoded odometry packet.
+7. Detect sequence gaps and likely arm reboot/reset events.
+8. Decide whether latest-only delivery is sufficient. If every frame matters,
+   replace `UartLink.latest_packet` with a bounded queue or parser callback.
+
+### D. Replace the Drivetrain Bench Main
+
+The production loop should:
+
+1. Initialize the shared UART link and odometry receiver.
+2. Initialize the full `Drivetrain` object with `DRIVETRAIN_CONFIG`.
+3. Update all encoders every iteration.
+4. Read tape sensors only at the cadence needed by the active controller.
+5. Run the robot state machine/controller using explicit sensor-validity states.
+6. Apply one coherent body or four-wheel command.
+7. Call `drivetrain_tick()` on every iteration, including error paths where the
+   main loop continues.
+8. Enter an explicit safe state on initialization, receiver, encoder, or controller
+   failure.
+
+Do not copy the current bench behavior into production control: the bench main
+bypasses drivetrain brake and watchdog ownership.
+
+### E. Rework the Stepper Module
+
+### Header and Configuration Ownership
+
+- Break the circular include between `stepper_config.h` and
+  `stepper_driver.h`.
+- Keep `StepperConfig` in the config header and include it only from the driver.
+- Remove private `static` helper declarations from the public driver header.
+- Replace C++17 inline configuration variables with `extern const`
+  declarations and one `.cpp` definition file, or explicitly adopt C++17.
+- Use pin macros from `pin_map.h` instead of duplicating numeric GPIO values.
+- Normalize naming (`step_pin`, `step_pulse_us`, and
+  `stepper_move_distance_mm`).
+
+### Non-Blocking Runtime
+
+Replace the blocking loop and delays with a service-based state machine:
 
 ```c
 typedef struct {
-    uint8_t step_pin;
-    uint8_t dir_pin;
-    uint32_t step_pulse_us;
-    uint32_t step_delay_us;
+    const StepperConfig *config;
     long steps_remaining;
     long position_steps;
     int8_t direction;
-    int64_t next_step_us;
+    int64_t next_transition_us;
+    bool pulse_high;
     bool initialized;
 } StepperDriver;
 ```
@@ -324,149 +252,133 @@ esp_err_t stepper_stop(StepperDriver *driver);
 bool stepper_is_moving(const StepperDriver *driver);
 ```
 
-`stepper_service()` emits at most one pulse per call. The arm loop services all four
-drivers every iteration, allowing simultaneous movement without blocking UART or
-sensor polling.
+Also validate null pointers and timing, handle `LONG_MIN`, detect distance-to-step
+overflow, define stop semantics, and update position only after emitted pulses.
 
-### 3. Validate Movement Inputs
+### F. Harden Tape Sensing and PID
 
-- Reject zero pulse or delay values.
-- Handle `LONG_MIN` without negating it.
-- Detect overflow when converting millimeters to steps.
-- Keep distance conversion separate from the low-level driver.
-- Update `position_steps` only after a pulse is emitted successfully.
-- Define whether `stepper_stop()` preserves or clears the queued move.
+- Export `FRONT_PID_WEIGHTS`, `BACK_PID_WEIGHTS`, and `LEFT_PID_WEIGHTS` from
+  `tape_following_config.h`.
+- Validate tape GPIOs before shifting them into pin masks.
+- Propagate errors from channel-select `gpio_set_level()` calls.
+- Confirm active level, channel mapping, channel weight order, and the 5 us mux
+  settling time on hardware.
+- Reject non-finite PID gains, inputs, and `dt_s`.
+- Require a non-negative integral limit and ordered output limits.
+- Add `has_last_known_error`; initial line loss must not arbitrarily choose right.
+- Distinguish tracked, lost, and ambiguous/intersection patterns.
+- Reset or suppress derivative state when tape is reacquired.
+- Use conditional integration so saturation does not continue windup.
+- Return `esp_err_t` plus an output parameter from the PID update so invalid input
+  is distinguishable from a valid zero correction.
 
-### 4. Stepper Verification
+### G. Finish Shared I2C and Lidar Integration
 
-- Confirm each motor's direction on hardware.
-- Confirm one pulse produces one commanded step.
-- Run two or more axes simultaneously.
-- Confirm UART and optical polling continue during long moves.
-- Confirm stop behavior and position accounting.
+- Keep the generic I2C implementation in `robot-common`.
+- Add an arm-specific `I2cBusConfig` using the arm pin map; only the drivetrain
+  currently defines a board-specific sensor bus config.
+- Add the actual lidar/ToF device driver and lifecycle code for each board; pin
+  definitions alone are present today.
+- No production entry point currently initializes or uses the shared I2C API.
+- Define XSHUT/address-assignment sequencing for multiple devices on one bus.
+- Validate I2C port, SDA/SCL pins, clock, and timeout before driver installation.
+- Return `ESP_ERR_INVALID_STATE` rather than `ESP_ERR_INVALID_ARG` when probing an
+  uninitialized bus.
+- Decide ownership when multiple modules share one hardware I2C port and prevent
+  duplicate driver installation.
+- Confirm external pull-ups, bus voltage, address plan, and 100/400 kHz operation
+  on hardware.
 
-## Session 4: Tape PID Hardening
+### H. Driver and API Hardening
 
-### Current Problems
+- Make PMW3610 initialization and bus operations return errors instead of ignoring
+  GPIO failures and continuing after sensor setup problems.
+- Add null/state validation to PMW3610, fusion, pose, and stepper APIs.
+- Finish consistent error-code semantics: several encoder calls currently return
+  `ESP_ERR_INVALID_ARG` for valid pointers in the wrong lifecycle state.
+- Consider output-parameter status APIs where returning zero currently hides
+  invalid drivetrain, motor, or encoder state.
+- Extend drivetrain configuration validation to detect duplicate GPIO assignments
+  and cross-subsystem pin collisions, not only duplicate PWM channels/PCNT units.
+- Define and validate UART port, pin, and buffer constraints before installing the
+  driver.
+- Decide whether packet version/type errors need separate diagnostics from the
+  aggregate parser error counter.
+- Add packet modules before using the existing `COMMAND` and `STATUS` enum values;
+  they currently have no payload definitions or consumers.
 
-- `FRONT_PID_WEIGHTS`, `BACK_PID_WEIGHTS`, and `LEFT_PID_WEIGHTS` are defined but
-  not declared in the public configuration header.
-- PID gains and inputs are not checked for NaN or infinity.
-- A negative `integral_limit` produces incorrect clamping.
-- `output_min > output_max` is accepted.
-- Before tape has ever been detected, line loss selects the positive/right fallback
-  because `last_known_error` starts at zero.
-- `line_was_present` is recorded but not used to suppress derivative spikes when
-  tape is reacquired.
-- Integral accumulation continues while the output is saturated.
-- Returning `0.0f` for invalid arguments is indistinguishable from a valid zero
-  correction.
-- Symmetric and all-active patterns produce zero error, so an intersection can be
-  mistaken for a centered line.
+### I. Tests, Tooling, and Repository Configuration
 
-### Recommended Changes
+Add host-testable or PlatformIO tests for:
 
-1. Export all three weight configurations from `tape_following_config.h`.
-2. Add a gain validation function that requires finite gains, a non-negative
-   integral limit, and ordered finite output limits.
-3. Add `has_last_known_error` to `TapePidState`.
-4. Return an explicit line state such as `LINE_TRACKED`, `LINE_LOST`, or
-   `LINE_AMBIGUOUS` instead of only a boolean.
-5. On initial line loss, return a caller-selected search behavior rather than always
-   turning right.
-6. Suppress or reset derivative history when transitioning from lost to tracked.
-7. Use conditional integration: do not integrate farther into output saturation.
-8. Change `tape_pid_update()` to return `esp_err_t` and write correction through an
-   output pointer.
-9. Define application behavior for intersections and all-active patterns.
-10. Verify sensor weight order and sign on the physical robot.
+- UART framing, parser resynchronization, checksum failures, and overwrite/queue
+  behavior.
+- Odometry byte order, round trips, malformed validity values, and non-finite data.
+- Drivetrain kinematics normalization and sign conventions.
+- Drivetrain rollback and watchdog state transitions using hardware wrappers or
+  fakes.
+- Encoder conversion math and glitch-filter bounds.
+- PMW3610 matrix validation, fusion, invalid-sample pose retention, and recovery.
+- Tape centroid, loss, ambiguity, reacquisition, saturation, and anti-windup.
+- Calibration matrix fitting and complete JSON schema generation.
 
-## Session 5: Production Loop Integration
+Repository cleanup:
 
-After the previous sessions are verified, replace the temporary mains.
+- Remove machine-specific `upload_port = COM5` and `monitor_port = COM5` from the
+  drivetrain PlatformIO configuration, or move them to an untracked local override.
+- Correct stale documentation before treating it as an implementation reference.
+- Consider pinning the resolved ArduinoJson version if reproducible builds matter;
+  the declared `^7.4.2` currently resolves to 7.4.3.
+- Add CI that performs clean builds for all four environments and runs tests.
 
-### Arm Loop
+## Hardware Acceptance Checklist
 
-At a fixed cadence:
+These items require the assembled robot:
 
-1. Poll optical sensors.
-2. Fuse the current sample.
-3. Update or retain cumulative pose based on validity.
-4. Send the shared cumulative odometry packet.
-5. Service every active stepper.
-6. Report rate-limited faults.
-
-### Drivetrain Loop
-
-At a fixed cadence:
-
-1. Update the UART receiver and odometry freshness.
-2. Update wheel encoders.
-3. Read tape sensors when required by the active controller.
-4. Run the state machine or controller.
-5. Apply the resulting motor command.
-6. Call `drivetrain_tick()` last on every iteration.
-
-## Hardware Checks
-
-These checks cannot be resolved through code review:
-
-- Determine the real PWM polarity of the motor driver.
-- Verify motor and encoder direction settings.
-- Verify X-drive wheel mapping and signs.
-- Verify tape sensor channel order and active level.
-- Check whether the 5 microsecond tape mux settling time is sufficient.
-- Review ESP32-S3 pin restrictions for encoder and mux-select pins.
-- Verify UART wiring, shared ground, packet rate, and unplug behavior.
-
-## Validation Checklist
-
-### Static Checks
-
-- Both PlatformIO projects build.
-- No arm-only sensing headers are included by `robot-common`.
-- Packet encoding and decoding exist only in `robot-common`.
-- `drivetrain_tick()` has exactly one declaration and one implementation.
-- No stepper runtime function performs a complete multi-step move in a blocking loop.
-
-### Drivetrain Safety
-
-- Startup leaves the brake engaged.
-- Partial initialization leaves all motors stopped and the brake engaged.
-- Partial enable rolls back previously enabled motors.
-- A multi-motor update failure triggers a safe all-motor state.
-- Motor commands stopping for more than 250 ms causes coasting.
-
-### Odometry Link
-
-- Normal motion produces cumulative pose on the drivetrain.
-- Invalid optical samples retain the previous pose and set `valid=false`.
-- Unplugging UART makes odometry invalid within 100 ms.
-- A checksum failure does not update pose or freshness.
-- Sequence gaps and arm resets are reported.
-
-### Steppers
-
-- Multiple axes move concurrently.
-- UART and optical polling continue during long moves.
-- Stop and completion states are reported correctly.
-- Position accounting matches emitted steps.
-
-### Tape PID
-
-- Invalid gains are rejected.
-- Initial line loss does not arbitrarily choose right.
-- Reacquiring tape does not create a derivative spike.
-- Saturation does not continue winding up the integral.
-- Intersections are distinguishable from a centered line.
+- Confirm brake active level and startup behavior.
+- Confirm coast versus active braking behavior.
+- Confirm PWM polarity and duty-to-speed direction.
+- Verify every motor and encoder direction setting.
+- Verify X-drive wheel mapping, forward, strafe, and turn signs.
+- Stop commands for more than 250 ms and confirm watchdog coasting.
+- Verify UART wiring, shared ground, sustained packet rate, corrupt frames, arm
+  reboot, and unplug behavior.
+- Verify PMW3610 forward/lateral signs, scale, baseline, invalid samples, and
+  recovery on representative surfaces.
+- Verify each stepper direction, travel conversion, limits, simultaneous motion,
+  and stop behavior.
+- Verify tape channel order, active level, intersection patterns, and settling
+  time.
+- Verify lidar power, XSHUT sequencing, addresses, pull-ups, range data, and bus
+  recovery.
 
 ## Recommended Implementation Order
 
-1. Confirm brake, timeout, and packet decisions.
-2. Implement drivetrain rollback and command watchdog.
-3. Add the shared cumulative odometry packet.
-4. Add arm sender and drivetrain receiver with freshness timeout.
-5. Rework steppers into the service-based API.
-6. Harden tape PID behavior and configuration.
-7. Replace both temporary production mains.
-8. Perform hardware acceptance checks.
+1. Repair `calibration.json`, correct stale optical/build documentation, and
+   verify fused optical output on hardware.
+2. Integrate the arm odometry sender.
+3. Implement the drivetrain receiver, sequence diagnostics, and 100 ms freshness
+   timeout, including an explicit latest-only versus queued UART decision.
+4. Replace the drivetrain bench main and exercise the existing safety layer and
+   watchdog.
+5. Repair stepper ownership/build warnings, then implement non-blocking motion.
+6. Harden tape sensing and PID behavior.
+7. Add board-specific I2C configs and lidar/ToF device integration.
+8. Harden remaining driver error handling and API state semantics.
+9. Add automated tests and clean-build CI.
+10. Complete the hardware acceptance checklist before enabling unrestricted robot
+    motion.
+
+## Completion Definition
+
+Firmware is production-ready only when:
+
+- Both production mains use the intended shared modules rather than test code.
+- Every clean build succeeds without project warnings.
+- The deployed calibration schema is valid and hardware-verified.
+- Odometry validity covers both sensor validity and transport freshness.
+- Motor watchdog, brake, rollback, and direction behavior pass hardware tests.
+- Stepper motion is non-blocking and does not starve sensing or UART service.
+- Tape and lidar fault states are explicit and handled by the controller.
+- Automated tests cover transport, math, state transitions, and malformed inputs.
+- No machine-specific serial port is required in tracked project configuration.
