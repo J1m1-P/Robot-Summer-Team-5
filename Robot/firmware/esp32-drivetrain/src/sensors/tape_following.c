@@ -1,11 +1,14 @@
+/* Implements shared-multiplexer sampling for the three tape sensor modules. */
 #include "sensors/tape_following.h"
 #include "config/pin_map.h"
 #include <stddef.h>
 #include "esp_rom_sys.h" /* esp_rom_delay_us */
 
+// Electrical level that indicates tape detection and mux settling delay.
 #define TAPE_ACTIVE_LEVEL 1
 #define TAPE_MUX_SETTLE_US 5
 
+// Tracks one-time initialization of the channel-select GPIOs shared by all modules.
 static bool s_chsel_initialized = false;
 
 /* Drive TF_CHSEL1 (mux address A) and TF_CHSEL2 (mux address B).
@@ -20,6 +23,7 @@ static void tape_sensor_select_channel(TapeChannel channel)
 }
 
 
+// Initializes one module input and the shared multiplexer pins when needed.
 esp_err_t tape_sensor_init(TapeSensor *sensor, const TapeSensorConfig *config)
 {
     if (sensor == NULL || config == NULL) {
@@ -66,6 +70,7 @@ esp_err_t tape_sensor_init(TapeSensor *sensor, const TapeSensorConfig *config)
 }
 
 
+// Reads the currently selected channel from one initialized tape module.
 bool pin_is_on_tape(TapeSensor *sensor)
 {
     if (sensor == NULL || sensor->config == NULL) {
@@ -74,7 +79,7 @@ bool pin_is_on_tape(TapeSensor *sensor)
     return gpio_get_level(sensor->config->module_out) == TAPE_ACTIVE_LEVEL; 
 }
 
-// Array of 3 pointers to the 3 sensor modules (front, back, left)
+// Selects every channel and updates all three module state structures.
 esp_err_t tape_sensor_read_all_channels(TapeSensor *sensors[TAPE_MODULE_COUNT])
 {
     if (sensors == NULL) { 
@@ -104,6 +109,7 @@ esp_err_t tape_sensor_read_all_channels(TapeSensor *sensors[TAPE_MODULE_COUNT])
     return ESP_OK;
 }
 
+// Samples every channel and packs each module's four readings into one nibble.
 esp_err_t tape_sensor_read_all_channels_raw(TapeSensor *sensors[TAPE_MODULE_COUNT], uint8_t out_bits[TAPE_MODULE_COUNT])
 {
     if (out_bits == NULL) {

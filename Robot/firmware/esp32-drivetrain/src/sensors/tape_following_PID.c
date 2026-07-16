@@ -1,6 +1,8 @@
+/* Implements tape position estimation and bounded PID steering correction. */
 #include "sensors/tape_following_PID.h"
 #include <stddef.h>
 
+// Clears integral, derivative, line-presence, and fallback-error history.
 void tape_pid_state_reset(TapePidState *state)
 {
     if (state == NULL) {
@@ -19,6 +21,7 @@ void tape_pid_state_reset(TapePidState *state)
 
 }
 
+// Computes the weighted channel centroid or a directional fallback when the line is lost.
 bool tape_pid_compute_error(const TapeSensor *sensor,
                              const TapePidSensorConfig *sensor_cfg,
                              TapePidState *state,
@@ -62,6 +65,7 @@ bool tape_pid_compute_error(const TapeSensor *sensor,
     return false; 
 }
 
+// Computes one bounded PID correction and applies integral anti-windup.
 float tape_pid_update(TapePidState *state,
                        const TapePidGains *gains,
                        float error,

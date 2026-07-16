@@ -1,11 +1,13 @@
+/* Implements blocking pulse generation for step/direction motor drivers. */
 #include "drivers/stepper_driver.h"
 
+// Mechanical constants used to convert linear travel into motor steps.
 const float stepAngle = 1.8;
 const float beltPitchMM = 2.0; 
 const uint8_t pulleyTeeth = 20;
 const float stepsPerRev = 360/stepAngle; 
 
-// initialize stepper
+// Copies configuration into the runtime driver and initializes its output pins.
 void stepper_begin(StepperDriver *driver, StepperConfig config) {
     driver->stepPin = config.stepPin;
     driver->dirPin = config.dirPin;
@@ -72,12 +74,12 @@ void stepper_move_distanceMM(StepperDriver *driver, long distanceMM) {
     stepper_move_steps(driver, steps);
 }
 
-// Set step_pulse
+// Updates the duration of the high portion of each step pulse.
 void stepper_set_pulse_us(StepperDriver *driver, uint32_t pulseUs) {
     driver->stepPulseUs = pulseUs;
 }
 
-// Set step_delay
+// Updates the delay inserted after each step pulse.
 void stepper_set_delay_us(StepperDriver *driver, uint32_t delayUs) {
     driver->stepDelayUs = delayUs;
 }

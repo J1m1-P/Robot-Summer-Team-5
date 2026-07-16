@@ -1,3 +1,4 @@
+/* Defines the ESP32 arm board's GPIO assignments for motors, sensors, and links. */
 #pragma once
 
 // Servos

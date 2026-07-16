@@ -1,4 +1,5 @@
-#pragma once 
+/* Declares quadrature encoder counting, distance tracking, and velocity estimation. */
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -12,6 +13,7 @@ extern "C" {
 #endif
 
 
+// Identifies each physical wheel encoder and bounds encoder lookup arrays.
 typedef enum {
     FL_ENCODER = 0,
     FR_ENCODER,
@@ -20,6 +22,7 @@ typedef enum {
     ENCODER_ID_MAX
 } EncoderId;
 
+// Defines pulse-counter channels, pins, wheel geometry, and input filtering.
 typedef struct {
     EncoderId id;
 
@@ -41,6 +44,7 @@ typedef struct {
     uint32_t glitch_filter_ns;
 } EncoderDriverConfig;
 
+// Holds accumulated count, velocity estimates, and encoder lifecycle state.
 typedef struct {
     const EncoderDriverConfig *config;
 
@@ -54,24 +58,43 @@ typedef struct {
     bool enabled;
 } EncoderDriver;
 
-// Initialization
+// Checks whether an encoder configuration is safe and internally consistent.
+bool encoder_driver_config_is_valid(const EncoderDriverConfig *config);
+
+// Configures the ESP32 pulse counter for one quadrature encoder.
 esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig *config);
 
-// Counter Control
+// Clears and starts pulse counting for an initialized encoder.
 esp_err_t encoder_driver_start(EncoderDriver *encoder);
+
+// Pauses pulse counting and marks the encoder disabled.
 esp_err_t encoder_driver_stop(EncoderDriver *encoder);
+
+// Clears hardware and accumulated counts plus velocity history.
 esp_err_t encoder_driver_reset(EncoderDriver *encoder);
 
+// Returns the total count including accumulated hardware counter deltas.
 esp_err_t encoder_driver_get_count(const EncoderDriver *encoder, int32_t *count);
+
+// Converts the total count into wheel revolutions.
 esp_err_t encoder_driver_get_revolutions(const EncoderDriver *encoder, float *revolutions);
+
+// Converts the total count into linear wheel travel in meters.
 esp_err_t encoder_driver_get_distance_m(const EncoderDriver *encoder, float *distance_m);
 
+// Samples the hardware counter and updates accumulated count and velocity.
 esp_err_t encoder_driver_update(EncoderDriver *encoder);
 
-// Status
+// Reports whether the encoder driver has been initialized.
 bool encoder_driver_is_initialized(const EncoderDriver *encoder);
+
+// Reports whether pulse counting is currently enabled.
 bool encoder_driver_is_enabled(const EncoderDriver *encoder);
+
+// Returns the latest angular velocity estimate in revolutions per second.
 float encoder_driver_get_velocity_rps(const EncoderDriver *encoder);
+
+// Returns the latest linear velocity estimate in meters per second.
 float encoder_driver_get_velocity_mps(const EncoderDriver *encoder);
 
 

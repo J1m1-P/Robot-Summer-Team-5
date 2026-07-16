@@ -1,3 +1,4 @@
+/* Declares weighted tape-position estimation and PID steering calculations. */
 #ifndef TAPE_PID_H
 #define TAPE_PID_H
 
@@ -20,6 +21,7 @@ extern "C" {
  * doesn't leak into the new segment.
  */
 
+// Number of weighted tape channels used to calculate a line-position error.
 #define TAPE_PID_CHANNEL_COUNT 4
 
 /* Position weight assigned to each of a sensor's 4 channels, in

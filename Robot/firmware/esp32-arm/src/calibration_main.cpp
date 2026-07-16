@@ -1,13 +1,15 @@
+/* Runs calibration firmware that streams raw dual-PMW3610 motion samples. */
 #include <Arduino.h>
 
 #include "config/pin_map.h"
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 #include "drivers/pmw3610_driver.h"
 
 // Calibration-only firmware: it publishes raw deltas for the laptop helper
 // and intentionally contains no fitting, persistence, or config logic.
 static DualPmw3610 sensors;
 
+// Initializes serial output, logging, and both optical sensors.
 void setup() {
     Serial.begin(115200);
     delay(2000);
@@ -22,6 +24,7 @@ void setup() {
     dual_pmw3610_init(&sensors, &pins);
 }
 
+// Polls both sensors and emits one machine-readable calibration sample per side.
 void loop() {
     int16_t ldx = 0, ldy = 0, rdx = 0, rdy = 0;
     bool l_valid = false, r_valid = false;

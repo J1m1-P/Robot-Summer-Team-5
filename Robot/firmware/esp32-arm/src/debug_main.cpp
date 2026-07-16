@@ -1,10 +1,11 @@
+/* Runs an interactive diagnostic firmware for dual-PMW3610 tracking and fusion. */
 #include <Arduino.h>
 
 #include "config/fusion_config.h"
 #include "config/pin_map.h"
 #include "config/pmw3610_config.h"
 #include "config/static_calibration.h"
-#include "debug/app_log.h"
+#include <robot_common/app_log.h>
 #include "drivers/pmw3610_driver.h"
 #include "sensing/pmw3610_fusion.h"
 #include "sensing/pmw3610_pose.h"
@@ -18,12 +19,14 @@
 // harness uses, so it costs more bus time per poll -- fine for a slower
 // human-watched debug console, not for the hot tracking loop.
 
+// Persistent sensor, fusion, pose, and Smart-mode state for the diagnostic loop.
 static bool smart_disabled_l = false;
 static bool smart_disabled_r = false;
 static Pmw3610Fusion fusion;
 static Pmw3610PoseManager pose;
 static bool fusion_ready = false;
 
+// Prints one sensor's full burst diagnostics in a human-readable format.
 static void print_diagnostics(const char *label, const Pmw3610Diagnostics &d) {
     Serial.printf(
         "[%s] dx=%-5d dy=%-5d  mot=%d ovf=%d lpValid=%d lsrFault=%d rst=%d valid=%d  "
@@ -33,6 +36,7 @@ static void print_diagnostics(const char *label, const Pmw3610Diagnostics &d) {
         d.squal, d.shutter, d.pix_min, d.pix_avg, d.pix_max);
 }
 
+// Prints the latest fused delta, validity, and cumulative pose.
 static void print_fused(const DeltaPose &delta, bool l_valid, bool r_valid) {
     const Pose current = pmw3610_pose_get(&pose);
     Serial.printf("[FUSED] d=(%.4f,%.4f,%.4fdeg) valid=%d pose=(%.2f,%.2f,%.2fdeg)\n", delta.dx_mm,
@@ -40,6 +44,7 @@ static void print_fused(const DeltaPose &delta, bool l_valid, bool r_valid) {
                   current.x_mm, current.y_mm, current.heading_deg);
 }
 
+// Initializes serial diagnostics, both sensors, calibration, fusion, and pose.
 void setup() {
     Serial.begin(115200);
     delay(2000);  // let native USB CDC enumerate before printing setup diagnostics
@@ -62,6 +67,7 @@ void setup() {
     }
 }
 
+// Reads full diagnostics, updates Smart mode, and reports fused motion when configured.
 void loop() {
     Pmw3610Diagnostics l = pmw3610_bus_burst_read_diagnostics(PIN_PMW_NCS_L);
     Pmw3610Diagnostics r = pmw3610_bus_burst_read_diagnostics(PIN_PMW_NCS_R);

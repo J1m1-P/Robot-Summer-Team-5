@@ -1,8 +1,12 @@
-#pragma once 
+/*
+ * Public interface for a shared ESP32 I2C master bus and its attached devices.
+ * Each firmware target supplies its own pins, port, clock, and timeout settings.
+ */
+#pragma once
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c.h"
@@ -12,6 +16,7 @@
 extern "C" {
 #endif
 
+// Defines the hardware and timing settings used to initialize an I2C master bus.
 typedef struct {
     i2c_port_t port;
 
@@ -24,38 +29,44 @@ typedef struct {
     bool enable_internal_pullups;
 } I2cBusConfig;
 
+// Holds the configuration and initialization state of one I2C bus.
 typedef struct {
     const I2cBusConfig *config;
     bool initialized;
 } I2cBus;
 
-// This represents a device connected on the i2c bus
+// Represents one addressed device connected to an initialized I2C bus.
 typedef struct {
     I2cBus *bus;
     uint8_t address;
     bool initialized;
 } I2cDevice;
 
-// Bus Management
-esp_err_t i2c_bus_init(I2cBus *bus, const I2cBusConfig *config); 
+// Configures and installs an I2C master bus. The bus must be zero-initialized before its first call.
+// Example: I2cBus bus = {0};
+esp_err_t i2c_bus_init(I2cBus *bus, const I2cBusConfig *config);
 
+// Removes the I2C driver and clears the bus's runtime state.
 esp_err_t i2c_bus_deinit(I2cBus *bus);
 
+// Reports whether the bus has a valid configuration and is initialized.
 bool i2c_bus_is_initialized(const I2cBus *bus);
 
-// Checks whether a device acknowledge an address
+// Sends an address-only transaction to check whether a device acknowledges it.
 esp_err_t i2c_bus_probe(const I2cBus *bus, uint8_t address);
 
-// Device management
+// Associates a 7-bit device address with an initialized bus.
 esp_err_t i2c_device_init(I2cDevice *device, I2cBus *bus, uint8_t address);
 
-// Basic I2C transactions. 
+// Writes one or more bytes to an initialized I2C device.
 esp_err_t i2c_device_write(const I2cDevice *device, const uint8_t *data, size_t data_size);
 
+// Reads one or more bytes from an initialized I2C device.
 esp_err_t i2c_device_read(const I2cDevice *device, uint8_t *data, size_t data_size);
 
 /*
- * Performs:
+ * Writes a request and then reads a response using a repeated start condition.
+ * This is the common transaction for reading sensor registers:
  *
  * START
  * address + write
@@ -64,8 +75,6 @@ esp_err_t i2c_device_read(const I2cDevice *device, uint8_t *data, size_t data_si
  * address + read
  * read data
  * STOP
- *
- * This is the most common transaction for reading sensor registers.
  */
 esp_err_t i2c_device_write_read(
     const I2cDevice *device,

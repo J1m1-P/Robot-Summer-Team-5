@@ -1,3 +1,4 @@
+/* Exposes tape sensor pin mappings and PID position weights. */
 #pragma once
 
 
@@ -7,7 +8,8 @@
 extern "C" {
 #endif
 
-extern const TapeSensorConfig TAPE_SENSOR_FRONT; 
+// Pin configurations for the front, back, and left tape sensor modules.
+extern const TapeSensorConfig TAPE_SENSOR_FRONT;
 extern const TapeSensorConfig TAPE_SENSOR_BACK;
 extern const TapeSensorConfig TAPE_SENSOR_LEFT;
 

@@ -1,3 +1,4 @@
+/* Defines quadrature counting and wheel geometry for all four encoders. */
 #include "config/pin_map.h"
 #include "config/encoder_config.h"
 
@@ -40,6 +41,7 @@
 
  #define ENCODER_GLITCH_FILTER_NS 1000U
 
+// Front-left encoder pulse-counter and wheel configuration.
  const EncoderDriverConfig FL_ENCODER_CONFIG = {
     .id = FL_ENCODER, 
 
@@ -61,6 +63,7 @@
     .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
  };
 
+// Front-right encoder pulse-counter and wheel configuration.
   const EncoderDriverConfig FR_ENCODER_CONFIG = {
     .id = FR_ENCODER, 
 
@@ -82,6 +85,7 @@
     .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
  };
 
+// Back-left encoder pulse-counter and wheel configuration.
   const EncoderDriverConfig BL_ENCODER_CONFIG = {
     .id = BL_ENCODER, 
 
@@ -103,6 +107,7 @@
     .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
  };
 
+// Back-right encoder pulse-counter and wheel configuration.
   const EncoderDriverConfig BR_ENCODER_CONFIG = {
     .id = BR_ENCODER, 
 
@@ -124,6 +129,7 @@
     .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
  };
 
+// Maps EncoderId values to their corresponding hardware configurations.
  const EncoderDriverConfig * const ENCODER_CONFIGS[ENCODER_ID_MAX] = {
     [FL_ENCODER] = &FL_ENCODER_CONFIG, 
     [FR_ENCODER] = &FR_ENCODER_CONFIG, 

@@ -1,3 +1,4 @@
+/* Defines the drivetrain ESP32's GPIO assignments for actuators and sensors. */
 #pragma once
 
 // Tape Following Pins
