@@ -1,7 +1,7 @@
 /* Exposes the four wheel-encoder configurations and their indexed lookup table. */
 #pragma once
 
-#include "drivers/encoder_driver.h"
+#include "drivers/encoder/encoder_driver.h"
 
 #ifdef __cplusplus
 extern "C" {

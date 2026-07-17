@@ -1,7 +1,7 @@
 /* Exposes the four drivetrain motor configurations. */
 #pragma once
 
-#include "drivers/motor_driver.h"
+#include "drivers/motor/motor_driver.h"
 
 #ifdef __cplusplus
 extern "C" {

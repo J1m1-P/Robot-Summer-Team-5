@@ -1,6 +1,6 @@
 /* Defines quadrature counting and wheel geometry for all four encoders. */
 #include "config/pin_map.h"
-#include "config/encoder_config.h"
+#include "config/drivetrain/encoder_config.h"
 
 /*
  * Change these based on your real encoder, gearbox, and wheel.
@@ -49,8 +49,8 @@
     .pcnt_channel_a = PCNT_CHANNEL_0, 
     .pcnt_channel_b = PCNT_CHANNEL_1, 
 
-    .a_pin = PIN_ENC1_A, 
-    .b_pin = PIN_ENC1_B, 
+    .a_pin = PIN_ENC1_A,
+    .b_pin = PIN_ENC1_B,
 
     .direction_inverted = false, 
 
@@ -64,17 +64,21 @@
  };
 
 // Front-right encoder pulse-counter and wheel configuration.
+// Physically wired to connector 3 (not 2) -- see motor_config.c's
+// FR_MOTOR_CONFIG comment; direction_inverted stays with the physical
+// connector (calibrated against that connector's actual count direction),
+// not with the FR label.
   const EncoderDriverConfig FR_ENCODER_CONFIG = {
-    .id = FR_ENCODER, 
+    .id = FR_ENCODER,
 
-    .pcnt_unit = PCNT_UNIT_1, 
-    .pcnt_channel_a = PCNT_CHANNEL_0, 
-    .pcnt_channel_b = PCNT_CHANNEL_1, 
+    .pcnt_unit = PCNT_UNIT_1,
+    .pcnt_channel_a = PCNT_CHANNEL_0,
+    .pcnt_channel_b = PCNT_CHANNEL_1,
 
-    .a_pin = PIN_ENC2_A, 
-    .b_pin = PIN_ENC2_B, 
+    .a_pin = PIN_ENC3_A,
+    .b_pin = PIN_ENC3_B,
 
-    .direction_inverted = false, 
+    .direction_inverted = true,
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
@@ -86,17 +90,18 @@
  };
 
 // Back-left encoder pulse-counter and wheel configuration.
+// Physically wired to connector 2 (not 3) -- see FR_ENCODER_CONFIG comment.
   const EncoderDriverConfig BL_ENCODER_CONFIG = {
-    .id = BL_ENCODER, 
+    .id = BL_ENCODER,
 
-    .pcnt_unit = PCNT_UNIT_2, 
-    .pcnt_channel_a = PCNT_CHANNEL_0, 
-    .pcnt_channel_b = PCNT_CHANNEL_1, 
+    .pcnt_unit = PCNT_UNIT_2,
+    .pcnt_channel_a = PCNT_CHANNEL_0,
+    .pcnt_channel_b = PCNT_CHANNEL_1,
 
-    .a_pin = PIN_ENC3_A, 
-    .b_pin = PIN_ENC3_B, 
+    .a_pin = PIN_ENC2_A,
+    .b_pin = PIN_ENC2_B,
 
-    .direction_inverted = false, 
+    .direction_inverted = false,
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
@@ -118,7 +123,7 @@
     .a_pin = PIN_ENC4_A, 
     .b_pin = PIN_ENC4_B, 
 
-    .direction_inverted = false, 
+    .direction_inverted = true, 
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
