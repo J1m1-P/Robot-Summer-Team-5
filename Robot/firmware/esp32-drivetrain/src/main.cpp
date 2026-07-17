@@ -9,6 +9,7 @@
 
 // Runtime state for the single-motor bench test.
 static MotorDriver motor1 = {0};
+static MotorDriver motor2 = {0};
 static bool motor_ready = false;
 
 // Initializes logging and enables the front-left motor for bench testing.
@@ -29,9 +30,19 @@ void setup()
         APP_LOGE(LOG_TAG_MOTOR, "Failed motor initialization: %s", esp_err_to_name(err));
         return;
     }
+    err = motor_driver_init(&motor2, &FR_MOTOR_CONFIG);
+    if (err != ESP_OK) {
+        APP_LOGE(LOG_TAG_MOTOR, "Failed motor initialization: %s", esp_err_to_name(err));
+        return;
+    }
     APP_LOGI(LOG_TAG_MOTOR, "Motor initialized");
 
     err = motor_driver_enable(&motor1);
+    if (err != ESP_OK) {
+        APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable: %s", esp_err_to_name(err));
+        return;
+    }
+    err = motor_driver_enable(&motor2);
     if (err != ESP_OK) {
         APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable: %s", esp_err_to_name(err));
         return;
@@ -49,6 +60,13 @@ void loop()
     }
 
     esp_err_t err = motor_driver_set_duty(&motor1, 0.5f);
+    if (err != ESP_OK) {
+        APP_LOGE(LOG_TAG_MOTOR, "Failed to set motor duty: %s", esp_err_to_name(err));
+        motor_ready = false;
+    }
+    delay(100);
+
+    err = motor_driver_set_duty(&motor2, 0.5f);
     if (err != ESP_OK) {
         APP_LOGE(LOG_TAG_MOTOR, "Failed to set motor duty: %s", esp_err_to_name(err));
         motor_ready = false;
