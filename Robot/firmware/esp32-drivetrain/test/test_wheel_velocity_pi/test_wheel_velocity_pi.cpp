@@ -1,4 +1,4 @@
-// Test suite for control/wheel_velocity_pi.h, focused on the integral
+// Test suite for control/drivetrain/wheel_velocity_pi.h, focused on the integral
 // accumulator's behavior -- in particular that a "stop" command
 // (target_mps == 0) doesn't inherit integral windup from whatever was
 // accumulated while cruising at a prior speed.
@@ -7,12 +7,25 @@
 
 #include <unity.h>
 
-#include "control/wheel_velocity_pi.h"
+#include "control/drivetrain/wheel_velocity_pi.h"
 
 namespace {
 
+// Keeps test expressions concise while exercising the pointer-based C API.
+esp_err_t wheel_velocity_pi_update(
+    WheelVelocityPi &pi,
+    const WheelVelocityPiConfig &config,
+    float target_mps,
+    float measured_mps,
+    float dt_s,
+    float &duty_out
+) {
+    return ::wheel_velocity_pi_update(
+        &pi, &config, target_mps, measured_mps, dt_s, &duty_out);
+}
+
 WheelVelocityPiConfig make_config() {
-    WheelVelocityPiConfig cfg;
+    WheelVelocityPiConfig cfg = {};
     cfg.kff = 0.0f;
     cfg.kff_offset = 0.0f;
     cfg.kp = 0.5f;
@@ -21,6 +34,7 @@ WheelVelocityPiConfig make_config() {
     cfg.output_max = 1.0f;
     cfg.integral_min = -10.0f;
     cfg.integral_max = 10.0f;
+    cfg.duty_slew_per_s = 1.0e6f;
     return cfg;
 }
 
@@ -31,7 +45,7 @@ void tearDown() {}
 
 void test_integral_accumulates_normally_while_target_nonzero() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Cruise with a sustained tracking error (measured never quite
@@ -46,7 +60,7 @@ void test_integral_accumulates_normally_while_target_nonzero() {
 
 void test_integral_resets_immediately_when_target_becomes_zero() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Build up a large integral while cruising, as if sustaining speed
@@ -65,7 +79,7 @@ void test_integral_resets_immediately_when_target_becomes_zero() {
 
 void test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Simulate a coast-down: target is 0 throughout, measured speed
@@ -82,7 +96,7 @@ void test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting
 
 void test_stop_command_produces_braking_duty_from_proportional_term_only() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Build up integral while cruising.
@@ -99,7 +113,7 @@ void test_stop_command_produces_braking_duty_from_proportional_term_only() {
 
 void test_integral_resumes_accumulating_once_target_goes_nonzero_again() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     wheel_velocity_pi_update(pi, cfg, 1.0f, 0.5f, 0.1f, duty); // accumulate
@@ -115,7 +129,7 @@ void test_stop_never_pushes_forward_even_with_misconfigured_positive_output() {
     cfg.kp = -0.5f; // deliberately wrong-signed, to prove the clamp is a real
                      // enforced invariant and not just an incidental
                      // consequence of kp being positive elsewhere in the file
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Without the target==0 braking clamp, kp*error = -0.5*(0-0.9) = +0.45
@@ -129,7 +143,7 @@ void test_stop_never_pushes_further_backward_when_wheel_already_reversed() {
     WheelVelocityPiConfig cfg = make_config();
     cfg.kp = -0.5f; // same defensive misconfiguration, mirrored for the
                      // wheel-already-moving-backward case
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // measured_mps = -0.9 (wheel already spinning backward), target = 0.
@@ -141,7 +155,7 @@ void test_stop_never_pushes_further_backward_when_wheel_already_reversed() {
 
 void test_stop_at_exactly_zero_measured_produces_zero_duty() {
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     wheel_velocity_pi_update(pi, cfg, 0.0f, 0.0f, 0.1f, duty);
@@ -152,7 +166,7 @@ void test_slew_limit_caps_first_cycle_jump_from_rest() {
     WheelVelocityPiConfig cfg = make_config();
     cfg.kff = 2.0f;         // large feedforward so the raw commanded jump is big...
     cfg.duty_slew_per_s = 1.0f; // ...but slew allows only 1.0 duty/s
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Raw output would be kff*target = 2.0*1.0 = 2.0 (clamped to
@@ -169,7 +183,7 @@ void test_slew_limit_ramps_toward_target_over_multiple_cycles() {
     cfg.kp = 0.0f; // isolate the slew behavior from proportional response
     cfg.ki = 0.0f;
     cfg.duty_slew_per_s = 1.0f;
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Raw commanded output is always 1.0 (clamped). Each 0.1s cycle
@@ -183,13 +197,13 @@ void test_slew_limit_ramps_toward_target_over_multiple_cycles() {
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, duty);
 }
 
-void test_slew_limit_also_caps_ramp_down() {
+void test_safe_stop_overrides_downward_slew_limit() {
     WheelVelocityPiConfig cfg = make_config();
     cfg.kff = 1.0f;
     cfg.kp = 0.0f;
     cfg.ki = 0.0f;
     cfg.duty_slew_per_s = 1.0f;
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     // Get to steady duty=1.0 first (kff*target = 1.0*1.0, within one
@@ -197,24 +211,33 @@ void test_slew_limit_also_caps_ramp_down() {
     wheel_velocity_pi_update(pi, cfg, 1.0f, 0.0f, 1.0f, duty);
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, duty);
 
-    // Now command a stop. Raw output is 0 immediately, but slew still
-    // limits how fast duty can fall, same as it limits the rise.
+    // A zero target must stop driving forward immediately even though the
+    // ordinary symmetric slew rule would otherwise return positive duty.
     wheel_velocity_pi_update(pi, cfg, 0.0f, 1.0f, 0.1f, duty);
-    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.9f, duty);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, duty);
 }
 
 void test_default_slew_is_effectively_unlimited() {
-    // make_config() doesn't set duty_slew_per_s, so it uses
-    // WheelVelocityPiConfig's own default -- confirms that default
-    // doesn't interfere with ordinary (non-slew-testing) cases like the
-    // other tests in this file.
+    // make_config() deliberately uses a very high slew rate so ordinary
+    // controller tests are not limited by output ramping.
     const WheelVelocityPiConfig cfg = make_config();
-    WheelVelocityPi pi;
+    WheelVelocityPi pi = {};
     float duty = 0.0f;
 
     wheel_velocity_pi_update(pi, cfg, 1.0f, 0.0f, 0.001f, duty); // very small dt
     // kp*error = 0.5*1.0 = 0.5, reached immediately despite the tiny dt.
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.5f, duty);
+}
+
+void test_rejects_invalid_controller_limits() {
+    WheelVelocityPiConfig cfg = make_config();
+    cfg.output_min = 1.0f;
+    cfg.output_max = -1.0f;
+    WheelVelocityPi pi = {};
+    float duty = 0.0f;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+        wheel_velocity_pi_update(pi, cfg, 1.0f, 0.0f, 0.1f, duty));
 }
 
 int main(int argc, char **argv) {
@@ -232,8 +255,9 @@ int main(int argc, char **argv) {
 
     RUN_TEST(test_slew_limit_caps_first_cycle_jump_from_rest);
     RUN_TEST(test_slew_limit_ramps_toward_target_over_multiple_cycles);
-    RUN_TEST(test_slew_limit_also_caps_ramp_down);
+    RUN_TEST(test_safe_stop_overrides_downward_slew_limit);
     RUN_TEST(test_default_slew_is_effectively_unlimited);
+    RUN_TEST(test_rejects_invalid_controller_limits);
 
     return UNITY_END();
 }

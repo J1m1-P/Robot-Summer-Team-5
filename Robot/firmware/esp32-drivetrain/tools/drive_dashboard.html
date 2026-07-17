@@ -137,8 +137,8 @@
 <body>
 <div class="viz-root">
   <h1>Drive Test</h1>
-  <p class="subtitle">Drives all 4 wheels via control/drivetrain_velocity_kinematics.h and
-  control/wheel_velocity_pi.h (src/drive_main.cpp, platformio.ini's [env:drive]). Battery
+  <p class="subtitle">Drives all 4 wheels via control/drivetrain/velocity_kinematics.h and
+  control/drivetrain/wheel_velocity_pi.h (src/harnesses/drive_main.cpp, platformio.ini's [env:drive]). Battery
   must be powering the motors -- USB/WiFi are control/telemetry only. Connect via USB
   (Chrome or Edge only, Web Serial API) or WiFi (any browser, board runs a debug-only open
   AP "esp32-drivetrain").</p>
@@ -199,7 +199,7 @@
   </div>
 
   <div class="panel gains">
-    <div class="control" style="grid-column: 1 / -1;"><label>PI gains (control/wheel_velocity_pi.h), shared by all 4 wheels</label></div>
+    <div class="control" style="grid-column: 1 / -1;"><label>PI gains (control/drivetrain/wheel_velocity_pi.h), shared by all 4 wheels</label></div>
     <div class="control">
       <label for="ff">Feedforward slope (ff)</label>
       <div class="row"><input id="ff" type="number" step="0.01" /><button data-cmd="ff">Set</button></div>
@@ -216,7 +216,7 @@
       <label for="ki">Integral (ki)</label>
       <div class="row"><input id="ki" type="number" step="0.001" /><button data-cmd="ki">Set</button></div>
     </div>
-    <p class="hint" style="grid-column: 1 / -1;">Live-tunes wheel_velocity_pi_config.cpp's
+    <p class="hint" style="grid-column: 1 / -1;">Live-tunes config/drivetrain/drivetrain_config.c's
     defaults in RAM only -- watch the effect on the charts below, then copy final values
     into that file by hand once you're happy.</p>
   </div>

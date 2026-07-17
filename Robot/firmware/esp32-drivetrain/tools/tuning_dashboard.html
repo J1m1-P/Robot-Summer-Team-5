@@ -155,7 +155,7 @@
 <body>
 <div class="viz-root">
   <h1>Wheel PI Tuning Dashboard</h1>
-  <p class="subtitle">Live view of control/wheel_velocity_pi.h running on src/tuning_main.cpp (platformio.ini's [env:tuning]). Chrome or Edge only — uses the Web Serial API.</p>
+  <p class="subtitle">Live view of control/drivetrain/wheel_velocity_pi.h running on src/harnesses/tuning_main.cpp (platformio.ini's [env:tuning]). Chrome or Edge only — uses the Web Serial API.</p>
 
   <div class="toolbar">
     <button id="connectBtn" class="primary">Connect</button>
@@ -201,7 +201,7 @@
       <div class="row"><input id="period" type="number" step="100" value="3000" /><button data-cmd="period">Set</button></div>
     </div>
   </div>
-  <p class="hint">Motor toggles send "motor &lt;n&gt; &lt;0|1&gt;\n"; each gain/target field sends its matching command (e.g. "ff 0.5\n") — all over the same serial link used for telemetry, shared across every enabled motor. Values live in RAM on the board only — copy final ff/ffo/kp/ki into wheel_velocity_pi_config.cpp by hand once you're happy.</p>
+  <p class="hint">Motor toggles send "motor &lt;n&gt; &lt;0|1&gt;\n"; each gain/target field sends its matching command (e.g. "ff 0.5\n") — all over the same serial link used for telemetry, shared across every enabled motor. Values live in RAM on the board only — copy final ff/ffo/kp/ki into config/drivetrain/drivetrain_config.c by hand once you're happy.</p>
 
   <div class="chart-card">
     <div class="chart-head">
