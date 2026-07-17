@@ -1,18 +1,38 @@
-/* Implements blocking pulse generation for step/direction motor drivers. */
 #include "drivers/stepper_driver.h"
+#include <Arduino.h>
 
 // Mechanical constants used to convert linear travel into motor steps.
 const float stepAngle = 1.8;
-const float beltPitchMM = 2.0; 
+const float beltPitchMM = 2.0;
 const uint8_t pulleyTeeth = 20;
-const float stepsPerRev = 360/stepAngle; 
+const float stepsPerRev = 360.0 / stepAngle;
 
-// Copies configuration into the runtime driver and initializes its output pins.
+// Set the current direction pin state and record the chosen direction.
+static void stepper_set_direction(StepperDriver *driver, bool direction) {
+    driver->direction = direction;
+    digitalWrite(driver->dirPin, direction ? HIGH : LOW);
+}
+
+// Internal stop helper: clear motion state and lower the step pin.
+static void stepper_stop_internal(StepperDriver *driver) {
+    driver->isMoving = false;
+    driver->stepsRemaining = 0;
+    driver->state = 0;
+    digitalWrite(driver->stepPin, LOW);
+}
+
 void stepper_begin(StepperDriver *driver, StepperConfig config) {
     driver->stepPin = config.stepPin;
     driver->dirPin = config.dirPin;
     driver->stepPulseUs = config.stepPulseUs;
     driver->stepDelayUs = config.stepDelayUs;
+
+    driver->isMoving = false;
+    driver->stepsRemaining = 0;
+    driver->direction = true;
+    driver->lastEventUs = micros();
+    driver->pulseStartUs = 0;
+    driver->state = 0;
 
     pinMode(driver->stepPin, OUTPUT);
     pinMode(driver->dirPin, OUTPUT);
@@ -21,23 +41,6 @@ void stepper_begin(StepperDriver *driver, StepperConfig config) {
     digitalWrite(driver->dirPin, LOW);
 }
 
-// Set the direction of the stepper by setting true or false.
-// The actual direction needs to be physically verified. 
-void static stepper_set_direction(StepperDriver *driver, bool direction) {
-    digitalWrite(driver->dirPin, direction ? HIGH : LOW);
-}
-
-// Drive the stepper by one step in the set direction. 
-void static stepper_step(StepperDriver *driver) {
-    digitalWrite(driver->stepPin, HIGH);
-    delayMicroseconds(driver->stepPulseUs);
-
-    digitalWrite(driver->stepPin, LOW);
-    delayMicroseconds(driver->stepDelayUs);
-}
-
-// Drive the stepper by a number of steps. 
-// Negative steps will move in the opposite direction.
 void stepper_move_steps(StepperDriver *driver, long steps) {
     if (steps == 0) {
         return;
@@ -50,36 +53,76 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
         stepper_set_direction(driver, true);
     }
 
-    for (long i = 0; i < steps; i++) {
-        stepper_step(driver);
-    }
+    // Arm the state machine to begin generating pulses in stepper_update().
+    driver->stepsRemaining = steps;
+    driver->isMoving = true;
+    driver->state = 0;
+    driver->lastEventUs = micros() - driver->stepDelayUs;
+    driver->pulseStartUs = 0;
+    digitalWrite(driver->stepPin, LOW);
 }
 
-// Drive the stepper by a distance in millimeters.
-// Negative distance will move in the opposite direction.
 void stepper_move_distanceMM(StepperDriver *driver, long distanceMM) {
     if (distanceMM == 0) {
         return;
     }
 
-    if (distanceMM < 0) {
-        stepper_set_direction(driver, false);
-        distanceMM = -distanceMM;
-    } else {
-        stepper_set_direction(driver, true);
-    }
-
-    // Calculate number of steps for a distance
-    long steps = distanceMM * (stepsPerRev / (beltPitchMM * pulleyTeeth));
+    // Convert linear motion to step count using the belt and pulley geometry.
+    long steps = (long)round(distanceMM * (stepsPerRev / (beltPitchMM * pulleyTeeth)));
     stepper_move_steps(driver, steps);
 }
 
-// Updates the duration of the high portion of each step pulse.
+void stepper_update(StepperDriver *driver) {
+    if (!driver->isMoving || driver->stepsRemaining <= 0) {
+        return;
+    }
+
+    unsigned long now = micros();
+
+    switch (driver->state) {
+        case 0:
+            // Wait the configured delay between steps before asserting the next pulse.
+            if ((unsigned long)(now - driver->lastEventUs) >= driver->stepDelayUs) {
+                digitalWrite(driver->stepPin, HIGH);
+                driver->pulseStartUs = now;
+                driver->state = 1;
+            }
+            break;
+
+        case 1:
+            // Keep the step pin high for the configured pulse width.
+            if ((unsigned long)(now - driver->pulseStartUs) >= driver->stepPulseUs) {
+                digitalWrite(driver->stepPin, LOW);
+                driver->stepsRemaining--;
+
+                if (driver->stepsRemaining <= 0) {
+                    stepper_stop_internal(driver);
+                } else {
+                    driver->lastEventUs = now;
+                    driver->state = 0;
+                }
+            }
+            break;
+
+        default:
+            // Recover from invalid state by stopping motion.
+            stepper_stop_internal(driver);
+            break;
+    }
+}
+
+bool stepper_is_moving(StepperDriver *driver) {
+    return driver->isMoving;
+}
+
+void stepper_stop(StepperDriver *driver) {
+    stepper_stop_internal(driver);
+}
+
 void stepper_set_pulse_us(StepperDriver *driver, uint32_t pulseUs) {
     driver->stepPulseUs = pulseUs;
 }
 
-// Updates the delay inserted after each step pulse.
 void stepper_set_delay_us(StepperDriver *driver, uint32_t delayUs) {
     driver->stepDelayUs = delayUs;
 }
