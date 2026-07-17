@@ -23,8 +23,8 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
     },
     .kinematics = {
         .wheel_radius_m = 0.035f,
-        .chassis_half_length_m = 0.200f,
-        .chassis_half_width_m = 0.273f,
+        .chassis_half_length_m = 0.100f,
+        .chassis_half_width_m = 0.1365f,
         .wheel_angle_rad = DEG_TO_RAD(30.0f),
     },
     .wheel_pi = {
