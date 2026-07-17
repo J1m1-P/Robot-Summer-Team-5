@@ -2,6 +2,7 @@
 #include "control/drivetrain_kinematics.h"
 
 #include <math.h>
+#include <stddef.h>
 
 // Scales all wheel duties together when any magnitude exceeds the configured limit.
 static void normalize_wheel_duty(DrivetrainWheelDuty *wheels, float max_duty) {
