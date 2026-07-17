@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drivetrain USB Controller</title>
+<style>
+:root{color-scheme:dark;--page:#0d1117;--panel:#161b22;--raised:#21262d;--border:#30363d;--text:#f0f6fc;--muted:#8b949e;--blue:#2f81f7;--green:#3fb950;--red:#da3633;--amber:#d29922}*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:980px;margin:auto;padding:20px 16px 48px}h1{margin:0;font-size:24px}h2{margin:0 0 14px;font-size:16px}.subtitle,.note{color:var(--muted);font-size:13px}.subtitle{margin:5px 0 18px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}.toolbar,.utilities{display:flex;align-items:center;flex-wrap:wrap;gap:9px}#status{margin-left:auto;color:var(--muted);font-size:13px}#status.connected{color:var(--green);font-weight:700}#status.error{color:#ff7b72;font-weight:700}button{min-height:42px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--raised);color:var(--text);font:inherit;font-weight:650;cursor:pointer}button:hover:not(:disabled){border-color:var(--blue)}button:active:not(:disabled){transform:translateY(1px)}button:disabled{opacity:.4;cursor:not-allowed}.primary{background:var(--blue);border-color:var(--blue)}button.stop{background:var(--red);border-color:var(--red);font-size:16px;min-height:52px}.warning{border-color:var(--amber)}.settings{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:12px}label{display:block;font-size:12px;color:var(--muted);font-weight:650}input,select{width:100%;margin-top:5px;padding:9px 10px;border:1px solid var(--border);border-radius:7px;background:var(--page);color:var(--text);font:inherit}.control-layout{display:grid;grid-template-columns:minmax(290px,1fr) minmax(230px,.75fr);gap:18px}.drive-pad{display:grid;grid-template-columns:repeat(3,minmax(80px,1fr));gap:8px}.drive-pad button{min-height:64px}.side{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-content:start}.wide{grid-column:1/-1}.wheel-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.wheel{background:var(--raised);border-radius:9px;padding:12px}.wheel h3{margin:0 0 8px;font-size:14px}.wheel-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.action-row{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.chart{background:#080b10;border:1px solid var(--border);border-radius:8px;padding:8px}.chart h3{font-size:13px;margin:0 0 6px}.chart canvas{display:block;width:100%;height:220px}#lastCommand{color:var(--muted);font:12px ui-monospace,monospace;margin-top:10px}#log{height:250px;overflow:auto;margin:0;padding:12px;background:#080b10;border:1px solid var(--border);border-radius:8px;color:#c9d1d9;font:12px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap}.danger{color:#ffb4b2}@media(max-width:720px){.settings{grid-template-columns:repeat(2,1fr)}.control-layout,.wheel-grid,.chart-grid{grid-template-columns:1fr}.action-row{grid-template-columns:1fr 1fr}#status{width:100%;margin-left:0}}
+</style>
+</head>
+<body><main>
+<h1>Drivetrain USB Controller</h1>
+<p class="subtitle">Direct USB serial control for the drivetrain-test firmware. No Wi-Fi or server required.</p>
+
+<section class="panel toolbar">
+  <button id="connect" class="primary">Connect USB</button><button id="disconnect" disabled>Disconnect</button>
+  <button class="stop" data-command="stop">STOP ALL MOTORS</button><span id="status">Not connected</span>
+</section>
+
+<section class="panel"><h2>Test settings</h2><div class="settings">
+  <label>Translation speed (m/s)<input id="speed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
+  <label>Turn speed (rad/s)<input id="turnSpeed" type="number" min="0.01" max="1" step="0.05" value="0.60"></label>
+  <label>Duration (ms)<input id="duration" type="number" min="1" max="10000" step="100" value="1500"></label>
+  <label>Individual motor duty<input id="duty" type="number" min="0.01" max="0.8" step="0.01" value="0.25"></label>
+</div></section>
+
+<section class="panel"><h2>Whole-robot movement</h2><div class="control-layout">
+  <div class="drive-pad">
+    <button data-motion="forward-left">↖<br>Forward left</button><button data-motion="forward">↑<br>Forward</button><button data-motion="forward-right">↗<br>Forward right</button>
+    <button data-motion="left">←<br>Left</button><button class="stop" data-command="stop">STOP</button><button data-motion="right">→<br>Right</button>
+    <button data-motion="backward-left">↙<br>Back left</button><button data-motion="backward">↓<br>Backward</button><button data-motion="backward-right">↘<br>Back right</button>
+  </div>
+  <div class="side"><button id="ccw">↶ CCW</button><button id="cw">↷ CW</button><button id="sequence" class="wide warning">Run complete sequence</button><button data-command="status" class="wide">Refresh status</button><p class="note wide">Every movement is timed. The sequence coasts between movements.</p></div>
+</div><div id="lastCommand">Last command: none</div></section>
+
+<section class="panel"><h2>Encoder-relative movement</h2><div class="settings">
+  <label>Direction<select id="distanceDirection"><option>forward</option><option>backward</option><option>left</option><option>right</option><option>forward-left</option><option>forward-right</option><option>backward-left</option><option>backward-right</option></select></label>
+  <label>Distance (m)<input id="distance" type="number" min="0.011" max="100" step="0.01" value="1.00"></label>
+  <label>Turn direction<select id="angleDirection"><option>cw</option><option>ccw</option></select></label>
+  <label>Angle (degrees)<input id="angle" type="number" min="2.1" max="3600" step="1" value="90"></label>
+</div><div class="action-row"><button id="moveDistance" class="primary">Move distance</button><button id="turnAngle" class="primary">Turn angle</button><button data-command="reset-encoders">Reset encoders</button><button data-command="stop" class="stop">STOP</button></div>
+<p class="note">Distance and angle are relative to encoder positions at command start. Wheel slip still affects accuracy.</p></section>
+
+<section class="panel"><h2>Runtime PI and motion tuning</h2><div class="settings">
+  <label>Feedforward (kff)<input id="kff" type="number" step="0.01" value="1.14"><button data-pi="kff">Apply</button></label>
+  <label>Feedforward offset<input id="offset" type="number" step="0.001" value="0.069"><button data-pi="offset">Apply</button></label>
+  <label>Proportional (kp)<input id="kp" type="number" step="0.01" value="0.40"><button data-pi="kp">Apply</button></label>
+  <label>Integral (ki)<input id="ki" type="number" step="0.01" value="0.20"><button data-pi="ki">Apply</button></label>
+  <label>Duty slew (/s)<input id="slew" type="number" min="0" step="0.1" value="2.0"><button data-pi="slew">Apply</button></label>
+  <label>Acceleration<input id="accel" type="number" min="0.01" max="10" step="0.05" value="0.50"></label>
+  <label>Deceleration<input id="decel" type="number" min="0.01" max="10" step="0.05" value="0.80"></label>
+  <label>Distance tolerance (m)<input id="distanceTolerance" type="number" min="0.001" max="0.5" step="0.001" value="0.010"></label>
+  <label>Angle tolerance (deg)<input id="angleTolerance" type="number" min="0.1" max="45" step="0.1" value="2.0"></label>
+  <label>Position timeout (ms)<input id="timeout" type="number" min="100" max="60000" step="100" value="10000"></label>
+  <label>Telemetry period (ms)<input id="telemetry" type="number" min="20" max="5000" step="10" value="100"></label>
+</div><div class="action-row"><button id="applyRamp">Apply ramp</button><button id="applyAccuracy">Apply tolerance</button><button id="applyTiming">Apply timeout/telemetry</button><button data-command="pi reset">Reset PI defaults</button></div>
+<p class="note">Runtime tuning is RAM-only. Copy confirmed PI values into drivetrain_config.c to persist them.</p></section>
+
+<section class="panel"><h2>Individual motor and encoder pairs</h2><div class="wheel-grid" id="wheels"></div><p class="note">Encoder velocity should have the same sign as the commanded duty.</p></section>
+
+<section class="panel"><h2>Utilities</h2><div class="utilities"><button data-command="config">Show inversion config</button><button data-command="limits">Show limits/settings</button><button data-command="status">Show telemetry</button><button data-command="coast">Coast now</button><button data-command="brake" class="warning">Hardware brake</button><button data-command="enable">Enable after brake</button><button data-command="help">Firmware help</button><button id="clear">Clear log</button></div></section>
+
+<section class="panel"><h2>Live wheel telemetry</h2><div class="chart-grid"><div class="chart"><h3>Target (dashed) and measured velocity (m/s)</h3><canvas id="velocityChart"></canvas></div><div class="chart"><h3>Applied duty</h3><canvas id="dutyChart"></canvas></div></div><p class="note">FL blue, FR orange, BL green, BR red. The chart shows the latest 15 seconds.</p></section>
+
+<section class="panel"><h2>Serial output</h2><pre id="log"># Close PlatformIO's serial monitor first; only one program can own COM5.
+# Click Connect USB and select USB-SERIAL CH340K.</pre><p class="note danger">Lift and secure the robot before connecting or issuing commands.</p></section>
+
+<script>
+(()=>{"use strict";
+const wheelData=[{id:"fl",name:"Front left",hw:"M1 / E1"},{id:"fr",name:"Front right",hw:"M3 / E3"},{id:"bl",name:"Back left",hw:"M2 / E2"},{id:"br",name:"Back right",hw:"M4 / E4"}];
+const state={port:null,reader:null,writer:null,reading:false,readTask:null,rx:"",latest:0,samples:{FL:[],FR:[],BL:[],BR:[]}};
+const enc=new TextEncoder(),dec=new TextDecoder(),connectBtn=document.querySelector("#connect"),disconnectBtn=document.querySelector("#disconnect"),status=document.querySelector("#status"),logEl=document.querySelector("#log"),last=document.querySelector("#lastCommand");
+
+function log(text){logEl.textContent+=text;if(logEl.textContent.length>50000)logEl.textContent=logEl.textContent.slice(-50000);logEl.scrollTop=logEl.scrollHeight}
+function connected(on,message=on?"Connected over USB":"Not connected"){connectBtn.disabled=on;disconnectBtn.disabled=!on;document.querySelectorAll("[data-command],[data-motion],[data-pair],[data-invert],[data-pi],#cw,#ccw,#sequence,#moveDistance,#turnAngle,#applyRamp,#applyAccuracy,#applyTiming").forEach(b=>b.disabled=!on);status.textContent=message;status.className=on?"connected":""}
+function error(message){status.textContent=message;status.className="error"}
+function number(id,min,max){const input=document.querySelector("#"+id),value=Number(input.value);if(!Number.isFinite(value)||value<min||value>max){input.focus();throw new Error(`${id} must be ${min}..${max}`)}return value}
+function settings(){return{speed:number("speed",.01,1),turn:number("turnSpeed",.01,1),duration:Math.round(number("duration",1,10000)),duty:number("duty",.01,.8)}}
+
+async function connect(){if(!("serial" in navigator)){error("Web Serial unavailable");log("\n# Use desktop Chrome or Edge.\n");return}try{state.port=await navigator.serial.requestPort();await state.port.open({baudRate:115200});state.reader=state.port.readable.getReader();state.writer=state.port.writable.getWriter();state.reading=true;connected(true);log("\n# Connected at 115200 baud.\n");state.readTask=readLoop();setTimeout(()=>send("config",false),700)}catch(e){state.port=null;error("Connection failed");log(`\n# Connection error: ${e.message}\n`)}}
+async function readLoop(){try{while(state.reading&&state.reader){const{value,done}=await state.reader.read();if(done)break;if(value){const text=dec.decode(value,{stream:true});log(text);consumeTelemetry(text)}}}catch(e){if(state.reading)log(`\n# Read error: ${e.message}\n`)}finally{if(state.reader){state.reader.releaseLock();state.reader=null}}}
+async function disconnect(sendStop=true){try{if(sendStop&&state.writer)await send("stop",false);state.reading=false;if(state.reader)await state.reader.cancel();if(state.readTask)await state.readTask;if(state.writer){state.writer.releaseLock();state.writer=null}if(state.port)await state.port.close()}catch(e){log(`\n# Disconnect error: ${e.message}\n`)}finally{state.port=null;state.readTask=null;connected(false);log("\n# Disconnected\n")}}
+async function send(command,show=true){if(!state.writer){log("\n# Not connected\n");return}try{await state.writer.write(enc.encode(command+"\n"));if(show)last.textContent=`Last command: ${command}`}catch(e){error("Write failed");log(`\n# Write error: ${e.message}\n`)}}
+function safe(build){try{send(build(settings()))}catch(e){log(`\n# ${e.message}\n`)}}
+function checked(build){try{send(build())}catch(e){log(`\n# ${e.message}\n`)}}
+
+function consumeTelemetry(text){state.rx+=text;let newline;while((newline=state.rx.indexOf("\n"))>=0){const line=state.rx.slice(0,newline).trim();state.rx=state.rx.slice(newline+1);const p=line.split(",");if(p.length!==6||!/^\d+$/.test(p[0]))continue;const wheel=p[1].slice(0,2),t=Number(p[0]),count=Number(p[2]),target=Number(p[3]),measured=Number(p[4]),duty=Number(p[5]);if(!state.samples[wheel]||[t,count,target,measured,duty].some(Number.isNaN))continue;if(t<state.latest-1000)Object.keys(state.samples).forEach(k=>state.samples[k]=[]);state.latest=Math.max(state.latest,t);state.samples[wheel].push({t,count,target,measured,duty});const cutoff=state.latest-15000;Object.values(state.samples).forEach(a=>{while(a.length&&a[0].t<cutoff)a.shift()});drawCharts()}}
+const colors={FL:"#58a6ff",FR:"#d29922",BL:"#3fb950",BR:"#f85149"};
+function drawChart(canvas,field,fixed){const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);const c=canvas.getContext("2d");c.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,m={l:38,r:8,t:8,b:18},pw=w-m.l-m.r,ph=h-m.t-m.b,all=Object.values(state.samples).flat();c.clearRect(0,0,w,h);if(!all.length){c.fillStyle="#8b949e";c.fillText("Waiting for telemetry...",m.l,30);return}const t0=Math.min(...all.map(s=>s.t)),t1=Math.max(...all.map(s=>s.t));let lo,hi;if(fixed){[lo,hi]=fixed}else{const values=all.flatMap(s=>field==="measured"?[s.measured,s.target]:[s[field]]);lo=Math.min(...values,0);hi=Math.max(...values,0);const pad=Math.max(.05,(hi-lo)*.12);lo-=pad;hi+=pad}c.strokeStyle="#30363d";c.fillStyle="#8b949e";c.font="10px system-ui";c.textAlign="right";for(let i=0;i<=4;i++){const y=m.t+ph*i/4;c.beginPath();c.moveTo(m.l,y);c.lineTo(m.l+pw,y);c.stroke();c.fillText((hi-(hi-lo)*i/4).toFixed(2),m.l-5,y+3)}const x=t=>m.l+(t-t0)/Math.max(1,t1-t0)*pw,y=v=>m.t+ph-(v-lo)/Math.max(1e-6,hi-lo)*ph;for(const wheel of Object.keys(state.samples)){const a=state.samples[wheel];for(const targetLine of(field==="measured"?[false,true]:[false])){c.strokeStyle=colors[wheel];c.lineWidth=1.7;c.setLineDash(targetLine?[4,3]:[]);c.beginPath();a.forEach((s,i)=>{const yy=y(targetLine?s.target:s[field]);i?c.lineTo(x(s.t),yy):c.moveTo(x(s.t),yy)});c.stroke()}}c.setLineDash([])}
+function drawCharts(){drawChart(document.querySelector("#velocityChart"),"measured",null);drawChart(document.querySelector("#dutyChart"),"duty",[-.8,.8])}
+
+const wheelGrid=document.querySelector("#wheels");wheelData.forEach(w=>{const card=document.createElement("article");card.className="wheel";card.innerHTML=`<h3>${w.name} <span class="note">${w.hw}</span></h3><div class="wheel-actions"><button data-pair="${w.id}" data-sign="1">Test + duty</button><button data-pair="${w.id}" data-sign="-1">Test − duty</button><button data-invert="motor" data-wheel="${w.id}">Toggle motor direction</button><button data-invert="encoder" data-wheel="${w.id}">Toggle encoder direction</button><button class="stop wide" data-command="stop">Stop</button></div>`;wheelGrid.appendChild(card)});
+connected(false);connectBtn.onclick=connect;disconnectBtn.onclick=()=>disconnect(true);document.querySelector("#clear").onclick=()=>logEl.textContent="";
+document.querySelectorAll("[data-command]").forEach(b=>b.onclick=()=>send(b.dataset.command));
+document.querySelectorAll("[data-motion]").forEach(b=>b.onclick=()=>safe(s=>`${b.dataset.motion} ${s.speed} ${s.duration}`));
+document.querySelector("#cw").onclick=()=>safe(s=>`cw ${s.turn} ${s.duration}`);document.querySelector("#ccw").onclick=()=>safe(s=>`ccw ${s.turn} ${s.duration}`);document.querySelector("#sequence").onclick=()=>safe(s=>`sequence ${s.speed} ${s.duration}`);
+document.querySelectorAll("[data-pair]").forEach(b=>b.onclick=()=>safe(s=>`pair ${b.dataset.pair} ${(s.duty*Number(b.dataset.sign)).toFixed(2)} ${s.duration}`));
+document.querySelectorAll("[data-invert]").forEach(b=>b.onclick=()=>{send(`invert ${b.dataset.invert} ${b.dataset.wheel}`);setTimeout(()=>send("config",false),100)});
+document.querySelectorAll("[data-pi]").forEach(b=>b.onclick=()=>send(`pi ${b.dataset.pi} ${document.querySelector("#"+b.dataset.pi).value}`));
+document.querySelector("#moveDistance").onclick=()=>safe(s=>`distance ${document.querySelector("#distanceDirection").value} ${number("distance",.011,100)} ${s.speed}`);
+document.querySelector("#turnAngle").onclick=()=>safe(s=>`turn-angle ${document.querySelector("#angleDirection").value} ${number("angle",2.1,3600)} ${s.turn}`);
+document.querySelector("#applyRamp").onclick=()=>checked(()=>`ramp ${number("accel",.01,10)} ${number("decel",.01,10)}`);
+document.querySelector("#applyAccuracy").onclick=()=>checked(()=>{const d=number("distanceTolerance",.001,.5),a=number("angleTolerance",.1,45);send(`distance-tolerance ${d}`);return`angle-tolerance ${a}`});
+document.querySelector("#applyTiming").onclick=()=>checked(()=>{const t=Math.round(number("timeout",100,60000)),p=Math.round(number("telemetry",20,5000));send(`timeout ${t}`);return`telemetry ${p}`});
+window.addEventListener("resize",drawCharts);drawCharts();
+navigator.serial?.addEventListener("disconnect",e=>{if(e.target===state.port)disconnect(false)});
+})();
+</script></main></body></html>

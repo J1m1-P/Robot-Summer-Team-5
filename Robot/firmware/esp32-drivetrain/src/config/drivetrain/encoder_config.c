@@ -52,7 +52,7 @@
     .a_pin = PIN_ENC1_A,
     .b_pin = PIN_ENC1_B,
 
-    .direction_inverted = true,
+    .direction_inverted = false, 
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
@@ -78,7 +78,7 @@
     .a_pin = PIN_ENC3_A,
     .b_pin = PIN_ENC3_B,
 
-    .direction_inverted = false,
+    .direction_inverted = true,
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
@@ -101,7 +101,7 @@
     .a_pin = PIN_ENC2_A,
     .b_pin = PIN_ENC2_B,
 
-    .direction_inverted = true,
+    .direction_inverted = false,
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
@@ -123,7 +123,7 @@
     .a_pin = PIN_ENC4_A, 
     .b_pin = PIN_ENC4_B, 
 
-    .direction_inverted = false, 
+    .direction_inverted = true, 
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 

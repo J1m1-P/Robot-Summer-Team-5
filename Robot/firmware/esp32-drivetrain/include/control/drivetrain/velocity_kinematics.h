@@ -37,6 +37,13 @@ esp_err_t drivetrain_kinematics_body_to_wheel_velocities(
     DrivetrainWheelVelocity *wheels_out
 );
 
+// Converts FL/FR/BL/BR wheel angular velocities back to body-frame velocity.
+esp_err_t drivetrain_kinematics_wheel_to_body_velocities(
+    const DrivetrainVelocityKinematicsConfig *config,
+    const DrivetrainWheelVelocity *wheels,
+    DrivetrainBodyVelocity *body_out
+);
+
 #ifdef __cplusplus
 }
 #endif

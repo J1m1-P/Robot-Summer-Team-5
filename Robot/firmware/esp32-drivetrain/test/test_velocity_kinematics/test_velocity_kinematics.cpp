@@ -231,6 +231,31 @@ void test_rejects_non_finite_wheel_angle() {
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 }
 
+// Confirms the inverse Jacobian recovers a combined body command.
+void test_round_trip_body_to_wheel_to_body() {
+    const auto config = make_config(0.035f, 0.20f, 0.273f, 30.0f);
+    const DrivetrainBodyVelocity expected{0.31f, -0.17f, 0.42f};
+    DrivetrainWheelVelocity wheels{};
+    DrivetrainBodyVelocity actual{};
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(
+        &config, &expected, &wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_wheel_to_body_velocities(
+        &config, &wheels, &actual));
+    TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.vx, actual.vx);
+    TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.vy, actual.vy);
+    TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.omega, actual.omega);
+}
+
+// Rejects inverse transforms whose geometry cannot distinguish all axes.
+void test_inverse_rejects_singular_geometry() {
+    auto config = make_config(0.035f, 0.20f, 0.273f, 30.0f);
+    const DrivetrainWheelVelocity wheels{};
+    DrivetrainBodyVelocity body{};
+    config.wheel_angle_rad = 0.0f;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+        drivetrain_kinematics_wheel_to_body_velocities(&config, &wheels, &body));
+}
+
 void test_rejects_invalid_chassis_dimensions() {
     const auto body = make_body(1.0f, 0.0f, 0.0f);
     DrivetrainWheelVelocity wheels = {};
@@ -251,6 +276,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_pure_strafe_exact_values);
     RUN_TEST(test_pure_turn_exact_values);
     RUN_TEST(test_combined_motion_exact_values);
+    RUN_TEST(test_round_trip_body_to_wheel_to_body);
+    RUN_TEST(test_inverse_rejects_singular_geometry);
 
     RUN_TEST(test_zero_moment_arm_removes_turn_coupling);
     RUN_TEST(test_doubling_wheel_radius_halves_output);

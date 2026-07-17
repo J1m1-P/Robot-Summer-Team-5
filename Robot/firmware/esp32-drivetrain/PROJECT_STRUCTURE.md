@@ -72,6 +72,7 @@ esp32-drivetrain/
 |   |   `-- tape_following_PID.c
 |   `-- harnesses/
 |       |-- drive_main.cpp
+|       |-- drivetrain_test_main.cpp
 |       `-- tuning_main.cpp
 |
 |-- test/                            Native PlatformIO unit tests
@@ -154,7 +155,7 @@ Drivers own direct hardware interaction. Each hardware family has a subfolder so
 
 This is the motion-control layer. The current motion modules are grouped under `control/drivetrain/`, leaving room for later control subsystems without mixing them into one flat folder:
 
-- `velocity_kinematics.*` is pure geometry: body velocity becomes four wheel angular velocities.
+- `velocity_kinematics.*` is pure geometry: it converts between body velocity and four wheel angular velocities in both directions.
 - `wheel_velocity_pi.*` is pure closed-loop math for one wheel.
 - `odometry.*` integrates already-computed body-frame displacement into a world-frame pose.
 - `drivetrain.*` is the hardware-facing facade. It owns four motors, four encoders, four PI states, watchdog timing, braking/coasting behavior, body-command limits, and telemetry.
@@ -171,7 +172,7 @@ PlatformIO's default application entry point. It is currently a front-left motor
 
 ### `src/harnesses/`
 
-Contains alternative C++ application entry points selected by PlatformIO source filters. `drive_main.cpp` exercises the complete velocity drivetrain with serial/WebSocket commands. `tuning_main.cpp` accesses one motor/encoder control loop at a time for gain identification. Keeping these out of the normal source root prevents multiple `setup()`/`loop()` definitions and keeps debug-only networking or tuning logic out of production firmware.
+Contains alternative C++ application entry points selected by PlatformIO source filters. `drive_main.cpp` exercises the complete velocity drivetrain with serial/WebSocket commands. `drivetrain_test_main.cpp` provides timed and encoder-relative acceptance tests, runtime control tuning, and complete-robot movement. `tuning_main.cpp` accesses one motor/encoder control loop at a time for gain identification. Keeping these out of the normal source root prevents multiple `setup()`/`loop()` definitions and keeps debug-only networking or tuning logic out of production firmware.
 
 ### `test/`
 
@@ -179,7 +180,7 @@ Contains native unit tests arranged one suite per folder. `native_stubs/esp_err.
 
 ### `tools/`
 
-Contains host-side HTML dashboards rather than embedded code. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
+Contains host-side HTML dashboards rather than embedded code. `drivetrain_test_dashboard.html` is the USB-only button interface for the drivetrain acceptance harness. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
 
 ### `lib/`
 

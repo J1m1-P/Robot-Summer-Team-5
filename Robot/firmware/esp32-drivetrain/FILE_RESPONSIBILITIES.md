@@ -130,14 +130,14 @@ Configuration files bind reusable types to this board. Their source objects are 
 ### `include/control/drivetrain/velocity_kinematics.h` and `src/control/drivetrain/velocity_kinematics.c`
 
 - **Layer:** pure control mathematics.
-- **Why they exist:** convert body-frame `vx`, `vy`, and angular velocity into front-left/front-right/back-left/back-right wheel angular velocities.
-- **Header owns:** `DrivetrainVelocityKinematicsConfig`, `DrivetrainBodyVelocity`, `DrivetrainWheelVelocity`, and the conversion function.
-- **Source owns:** finite/geometry validation and the wheel equations.
+- **Why they exist:** convert between body-frame `vx`, `vy`, angular velocity and front-left/front-right/back-left/back-right wheel angular velocities.
+- **Header owns:** `DrivetrainVelocityKinematicsConfig`, `DrivetrainBodyVelocity`, `DrivetrainWheelVelocity`, and both conversion functions.
+- **Source owns:** finite/geometry/singularity validation plus forward and inverse wheel equations.
 - **Should not contain:** motor duty, encoder reads, PI state, timing, GPIO, or application commands.
 - **Dependencies:** only math, `esp_err`, and its own public types.
-- **Consumers:** `drivetrain.c` and native kinematics tests.
+- **Consumers:** `drivetrain.c`, `drivetrain_test_main.cpp`, and native kinematics tests.
 - **Interaction:** the drivetrain facade converts the result from radians per second to linear wheel speed using wheel radius before invoking each wheel PI controller.
-- **Current gap:** there is no inverse/forward wheel-to-body transform. Odometry therefore requires body deltas to be computed elsewhere.
+- **Position-test use:** the acceptance harness applies the inverse transform to relative encoder wheel angles to estimate translation and heading change.
 
 ### `include/control/drivetrain/wheel_velocity_pi.h` and `src/control/drivetrain/wheel_velocity_pi.c`
 
@@ -235,6 +235,14 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Consumers:** the `tuning` PlatformIO environment and `tools/tuning_dashboard.html` protocol.
 - **Intentional bypass:** it calls drivers directly instead of `Drivetrain` because single-wheel experimentation is its purpose. That would be inappropriate in production application code.
 
+### `src/harnesses/drivetrain_test_main.cpp`
+
+- **Layer:** interactive hardware acceptance application.
+- **Responsibility:** runs timed and encoder-relative translation/rotation tests, duty-limited individual motor/encoder checks, runtime PI/ramp/tolerance tuning, and serial telemetry.
+- **Configuration behavior:** starts from test-local copies of `DRIVETRAIN_CONFIG`, allowing RAM-only motor or encoder direction inversion without changing production configuration.
+- **Safety behavior:** provides controlled stop, immediate coast, hardware brake/re-enable, motion timeout, acceleration/deceleration ramps, an 80% individual-test cap, and pauses between automatic sequence steps.
+- **Consumers:** the `drivetrain-test` PlatformIO environment.
+
 ## Tests
 
 ### `test/native_stubs/esp_err.h`
@@ -264,6 +272,14 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should not test:** the not-yet-existing encoder-to-body-delta path.
 
 ## Developer tools
+
+### `tools/drivetrain_test_dashboard.html`
+
+- **Responsibility:** provides a local point-and-click controller for every command exposed by `drivetrain_test_main.cpp`.
+- **Transport:** uses the browser Web Serial API at 115200 baud through the CH340K USB-to-UART port; it has no Wi-Fi or server dependency.
+- **Safety:** exposes prominent stop controls, preserves the harness's input limits, and displays all firmware responses in a serial log.
+- **Telemetry:** plots rolling target/measured wheel velocity and applied duty for all four wheels.
+- **Consumers:** operators running the `drivetrain-test` PlatformIO environment in desktop Chrome or Edge.
 
 ### `tools/drive_dashboard.html`
 
