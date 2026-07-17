@@ -1,5 +1,5 @@
 /* Implements debounced task detection using the robot's left tape module. */
-#include "sensing/tape_task_detection.h"
+#include "sensing/tape_following/tape_task_detection.h"
 
 #include <stddef.h>
 #include <string.h>

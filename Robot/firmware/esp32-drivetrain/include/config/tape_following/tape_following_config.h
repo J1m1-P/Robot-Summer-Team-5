@@ -1,10 +1,10 @@
 /* Exposes all drivetrain tape-sensor and tape-behavior configuration. */
 #pragma once
 
-#include "control/tape_follower.h"
-#include "drivers/tape_sensor_driver.h"
-#include "sensing/tape_line_estimator.h"
-#include "sensing/tape_task_detection.h"
+#include "control/tape_following/tape_follower.h"
+#include "drivers/tape_sensor/tape_sensor_driver.h"
+#include "sensing/tape_following/tape_line_estimator.h"
+#include "sensing/tape_following/tape_task_detection.h"
 
 #ifdef __cplusplus
 extern "C" {

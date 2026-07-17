@@ -22,54 +22,68 @@ esp32-drivetrain/
 |   |-- README                       PlatformIO header-directory notes
 |   |-- config/
 |   |   |-- pin_map.h
-|   |   |-- tape_following_config.h
 |   |   |-- drivetrain/
 |   |   |   |-- motor_config.h
 |   |   |   |-- encoder_config.h
 |   |   |   `-- drivetrain_config.h
+|   |   |-- tape_following/
+|   |   |   `-- tape_following_config.h
 |   |   `-- communication/
 |   |       |-- i2c_bus_config.h
 |   |       `-- uart_link_config.h
 |   |-- control/
-|   |   `-- drivetrain/
-|   |       |-- drivetrain.h
-|   |       |-- velocity_kinematics.h
-|   |       |-- wheel_velocity_pi.h
-|   |       `-- odometry.h
+|   |   |-- drivetrain/
+|   |   |   |-- drivetrain.h
+|   |   |   |-- velocity_kinematics.h
+|   |   |   |-- wheel_velocity_pi.h
+|   |   |   `-- odometry.h
+|   |   `-- tape_following/
+|   |       |-- tape_follower.h
+|   |       `-- tape_following_controller.h
 |   |-- drivers/
 |   |   |-- motor/
 |   |   |   `-- motor_driver.h
-|   |   `-- encoder/
-|   |       `-- encoder_driver.h
-|   `-- sensors/
-|       |-- tape_following.h
-|       `-- tape_following_PID.h
+|   |   |-- encoder/
+|   |   |   `-- encoder_driver.h
+|   |   `-- tape_sensor/
+|   |       `-- tape_sensor_driver.h
+|   `-- sensing/
+|       `-- tape_following/
+|           |-- tape_line_estimator.h
+|           `-- tape_task_detection.h
 |
 |-- src/                             Implementations and applications
 |   |-- main.cpp
 |   |-- config/
-|   |   |-- tape_following_config.c
 |   |   |-- drivetrain/
 |   |   |   |-- motor_config.c
 |   |   |   |-- encoder_config.c
 |   |   |   `-- drivetrain_config.c
+|   |   |-- tape_following/
+|   |   |   `-- tape_following_config.c
 |   |   `-- communication/
 |   |       |-- i2c_bus_config.c
 |   |       `-- uart_link_config.c
 |   |-- control/
-|   |   `-- drivetrain/
-|   |       |-- drivetrain.c
-|   |       |-- velocity_kinematics.c
-|   |       |-- wheel_velocity_pi.c
-|   |       `-- odometry.c
+|   |   |-- drivetrain/
+|   |   |   |-- drivetrain.c
+|   |   |   |-- velocity_kinematics.c
+|   |   |   |-- wheel_velocity_pi.c
+|   |   |   `-- odometry.c
+|   |   `-- tape_following/
+|   |       |-- tape_follower.c
+|   |       `-- tape_following_controller.c
 |   |-- drivers/
 |   |   |-- motor/
 |   |   |   `-- motor_driver.c
-|   |   `-- encoder/
-|   |       `-- encoder_driver.c
-|   |-- sensors/
-|   |   |-- tape_following.c
-|   |   `-- tape_following_PID.c
+|   |   |-- encoder/
+|   |   |   `-- encoder_driver.c
+|   |   `-- tape_sensor/
+|   |       `-- tape_sensor_driver.c
+|   |-- sensing/
+|   |   `-- tape_following/
+|   |       |-- tape_line_estimator.c
+|   |       `-- tape_task_detection.c
 |   `-- harnesses/
 |       |-- drive_main.cpp
 |       |-- drivetrain_test_main.cpp
@@ -78,15 +92,19 @@ esp32-drivetrain/
 |-- test/                            Native PlatformIO unit tests
 |   |-- README
 |   |-- native_stubs/
-|   |   `-- esp_err.h
+|   |   |-- esp_err.h
+|   |   `-- driver/gpio.h
 |   |-- test_velocity_kinematics/
 |   |   `-- test_velocity_kinematics.cpp
 |   |-- test_wheel_velocity_pi/
 |   |   `-- test_wheel_velocity_pi.cpp
-|   `-- test_drivetrain_odometry/
-|       `-- test_drivetrain_odometry.cpp
+|   |-- test_drivetrain_odometry/
+|   |   `-- test_drivetrain_odometry.cpp
+|   `-- test_tape_following/
+|       `-- test_tape_following.cpp
 |
 |-- tools/                           Developer-side browser tools
+|   |-- drivetrain_test_dashboard.html
 |   |-- drive_dashboard.html
 |   `-- tuning_dashboard.html
 |
@@ -99,7 +117,7 @@ esp32-drivetrain/
 | Layer | Location | Responsibility | Dependency direction |
 |---|---|---|---|
 | Application and harnesses | `src/main.cpp`, `src/harnesses/` | Select a firmware behavior, process operator commands, schedule updates, and report telemetry. | May depend on configuration, control, drivers, and external communication libraries. |
-| Robot sensing and behavior support | `include/sensors/`, `src/sensors/` | Sample tape hardware and calculate a steering correction from tape position. | Tape sampling depends on GPIO and pin configuration; tape PID depends on sampled sensor state. |
+| Sensing | `include/sensing/`, `src/sensing/` | Estimate tape-line position and detect task markers from sampled inputs. | Depends on sampled sensor state, but not on GPIO operations or application code. |
 | Control | `include/control/`, `src/control/` | Convert body commands to wheel targets, regulate wheel speed, integrate pose deltas, and coordinate drivetrain safety and hardware. | Depends on drivers and control configuration. Pure math modules should not depend on application code. |
 | Hardware abstraction | `include/drivers/`, `src/drivers/` | Wrap ESP32 LEDC, GPIO, PCNT, and timing details behind motor and encoder APIs. | Depends on ESP-IDF and small shared utilities, but not on control or application code. |
 | Board configuration | `include/config/`, `src/config/` | Bind generic module types to this board's pins, peripherals, geometry, limits, and calibration values. | May depend on the type definitions being configured. Runtime modules consume these constants. |
@@ -137,23 +155,23 @@ Contains interfaces that more than one translation unit may include. Its subfold
 
 These files separate reusable algorithms and drivers from one robot's physical wiring and tuning. Headers expose named immutable configuration objects; sources construct those objects from pin assignments, dimensions, peripheral IDs, and calibration values. Changing a connector or gain should normally affect configuration rather than driver logic.
 
-`config/drivetrain/` groups motor, encoder, and complete drivetrain settings. `config/communication/` groups the board settings consumed by shared I2C and UART abstractions. Board-wide `pin_map.h` remains at the config root because several subsystems use it. Existing tape-following files remain at their current paths pending integration from the dedicated TapeFollowing branch.
+`config/drivetrain/` groups motor, encoder, and complete drivetrain settings. `config/tape_following/` groups tape hardware, estimation, controller, and task-detection settings. `config/communication/` groups the board settings consumed by shared I2C and UART abstractions. Board-wide `pin_map.h` remains at the config root because several subsystems use it.
 
 Important files include:
 
 - `pin_map.h`: the single board-level GPIO map.
 - `motor_config.*` and `encoder_config.*`: physical wheel-device assignments.
 - `drivetrain_config.*`: composition root for drivetrain hardware, geometry, PI gains, and safety limits.
-- `tape_following_config.*`: tape module pins and channel-position weights.
+- `tape_following/tape_following_config.*`: tape module pins, channel-position weights, controller limits, and task-detection debounce.
 - `i2c_bus_config.*` and `uart_link_config.*`: board-specific settings for shared `robot-common` communication abstractions.
 
 ### `include/drivers/` and `src/drivers/`
 
-Drivers own direct hardware interaction. Each hardware family has a subfolder so new drivers do not produce one large flat directory. `drivers/motor/` translates signed duty into direction GPIO and LEDC output. `drivers/encoder/` configures ESP32 pulse counters and turns quadrature counts into distance and velocity. Keeping these details here prevents control code from knowing register, channel, or GPIO mechanics.
+Drivers own direct hardware interaction. Each hardware family has a subfolder so new drivers do not produce one large flat directory. `drivers/motor/` translates signed duty into direction GPIO and LEDC output. `drivers/encoder/` configures ESP32 pulse counters and turns quadrature counts into distance and velocity. `drivers/tape_sensor/` owns shared-multiplexer GPIO setup and sampling. Keeping these details here prevents control and sensing code from knowing register, channel, or GPIO mechanics.
 
 ### `include/control/` and `src/control/`
 
-This is the motion-control layer. The current motion modules are grouped under `control/drivetrain/`, leaving room for later control subsystems without mixing them into one flat folder:
+This is the motion-control layer. Motion modules are grouped by subsystem under `control/drivetrain/` and `control/tape_following/`:
 
 - `velocity_kinematics.*` is pure geometry: it converts between body velocity and four wheel angular velocities in both directions.
 - `wheel_velocity_pi.*` is pure closed-loop math for one wheel.
@@ -162,13 +180,15 @@ This is the motion-control layer. The current motion modules are grouped under `
 
 The facade belongs above the individual drivers because it coordinates them as one subsystem. Kinematics, PI, and odometry remain separate because they are reusable, testable mathematical responsibilities.
 
-### `include/sensors/` and `src/sensors/`
+`control/tape_following/` contains the bounded tape correction controller and the stateful follower that chooses the leading sensor, handles line loss, and emits a `DrivetrainBodyVelocity` compatible with the drivetrain facade.
 
-`tape_following.*` reads the three multiplexed tape sensor modules and therefore belongs in the sensor/hardware area. `tape_following_PID.*` converts readings into an error and PID correction. It is currently stored next to its input sensor for discoverability, although its algorithmic portion overlaps conceptually with `control/`; this is identified as a possible future move in `FILE_RESPONSIBILITIES.md`.
+### `include/sensing/` and `src/sensing/`
+
+`sensing/tape_following/` contains hardware-independent interpretation of sampled tape inputs. `tape_line_estimator.*` computes weighted line position and remembers a lost-line direction. `tape_task_detection.*` debounces broad left-module observations into task-marker events.
 
 ### `src/main.cpp`
 
-PlatformIO's default application entry point. It is currently a front-left motor bench test, not a complete robot application. Entry points belong at the top of `src/` because they compose modules rather than implement a reusable layer.
+PlatformIO's default application entry point. It is currently a two-motor bench test, not a complete robot application. Entry points belong at the top of `src/` because they compose modules rather than implement a reusable layer.
 
 ### `src/harnesses/`
 
@@ -176,7 +196,7 @@ Contains alternative C++ application entry points selected by PlatformIO source 
 
 ### `test/`
 
-Contains native unit tests arranged one suite per folder. `native_stubs/esp_err.h` replaces the small ESP-IDF error-code dependency for desktop builds. Tests are separate from firmware sources so they are never linked into deployable images.
+Contains native unit tests arranged one suite per folder. `native_stubs/` replaces the small ESP-IDF error and GPIO type dependencies required by hardware-independent modules. Tests are separate from firmware sources so they are never linked into deployable images.
 
 ### `tools/`
 
@@ -203,7 +223,8 @@ Reserved by PlatformIO for project-private libraries. It currently contains only
 | New GPIO/peripheral driver | `include/drivers/<device>/<name>.h`, `src/drivers/<device>/<name>.c` |
 | New hardware-independent controller or motion transform | `include/control/<subsystem>/<name>.h`, `src/control/<subsystem>/<name>.c` |
 | New board pin, gain, limit, or immutable hardware instance | matching subsystem files under `include/config/` and `src/config/` |
-| New sensor hardware abstraction | `include/sensors/`, `src/sensors/` |
+| New sensor hardware abstraction | `include/drivers/<sensor>/`, `src/drivers/<sensor>/` |
+| New hardware-independent sensor interpretation | `include/sensing/<subsystem>/`, `src/sensing/<subsystem>/` |
 | New complete firmware behavior or diagnostic program | `src/main.cpp` or a separate `src/harnesses/*_main.cpp` plus a PlatformIO environment |
 | New native unit suite | `test/test_<module>/` |
 | New browser/host diagnostic interface | `tools/` |

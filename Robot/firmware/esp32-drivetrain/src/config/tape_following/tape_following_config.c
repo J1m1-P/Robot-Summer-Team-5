@@ -1,5 +1,5 @@
 /* Defines all drivetrain tape-sensor and tape-behavior configuration. */
-#include "config/tape_config.h"
+#include "config/tape_following/tape_following_config.h"
 
 #include "config/pin_map.h"
 
@@ -43,7 +43,7 @@ const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
         .correction_min = -0.30f,
         .correction_max = 0.30f,
     },
-    .search_duty = 0.15f,
+    .search_velocity_mps = 0.15f,
     .lost_timeout_s = 0.50f,
     .controller_dt_max_s = 0.05f,
 };

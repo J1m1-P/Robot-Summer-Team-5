@@ -5,7 +5,10 @@
 #include <esp_timer.h>
 
 #include "config/drivetrain/drivetrain_config.h"
+#include "config/tape_following/tape_following_config.h"
 #include "control/drivetrain/drivetrain.h"
+#include "control/tape_following/tape_following_controller.h"
+#include "sensing/tape_following/tape_line_estimator.h"
 
 namespace {
 
@@ -19,6 +22,8 @@ constexpr uint32_t kDefaultMotionTimeoutMs = 10000;
 constexpr uint32_t kMaxMotionTimeoutMs = 60000;
 constexpr uint32_t kControlPeriodUs = 5000;
 constexpr uint32_t kTelemetryPeriodMs = 100;
+constexpr uint32_t kTapeSamplePeriodMs = 5;
+constexpr float kDefaultTapeCenterMaxMps = 0.20f;
 constexpr uint32_t kSequencePauseMs = 750;
 constexpr float kDefaultAcceleration = 0.50f;
 constexpr float kDefaultDeceleration = 0.80f;
@@ -36,6 +41,7 @@ enum class TestMode {
     SEQUENCE,
     DISTANCE,
     ANGLE,
+    TAPE_CENTER,
     STOPPING,
 };
 
@@ -84,6 +90,7 @@ uint32_t sequence_step_ms = kDefaultDurationMs;
 uint32_t motion_end_ms = 0;
 uint32_t next_sequence_ms = 0;
 uint32_t last_telemetry_ms = 0;
+uint32_t last_tape_sample_ms = 0;
 int64_t last_control_us = 0;
 String serial_command_line;
 uint32_t telemetry_period_ms = kTelemetryPeriodMs;
@@ -105,6 +112,22 @@ int motion_turn_sign = 1;
 uint32_t position_timeout_at_ms = 0;
 WheelVelocityPiConfig live_pi_config = {};
 
+TapeSensorMux tape_sensor_mux = {};
+TapeSensor tape_sensors[TAPE_SENSOR_MODULE_COUNT] = {};
+TapeSensor *tape_sensor_list[TAPE_SENSOR_MODULE_COUNT] = {
+    &tape_sensors[0], &tape_sensors[1], &tape_sensors[2]
+};
+uint8_t tape_bits[TAPE_SENSOR_MODULE_COUNT] = {};
+bool tape_sensors_ready = false;
+int tape_center_sensor_index = 0;
+float tape_center_max_mps = kDefaultTapeCenterMaxMps;
+float tape_center_polarity = 1.0f;
+float tape_center_error = 0.0f;
+float tape_center_correction_mps = 0.0f;
+bool tape_center_line_present = false;
+TapeLineEstimatorState tape_center_estimator_state = {};
+TapeFollowingControllerState tape_center_controller_state = {};
+
 bool time_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
 }
@@ -118,6 +141,7 @@ void print_help() {
     Serial.println("#   distance <direction> <meters> [max_mps] - encoder-relative translation");
     Serial.println("#   turn-angle cw|ccw <degrees> [max_rad_s] - encoder-relative rotation");
     Serial.println("#   sequence [m/s] [ms_each]  - all 8 translations, then CW and CCW");
+    Serial.println("#   tape | tape-center front|back [max_mps] [ms] [polarity]");
     Serial.println("#   invert motor|encoder <wheel> [0|1] - RAM-only inversion (omit value to toggle)");
     Serial.println("#   pi show|reset|kff|offset|kp|ki|slew [value]");
     Serial.println("#   ramp <accel> <decel> | distance-tolerance <m> | angle-tolerance <deg>");
@@ -175,7 +199,9 @@ esp_err_t coast_all() {
 
 bool mode_uses_closed_loop(TestMode current_mode) {
     return current_mode == TestMode::BODY || current_mode == TestMode::DISTANCE ||
-           current_mode == TestMode::ANGLE || current_mode == TestMode::STOPPING ||
+           current_mode == TestMode::ANGLE ||
+           current_mode == TestMode::TAPE_CENTER ||
+           current_mode == TestMode::STOPPING ||
            (current_mode == TestMode::SEQUENCE && sequence_step_active);
 }
 
@@ -264,6 +290,14 @@ void begin_controlled_stop(const char *reason) {
     Serial.printf("# controlled stop: %s\n", reason);
 }
 
+void reset_tape_center_state() {
+    tape_line_estimator_reset(&tape_center_estimator_state);
+    tape_following_controller_reset(&tape_center_controller_state);
+    tape_center_error = 0.0f;
+    tape_center_correction_mps = 0.0f;
+    tape_center_line_present = false;
+}
+
 bool wheels_are_stopped() {
     for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
         if (fabsf(drivetrain_get_encoder_velocity_mps(
@@ -289,6 +323,7 @@ void stop_test(bool announce = true) {
     pair_index = -1;
     command_vx = command_vy = command_omega = 0.0f;
     applied_vx = applied_vy = applied_omega = 0.0f;
+    reset_tape_center_state();
     if (announce) Serial.println("# stopped; all motors coasting");
 }
 
@@ -375,6 +410,51 @@ void print_config() {
     }
 }
 
+void format_tape_bits(uint8_t bits, char output[5]) {
+    for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; ++channel) {
+        output[channel] = (bits & (1U << channel)) ? '1' : '0';
+    }
+    output[TAPE_SENSOR_CHANNEL_COUNT] = '\0';
+}
+
+bool sample_tape_sensors() {
+    if (!tape_sensors_ready) return false;
+    const esp_err_t error = tape_sensor_driver_read_all_raw(
+        tape_sensor_list, tape_bits);
+    if (error != ESP_OK) {
+        Serial.printf("# ERROR: tape sampling failed: %s\n",
+                      esp_err_to_name(error));
+        tape_sensors_ready = false;
+        if (mode == TestMode::TAPE_CENTER && drivetrain_ready) {
+            begin_controlled_stop("tape sensor fault");
+        }
+        return false;
+    }
+    return true;
+}
+
+void print_tape_telemetry(uint32_t now_ms) {
+    char front[5];
+    char back[5];
+    char left[5];
+    format_tape_bits(tape_bits[0], front);
+    format_tape_bits(tape_bits[1], back);
+    format_tape_bits(tape_bits[2], left);
+    const bool target_match = tape_sensors_ready &&
+        mode == TestMode::TAPE_CENTER &&
+        tape_bits[tape_center_sensor_index] == 0x06;
+    const float reported_error = mode == TestMode::TAPE_CENTER
+        ? tape_center_error : 0.0f;
+    const float reported_correction = mode == TestMode::TAPE_CENTER
+        ? tape_center_correction_mps : 0.0f;
+    Serial.printf("TAPE,%lu,%s,%s,%s,%s,%.3f,%.3f,%d\n",
+                  static_cast<unsigned long>(now_ms), front, back, left,
+                  !tape_sensors_ready ? "unavailable" :
+                  (mode == TestMode::TAPE_CENTER ? "centering" : "monitor"),
+                  reported_error, reported_correction,
+                  target_match ? 1 : 0);
+}
+
 void print_telemetry(uint32_t now_ms) {
     Serial.println("# ms,wheel,count,target_mps,measured_mps,duty");
     for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
@@ -398,6 +478,61 @@ void print_telemetry(uint32_t now_ms) {
                       motion_target * 180.0f / kPi,
                       fmaxf(0.0f, motion_target - motion_progress) * 180.0f / kPi);
     }
+    print_tape_telemetry(now_ms);
+}
+
+void start_tape_center(int sensor_index, float maximum_strafe_mps,
+                       uint32_t duration_ms, float polarity) {
+    if (!tape_sensors_ready) {
+        Serial.println("# tape sensors are not ready");
+        return;
+    }
+    const esp_err_t error = coast_all();
+    if (error != ESP_OK) {
+        report_error("tape center start", error);
+        return;
+    }
+    tape_center_sensor_index = sensor_index;
+    tape_center_max_mps = maximum_strafe_mps;
+    tape_center_polarity = polarity;
+    reset_tape_center_state();
+    command_vx = command_vy = command_omega = 0.0f;
+    applied_vx = applied_vy = applied_omega = 0.0f;
+    motion_end_ms = millis() + duration_ms;
+    mode = TestMode::TAPE_CENTER;
+    Serial.printf("# START tape-center %s: target=0110 max_strafe=%.3f m/s "
+                  "polarity=%+.0f for %lu ms\n",
+                  sensor_index == 0 ? "front" : "back",
+                  maximum_strafe_mps, polarity,
+                  static_cast<unsigned long>(duration_ms));
+}
+
+void service_tape_center(float dt_s) {
+    const TapeSensor *sensor = &tape_sensors[tape_center_sensor_index];
+    const TapeLineEstimatorConfig *estimator = tape_center_sensor_index == 0
+        ? &FRONT_TAPE_LINE_ESTIMATOR_CONFIG
+        : &BACK_TAPE_LINE_ESTIMATOR_CONFIG;
+    tape_center_line_present = tape_line_estimator_compute_error(
+        sensor, estimator, &tape_center_estimator_state, &tape_center_error);
+
+    command_vx = 0.0f;
+    command_omega = 0.0f;
+    if (!tape_center_line_present) {
+        tape_following_controller_reset(&tape_center_controller_state);
+        tape_center_correction_mps = 0.0f;
+        command_vy = 0.0f;
+        applied_vx = applied_vy = applied_omega = 0.0f;
+        return;
+    }
+
+    TapeFollowingControllerConfig controller = TAPE_FOLLOWER_CONFIG.controller;
+    controller.correction_min = -tape_center_max_mps;
+    controller.correction_max = tape_center_max_mps;
+    tape_center_correction_mps = tape_center_polarity *
+        tape_following_controller_update(
+            &tape_center_controller_state, &controller,
+            tape_center_error, dt_s);
+    command_vy = tape_center_correction_mps;
 }
 
 bool start_body(float vx, float vy, float omega, uint32_t duration_ms,
@@ -629,6 +764,11 @@ void process_command(String line) {
     if (command == "help") { print_help(); return; }
     if (command == "config") { print_config(); return; }
     if (command == "status") { print_telemetry(millis()); return; }
+    if (command == "tape") {
+        if (sample_tape_sensors()) print_tape_telemetry(millis());
+        else Serial.println("# tape sensors are not ready");
+        return;
+    }
     if (command == "limits" || command == "settings") {
         print_runtime_settings();
         print_pi_config();
@@ -742,6 +882,31 @@ void process_command(String line) {
         uint32_t duration = kDefaultDurationMs;
         if (count >= 4 && !parse_duration(tokens[3], duration)) return;
         start_pair(wheel, duty, duration);
+        return;
+    }
+
+    if (command == "tape-center") {
+        if (count < 2 || (tokens[1] != "front" && tokens[1] != "back")) {
+            Serial.println("# usage: tape-center front|back [max_mps] [ms] [polarity]");
+            return;
+        }
+        const float maximum_strafe = count >= 3
+            ? tokens[2].toFloat() : kDefaultTapeCenterMaxMps;
+        uint32_t duration = kDefaultDurationMs;
+        if (count >= 4 && !parse_duration(tokens[3], duration)) return;
+        const float polarity = count >= 5 ? tokens[4].toFloat() : 1.0f;
+        if (!isfinite(maximum_strafe) || maximum_strafe <= 0.0f ||
+            maximum_strafe > test_config.max_vy_mps) {
+            Serial.printf("# tape-center max speed must be >0 and <=%.2f m/s\n",
+                          test_config.max_vy_mps);
+            return;
+        }
+        if (polarity != 1.0f && polarity != -1.0f) {
+            Serial.println("# tape-center polarity must be 1 or -1");
+            return;
+        }
+        start_tape_center(tokens[1] == "front" ? 0 : 1,
+                          maximum_strafe, duration, polarity);
         return;
     }
 
@@ -877,6 +1042,32 @@ void initialize_test_config() {
     }
 }
 
+void initialize_tape_sensors() {
+    esp_err_t error = tape_sensor_mux_init(
+        &tape_sensor_mux, &TAPE_SENSOR_MUX_CONFIG);
+    if (error == ESP_OK) {
+        error = tape_sensor_driver_init(
+            &tape_sensors[0], &FRONT_TAPE_SENSOR_CONFIG, &tape_sensor_mux);
+    }
+    if (error == ESP_OK) {
+        error = tape_sensor_driver_init(
+            &tape_sensors[1], &BACK_TAPE_SENSOR_CONFIG, &tape_sensor_mux);
+    }
+    if (error == ESP_OK) {
+        error = tape_sensor_driver_init(
+            &tape_sensors[2], &LEFT_TAPE_SENSOR_CONFIG, &tape_sensor_mux);
+    }
+    if (error != ESP_OK) {
+        Serial.printf("# tape sensor initialization failed: %s\n",
+                      esp_err_to_name(error));
+        tape_sensors_ready = false;
+        return;
+    }
+    tape_sensors_ready = true;
+    sample_tape_sensors();
+    Serial.println("# tape sensors ready; channel order is left-to-right");
+}
+
 void update_open_loop_encoders() {
     for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
         const esp_err_t error = encoder_driver_update(&drivetrain.devices.encoders[i]);
@@ -914,6 +1105,7 @@ void setup() {
     Serial.println("\n# Initializing drivetrain hardware test...");
 
     initialize_test_config();
+    initialize_tape_sensors();
     esp_err_t error = drivetrain_init(&drivetrain, &test_config);
     if (error == ESP_OK) error = drivetrain_enable(&drivetrain);
     if (error != ESP_OK) {
@@ -930,9 +1122,22 @@ void setup() {
 
 void loop() {
     service_serial_input();
-    if (!drivetrain_ready) { delay(100); return; }
-
     const uint32_t now_ms = millis();
+    if (tape_sensors_ready &&
+        now_ms - last_tape_sample_ms >= kTapeSamplePeriodMs) {
+        last_tape_sample_ms = now_ms;
+        sample_tape_sensors();
+    }
+    if (!drivetrain_ready) {
+        if (serial_command_line.length() == 0 &&
+            now_ms - last_telemetry_ms >= telemetry_period_ms) {
+            last_telemetry_ms = now_ms;
+            print_tape_telemetry(now_ms);
+        }
+        delay(1);
+        return;
+    }
+
     if (mode == TestMode::PAIR && time_reached(now_ms, motion_end_ms)) {
         stop_test();
     } else if (mode == TestMode::BODY && time_reached(now_ms, motion_end_ms)) {
@@ -941,6 +1146,9 @@ void loop() {
         service_sequence(now_ms);
     } else if (mode == TestMode::DISTANCE || mode == TestMode::ANGLE) {
         service_position_goal(now_ms);
+    } else if (mode == TestMode::TAPE_CENTER &&
+               time_reached(now_ms, motion_end_ms)) {
+        begin_controlled_stop("tape-center duration complete");
     } else if (mode == TestMode::STOPPING &&
                (wheels_are_stopped() || time_reached(now_ms, motion_end_ms))) {
         stop_test(false);
@@ -954,6 +1162,7 @@ void loop() {
         esp_err_t error = ESP_OK;
         const bool closed_loop = mode_uses_closed_loop(mode);
         if (closed_loop) {
+            if (mode == TestMode::TAPE_CENTER) service_tape_center(dt_s);
             update_ramped_command(dt_s);
             error = drivetrain_set_body_velocity(
                 &drivetrain, applied_vx, applied_vy, applied_omega);
@@ -970,10 +1179,11 @@ void loop() {
         if (error != ESP_OK) { report_error("control update", error); return; }
     }
 
-    if (mode != TestMode::IDLE && serial_command_line.length() == 0 &&
+    if (serial_command_line.length() == 0 &&
         now_ms - last_telemetry_ms >= telemetry_period_ms) {
         last_telemetry_ms = now_ms;
-        print_telemetry(now_ms);
+        if (mode == TestMode::IDLE) print_tape_telemetry(now_ms);
+        else print_telemetry(now_ms);
     }
     delay(1);
 }

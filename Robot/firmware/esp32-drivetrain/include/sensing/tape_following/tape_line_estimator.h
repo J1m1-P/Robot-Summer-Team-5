@@ -4,7 +4,7 @@
 
 #include <stdbool.h>
 
-#include "drivers/tape_sensor_driver.h"
+#include "drivers/tape_sensor/tape_sensor_driver.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,4 +1,4 @@
-/* Declares bounded PID correction for tape following. */
+/* Declares bounded PID correction for tape-following velocity control. */
 #ifndef TAPE_FOLLOWING_CONTROLLER_H
 #define TAPE_FOLLOWING_CONTROLLER_H
 

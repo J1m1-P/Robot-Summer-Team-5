@@ -6,10 +6,10 @@
 
 #include "esp_err.h"
 
-#include "control/drivetrain_kinematics.h"
-#include "control/tape_following_controller.h"
-#include "drivers/tape_sensor_driver.h"
-#include "sensing/tape_line_estimator.h"
+#include "control/drivetrain/velocity_kinematics.h"
+#include "control/tape_following/tape_following_controller.h"
+#include "drivers/tape_sensor/tape_sensor_driver.h"
+#include "sensing/tape_following/tape_line_estimator.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,8 +34,8 @@ typedef struct {
     const TapeLineEstimatorConfig *back_estimator;
     TapeFollowingControllerConfig controller;
 
-    /* Lateral body duty used to search toward the last observed tape position. */
-    float search_duty;
+    /* Lateral body velocity used to search toward the last tape position. */
+    float search_velocity_mps;
 
     /* Maximum continuous search duration before reporting TAPE_FOLLOWER_LOST. */
     float lost_timeout_s;
@@ -45,19 +45,19 @@ typedef struct {
 
 } TapeFollowerConfig;
 
-/* Supplies both guidance modules and the requested signed travel duty.
+/* Supplies both guidance modules and the requested signed travel velocity.
  * Positive travel uses the front sensor; negative travel uses the back sensor.
  * Sensor sampling remains outside this module so it can be tested without GPIO. */
 typedef struct {
     const TapeSensor *front_sensor;
     const TapeSensor *back_sensor;
-    float travel_duty;
+    float travel_velocity_mps;
 } TapeFollowerInput;
 
-/* Returns the motion requested by the behavior and useful diagnostic values.
- * The robot manager should apply requested_motion only when motion_valid is true. */
+/* Returns a command compatible with drivetrain_set_body_velocity plus useful
+ * diagnostic values. Apply requested_velocity only when motion_valid is true. */
 typedef struct {
-    DrivetrainBodyDuty requested_motion;
+    DrivetrainBodyVelocity requested_velocity;
     TapeFollowerStatus status;
 
     float line_error;

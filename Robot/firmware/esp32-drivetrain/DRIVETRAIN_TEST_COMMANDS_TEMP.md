@@ -146,6 +146,30 @@ Example:
 sequence 0.20 1500
 ```
 
+## Tape Monitoring and 0110 Centering
+
+The harness samples the front, back, and left four-channel tape modules and
+streams their raw patterns while idle or moving. Bits are printed in channel
+order 0 through 3, corresponding to the configured left-to-right weights.
+
+```text
+tape
+tape-center front|back [max_strafe_mps] [duration_ms] [polarity]
+```
+
+Examples:
+
+```text
+tape
+tape-center front 0.20 3000 1
+tape-center back 0.15 2000 -1
+```
+
+Centering commands lateral velocity only and uses `0110` as the exact target.
+It stops lateral correction when no tape channel is active, ends after the
+requested duration, and remains subject to the normal stop and brake commands.
+Use polarity `-1` if the robot moves away from the center instead of toward it.
+
 ## Runtime Direction Inversion
 
 Toggle the current setting:
@@ -227,6 +251,7 @@ brake
 enable
 reset-encoders
 status
+tape
 config
 limits
 help

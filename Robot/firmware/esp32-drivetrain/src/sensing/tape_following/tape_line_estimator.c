@@ -1,5 +1,5 @@
 /* Implements weighted tape-line position estimation. */
-#include "sensing/tape_line_estimator.h"
+#include "sensing/tape_following/tape_line_estimator.h"
 
 #include <stddef.h>
 

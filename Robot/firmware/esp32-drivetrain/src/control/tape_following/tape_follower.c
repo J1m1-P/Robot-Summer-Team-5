@@ -1,5 +1,5 @@
 /* Implements directional tape following and lost-line recovery. */
-#include "control/tape_follower.h"
+#include "control/tape_following/tape_follower.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -23,11 +23,23 @@ static bool controller_config_is_valid(
 /* Rejects configurations that could produce undefined or unsafe behavior. */
 static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
 {
-    return config != NULL && config->front_estimator != NULL &&
-           config->back_estimator != NULL &&
-           controller_config_is_valid(&config->controller) &&
-           isfinite(config->search_duty) && config->search_duty >= 0.0f &&
-           config->search_duty <= 1.0f && isfinite(config->lost_timeout_s) &&
+    if (config == NULL || config->front_estimator == NULL ||
+        config->back_estimator == NULL) {
+        return false;
+    }
+
+    for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; channel++) {
+        if (!isfinite(config->front_estimator->channel_weights[channel]) ||
+            !isfinite(config->back_estimator->channel_weights[channel])) {
+            return false;
+        }
+    }
+
+    return controller_config_is_valid(&config->controller) &&
+           isfinite(config->search_velocity_mps) &&
+           config->search_velocity_mps >= 0.0f &&
+           config->search_velocity_mps <= 1.0f &&
+           isfinite(config->lost_timeout_s) &&
            config->lost_timeout_s >= 0.0f &&
            isfinite(config->controller_dt_max_s) &&
            config->controller_dt_max_s > 0.0f;
@@ -84,7 +96,8 @@ esp_err_t tape_follower_update(TapeFollower *follower,
 {
     if (follower == NULL || input == NULL || output == NULL ||
         input->front_sensor == NULL || input->back_sensor == NULL ||
-        !isfinite(input->travel_duty) || fabsf(input->travel_duty) > 1.0f ||
+        !isfinite(input->travel_velocity_mps) ||
+        fabsf(input->travel_velocity_mps) > 1.0f ||
         !isfinite(dt_s) || dt_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -96,9 +109,9 @@ esp_err_t tape_follower_update(TapeFollower *follower,
     /* A zero travel request idles the behavior instead of choosing a sensor or
      * refreshing the drivetrain watchdog with a zero motion command. */
     int8_t requested_direction = 0;
-    if (input->travel_duty > 0.0f) {
+    if (input->travel_velocity_mps > 0.0f) {
         requested_direction = 1;
-    } else if (input->travel_duty < 0.0f) {
+    } else if (input->travel_velocity_mps < 0.0f) {
         requested_direction = -1;
     }
 
@@ -148,11 +161,11 @@ esp_err_t tape_follower_update(TapeFollower *follower,
             reset_controller(follower);
         }
 
-        output->requested_motion.x = tape_following_controller_update(
+        output->requested_velocity.vy = tape_following_controller_update(
             &follower->controller_state, &follower->config->controller,
             output->line_error, controller_dt);
-        output->requested_motion.y = input->travel_duty;
-        output->requested_motion.turn = 0.0f;
+        output->requested_velocity.vx = input->travel_velocity_mps;
+        output->requested_velocity.omega = 0.0f;
         output->motion_valid = true;
 
         follower->lost_elapsed_s = 0.0f;
@@ -177,8 +190,8 @@ esp_err_t tape_follower_update(TapeFollower *follower,
             }
 
             follower->status = TAPE_FOLLOWER_SEARCHING;
-            output->requested_motion.x =
-                search_direction * follower->config->search_duty;
+            output->requested_velocity.vy =
+                search_direction * follower->config->search_velocity_mps;
             output->motion_valid = search_direction != 0.0f;
         }
     }

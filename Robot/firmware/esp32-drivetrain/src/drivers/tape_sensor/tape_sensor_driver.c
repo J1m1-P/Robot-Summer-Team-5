@@ -1,5 +1,5 @@
 /* Implements shared-multiplexer sampling for the three tape sensor modules. */
-#include "drivers/tape_sensor_driver.h"
+#include "drivers/tape_sensor/tape_sensor_driver.h"
 
 #include <stddef.h>
 

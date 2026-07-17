@@ -1,4 +1,4 @@
-/* Declares multiplexed tape sensor hardware initialization and sampling. */
+/* Declares multiplexed tape-sensor hardware initialization and sampling. */
 #ifndef TAPE_SENSOR_DRIVER_H
 #define TAPE_SENSOR_DRIVER_H
 

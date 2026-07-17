@@ -11,7 +11,7 @@ For every header/source pair, the header is the public contract: shared types, i
 | Path | Layer | Responsibility and interaction |
 |---|---|---|
 | `.gitignore` | Repository tooling | Excludes PlatformIO output, generated VS Code databases, and `misc/`. It should contain only repository-wide ignore rules and should not encode build behavior. Git and developer tools consume it. |
-| `platformio.ini` | Build configuration | Selects ESP32-S3/Arduino and native toolchains, `robot-common`, WebSockets, C++17, entry-point source filters, monitor settings, and four environments. It should not contain firmware behavior or runtime constants. PlatformIO consumes it; its filters determine which files become each image. |
+| `platformio.ini` | Build configuration | Selects ESP32-S3/Arduino and native toolchains, `robot-common`, WebSockets, C++17, entry-point source filters, monitor settings, and five environments. It should not contain firmware behavior or runtime constants. PlatformIO consumes it; its filters determine which files become each image. |
 | `PLATFORMIO_COMMANDS.md` | Developer documentation | Lists common build, test, upload, monitor, and clean commands. It affects no firmware and depends only on the environment names in `platformio.ini`. |
 | `include/README`, `lib/README`, `test/README` | Template documentation | Generic PlatformIO explanations for those directories. They are onboarding aids but do not describe this robot. Replacing or supplementing them with project-specific notes would be more useful. |
 
@@ -26,8 +26,8 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should contain:** board-revision pin assignments and only very small compile-time pin aliases.
 - **Should not contain:** driver initialization, controller gains, runtime state, or application decisions.
 - **Dependencies:** none.
-- **Used by:** all configuration sources and `tape_following.c` for its shared mux selectors.
-- **Current coupling:** `tape_following.c` directly consumes shared selector macros, so those selectors cannot be supplied through a reusable sensor configuration object.
+- **Used by:** board configuration sources, including the tape-following composition root.
+- **Tape isolation:** the tape driver receives selector pins through `TapeSensorMuxConfig`; it does not consume this board map directly.
 
 ### `include/config/drivetrain/motor_config.h` and `src/config/drivetrain/motor_config.c`
 
@@ -64,17 +64,16 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Consumers:** `drive_main.cpp`, `tuning_main.cpp`, and any future production drivetrain application.
 - **Interaction:** it is the subsystem's composition root; `drivetrain_init` validates and retains it.
 
-### `include/config/tape_following_config.h` and `src/config/tape_following_config.c`
+### `include/config/tape_following/tape_following_config.h` and `src/config/tape_following/tape_following_config.c`
 
-- **Layer:** sensor and control calibration configuration.
-- **Why they exist:** map front/back/left tape modules to input pins and assign physical position weights to their four channels.
-- **Header currently owns:** declarations for the three `TapeSensorConfig` objects.
-- **Source owns:** those three objects and `FRONT_PID_WEIGHTS`, `BACK_PID_WEIGHTS`, and `LEFT_PID_WEIGHTS`.
-- **Should contain:** immutable module wiring, channel ordering, weights, and eventually named tape PID gain objects.
-- **Should not contain:** sensor samples, PID integral/derivative history, GPIO operations, or steering decisions.
-- **Dependencies:** `tape_following.h`, `tape_following_PID.h`, and `pin_map.h`.
-- **Consumers:** no current application consumes these objects; they are available for future tape-following integration.
-- **Current defect:** the three PID weight objects are defined in the `.c` file but not declared in the header. Other files cannot use them through the intended public configuration interface. The header also does not include the header that defines `TapePidSensorConfig`.
+- **Layer:** tape-sensor and behavior configuration.
+- **Why they exist:** compose the tape subsystem in one place, parallel to `config/drivetrain/`.
+- **Header owns:** declarations for the shared mux, three module configs, front/back estimator configs, complete follower config, and task-detector config.
+- **Source owns:** board pin bindings, channel weights, controller gains and limits, lost-line behavior, and task-marker debounce values.
+- **Should contain:** immutable wiring, calibration, controller tuning, and behavior thresholds.
+- **Should not contain:** sensor samples, controller history, GPIO operations, task state, or drivetrain commands.
+- **Dependencies:** tape driver, sensing, follower types, and `pin_map.h`.
+- **Consumers:** future production tape-following composition code; the definitions currently compile into the default firmware but are not invoked by `main.cpp`.
 
 ### `include/config/communication/i2c_bus_config.h` and `src/config/communication/i2c_bus_config.c`
 
@@ -176,38 +175,61 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Current public state:** `Drivetrain` has four grouped top-level members—`config`, `devices`, `control`, and `status`—instead of many flat fields. The device and control layouts remain visible so callers can statically allocate a C object. This creates more coupling than a truly opaque handle.
 - **Scope note:** at roughly 500 lines it has several responsibilities, but they are currently cohesive around subsystem coordination. If it grows, private lifecycle, safety, and telemetry helpers could move to internal files without expanding the public API.
 
-## Sensor and tape-control layer
+## Tape driver, sensing, and control layers
 
-### `include/sensors/tape_following.h` and `src/sensors/tape_following.c`
+### `include/drivers/tape_sensor/tape_sensor_driver.h` and `src/drivers/tape_sensor/tape_sensor_driver.c`
 
 - **Layer:** sensor hardware abstraction.
 - **Why they exist:** operate three tape modules that share two multiplexer selector pins and each expose one selected-channel input.
-- **Header owns:** module count, per-module configuration, sampled state, channel enum, initialization, single-pin read, full scan, and packed raw scan APIs.
-- **Source owns:** active electrical level, mux settling time, shared selector initialization, private channel selection, GPIO setup, scanning, and bit packing.
-- **Should not contain:** PID gains, steering correction, motor commands, course state, or drivetrain control.
-- **Dependencies:** ESP-IDF GPIO/delay APIs and `pin_map.h`.
-- **Consumers:** `tape_following_PID.*` uses the sampled `TapeSensor` type; no application currently initializes or samples the sensors.
-- **Current coupling:** selector pins are global macros rather than part of a bus/mux configuration, and `s_chsel_initialized` assumes one shared mux for the entire program. That matches this board but limits reuse and isolated testing.
-- **API note:** `pin_is_on_tape` could accept `const TapeSensor *` because it does not modify state.
+- **Header owns:** channel/module constants, mux and module configuration, runtime sampled state, initialization, current-channel read, full scan, and packed raw scan APIs.
+- **Source owns:** active electrical level, mux settling, channel selection, GPIO setup, sampling, and bit packing.
+- **Should not contain:** estimation weights, controller gains, steering decisions, motor commands, or task-marker policy.
+- **Dependencies:** ESP-IDF GPIO, delay, and error APIs.
+- **Consumers:** the tape sensing and control modules use the sampled `TapeSensor` type; no application currently initializes the physical sensors.
+- **Isolation:** selector pins are supplied through `TapeSensorMuxConfig`, so the driver no longer reads board pin macros directly.
 
-### `include/sensors/tape_following_PID.h` and `src/sensors/tape_following_PID.c`
+### `include/sensing/tape_following/tape_line_estimator.h` and `src/sensing/tape_following/tape_line_estimator.c`
 
-- **Layer:** line-position estimation and control logic.
-- **Why they exist:** calculate a weighted line error, preserve a useful direction when the line disappears, and produce a bounded PID steering correction.
-- **Header owns:** channel count, `TapePidSensorConfig`, `TapePidGains`, `TapePidState`, reset, error calculation, and PID update declarations.
-- **Source owns:** centroid calculation, lost-line fallback, integral clamp, derivative history, output clamp, and reset behavior.
-- **Should not contain:** GPIO access, motor commands, course sequencing, drivetrain mapping, or immutable board-specific weights/gains.
-- **Dependencies:** `tape_following.h` for sampled sensor state and standard scalar types.
-- **Consumers:** `tape_following_config.c`; no application currently calls the PID functions.
-- **Overlap:** PID calculation is control logic located under `sensors/`. Keeping centroid extraction near the sensor is defensible, but the generic PID step overlaps `control/drivetrain/wheel_velocity_pi.c` conceptually and may be better placed under `control/` if tape behavior expands.
-- **Naming inconsistency:** uppercase `PID` in paths differs from the repository's lowercase snake_case convention.
+- **Layer:** hardware-independent sensing.
+- **Why they exist:** calculate a weighted line centroid and retain a useful search direction when the line disappears.
+- **Header owns:** estimator configuration/state plus reset and compute APIs.
+- **Source owns:** active-channel aggregation, centroid calculation, and lost-line fallback.
+- **Should not contain:** GPIO reads, PID state, drivetrain commands, or board-specific weights.
+- **Consumers:** `tape_follower.c` and native tape-following tests.
+
+### `include/sensing/tape_following/tape_task_detection.h` and `src/sensing/tape_following/tape_task_detection.c`
+
+- **Layer:** hardware-independent sensing/event detection.
+- **Why they exist:** debounce broad left-module observations into stable task-marker state and edge events.
+- **Header owns:** detector configuration, runtime state, output events, and lifecycle/update APIs.
+- **Source owns:** active-channel counting, saturated counters, confirmation, and release transitions.
+- **Consumers:** future robot-manager integration and native tape-following tests.
+
+### `include/control/tape_following/tape_following_controller.h` and `src/control/tape_following/tape_following_controller.c`
+
+- **Layer:** pure control mathematics.
+- **Why they exist:** convert estimated lateral tape error into a bounded lateral velocity correction.
+- **Header owns:** PID configuration/history plus reset and update APIs.
+- **Source owns:** finite-input validation, integration, derivative calculation, and output clamping.
+- **Should not contain:** sensor sampling, travel-direction selection, task detection, or drivetrain calls.
+- **Consumers:** `tape_follower.c` and native tape-following tests.
+
+### `include/control/tape_following/tape_follower.h` and `src/control/tape_following/tape_follower.c`
+
+- **Layer:** stateful tape-following behavior.
+- **Why they exist:** select the leading sensor from travel direction, coordinate estimation and feedback, recover briefly after tape loss, and report a lost state.
+- **Header owns:** follower configuration, input/output, status, state, and lifecycle/update APIs.
+- **Source owns:** configuration validation, direction changes, controller resets, timeout handling, and search behavior.
+- **Drivetrain compatibility:** output uses `DrivetrainBodyVelocity` (`vx`, `vy`, `omega`) and can be passed to `drivetrain_set_body_velocity` when `motion_valid` is true.
+- **Should not contain:** GPIO operations, direct drivetrain calls, task detection, or board-specific tuning constants.
+- **Consumers:** future robot-manager integration and native tape-following tests.
 
 ## Application and harness files
 
 ### `src/main.cpp`
 
 - **Layer:** default application entry point.
-- **Current responsibility:** initializes logging and the front-left motor, enables it, and repeatedly applies `0.5` duty as a bench test.
+- **Current responsibility:** initializes logging and the front-left/front-right motors, enables them, and repeatedly applies `0.5` duty as a bench test.
 - **Why it exists here:** Arduino expects one compiled pair of global `setup()` and `loop()` functions; the default PlatformIO environment includes this file.
 - **Should contain:** top-level composition, startup ordering, periodic scheduling, and high-level handling for the selected production behavior.
 - **Should not contain:** reusable motor logic, controller equations, pin definitions, or hardware-driver implementation.
@@ -238,9 +260,9 @@ Configuration files bind reusable types to this board. Their source objects are 
 ### `src/harnesses/drivetrain_test_main.cpp`
 
 - **Layer:** interactive hardware acceptance application.
-- **Responsibility:** runs timed and encoder-relative translation/rotation tests, duty-limited individual motor/encoder checks, runtime PI/ramp/tolerance tuning, and serial telemetry.
+- **Responsibility:** runs timed and encoder-relative translation/rotation tests, duty-limited individual motor/encoder checks, tape-sensor monitoring and timed `0110` lateral centering, runtime PI/ramp/tolerance tuning, and serial telemetry.
 - **Configuration behavior:** starts from test-local copies of `DRIVETRAIN_CONFIG`, allowing RAM-only motor or encoder direction inversion without changing production configuration.
-- **Safety behavior:** provides controlled stop, immediate coast, hardware brake/re-enable, motion timeout, acceleration/deceleration ramps, an 80% individual-test cap, and pauses between automatic sequence steps.
+- **Safety behavior:** provides controlled stop, immediate coast, hardware brake/re-enable, motion timeout, acceleration/deceleration ramps, an 80% individual-test cap, timed tape centering, no-tape motion suppression, and pauses between automatic sequence steps.
 - **Consumers:** the `drivetrain-test` PlatformIO environment.
 
 ## Tests
@@ -278,7 +300,7 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Responsibility:** provides a local point-and-click controller for every command exposed by `drivetrain_test_main.cpp`.
 - **Transport:** uses the browser Web Serial API at 115200 baud through the CH340K USB-to-UART port; it has no Wi-Fi or server dependency.
 - **Safety:** exposes prominent stop controls, preserves the harness's input limits, and displays all firmware responses in a serial log.
-- **Telemetry:** plots rolling target/measured wheel velocity and applied duty for all four wheels.
+- **Telemetry:** plots rolling target/measured wheel velocity and applied duty for all four wheels, displays all three four-channel tape patterns, and reports tape detection, centering error, lateral correction, and exact `0110` matches.
 - **Consumers:** operators running the `drivetrain-test` PlatformIO environment in desktop Chrome or Edge.
 
 ### `tools/drive_dashboard.html`
@@ -299,24 +321,21 @@ Configuration files bind reusable types to this board. Their source objects are 
 
 ### Overlapping responsibilities
 
-1. `tape_following_PID.c` contains general control math under `sensors/`, while wheel PI lives under `control/`. A consistent boundary would keep hardware sampling under `sensors/` and steering control under `control/`.
-2. Wheel identity is represented by both `DrivetrainMotorId` and `EncoderId`. They currently share FL/FR/BL/BR ordering, and `drivetrain.c` validates that assumption, but two enums can diverge.
-3. Wheel geometry appears as encoder diameter and kinematics radius. This duplication is necessary for the current APIs but needs a single calibrated source or explicit cross-validation.
-4. `drivetrain.c` combines lifecycle, safety, control scheduling, and telemetry. This is acceptable for a facade today, but private submodules may be warranted as it grows.
+1. Wheel identity is represented by both `DrivetrainMotorId` and `EncoderId`. They currently share FL/FR/BL/BR ordering, and `drivetrain.c` validates that assumption, but two enums can diverge.
+2. Wheel geometry appears as encoder diameter and kinematics radius. This duplication is necessary for the current APIs but needs a single calibrated source or explicit cross-validation.
+3. `drivetrain.c` combines lifecycle, safety, control scheduling, and telemetry. This is acceptable for a facade today, but private submodules may be warranted as it grows.
 
 ### Misplaced or inconsistent files
 
 1. `src/main.cpp` is a motor bench harness in the production/default entry-point location.
-2. `tape_following_PID.h/.c` use uppercase `PID`, unlike lowercase snake_case filenames elsewhere.
-3. Generic PlatformIO README files do not document this project's conventions.
-4. `lib/` is empty while the actual private shared library is a sibling directory. This is valid PlatformIO configuration but can surprise new developers.
+2. Generic PlatformIO README files do not document this project's conventions.
+3. `lib/` is empty while the actual private shared library is a sibling directory. This is valid PlatformIO configuration but can surprise new developers.
 
 ### Unnecessary coupling
 
 1. `drivetrain.h` includes both driver headers and publicly exposes `DrivetrainDevices` and `DrivetrainControlState`. This is required by the present caller-allocated C object design, but it exposes implementation layout.
 2. `encoder_driver.h` exposes ESP-IDF `gpio_num_t`, `pcnt_unit_t`, and `pcnt_channel_t`, so any host code including it needs ESP-IDF types or stubs.
-3. `tape_following.c` reads shared selector pins directly from `pin_map.h`, tying a nominal sensor driver to this board.
-4. The HTML tools and C++ harnesses share protocols only by convention; there is no versioned schema or common protocol description.
+3. The HTML tools and C++ harnesses share protocols only by convention; there is no versioned schema or common protocol description.
 
 ### Missing integration or modules
 
@@ -326,17 +345,15 @@ These are observations and recommendations, not existing files:
 2. **Motor bench harness:** move the present `main.cpp` behavior to a recommended `src/harnesses/motor_bench_main.cpp` and add a matching PlatformIO environment.
 3. **Wheel-to-body odometry transform:** add a hardware-independent forward-kinematics/delta module so encoder changes can produce `DrivetrainBodyDelta`; then decide whether `Drivetrain` or a higher state-estimation layer owns odometry.
 4. **Communication application layer:** add a module that owns UART-link initialization, packet parsing, timeouts, and translation from upper-controller messages to drivetrain commands. The current repository has only UART configuration.
-5. **Tape-following behavior:** add application/course logic that initializes sensors, runs the tape controller, and converts steering correction into bounded body-velocity commands. Sensor and PID primitives exist but are unused.
-6. **Tape PID configuration declarations:** expose the three existing weight objects and add explicit gain objects if they are intended to be globally configured.
-7. **Integration and driver tests:** add tests for drivetrain state transitions/limits with hardware fakes, tape PID math, tape scan behavior, and driver validation. Current native coverage is limited to three pure control modules.
-8. **Root README:** add a project-specific `README.md` covering purpose, hardware, prerequisites, quick build/test commands, and links to these architecture documents.
+5. **Tape-following integration:** add application/course logic that initializes the tape driver, updates the follower and task detector, and forwards valid body-velocity requests to the drivetrain. The primitives are implemented and natively tested but unused by `main.cpp`.
+6. **Integration and driver tests:** add tests for drivetrain state transitions/limits with hardware fakes, tape scan behavior, and driver validation. Pure tape estimation, control, follower, and task detection now have native coverage.
+7. **Root README:** add a project-specific `README.md` covering purpose, hardware, prerequisites, quick build/test commands, and links to these architecture documents.
 
 ## Suggested improvement order
 
-1. Fix `tape_following_config.h` declarations and normalize `tape_following_pid` naming.
-2. Move the motor bench behavior into its own harness and make `main.cpp` an explicit production composition root.
-3. Add native tests for tape PID and drivetrain state/limit behavior.
-4. Establish one shared wheel identity and one authoritative wheel-geometry calibration source.
-5. Add wheel-to-body kinematics and connect odometry only after its ownership and update timing are defined.
-6. Add application-level UART command handling and tape-following behavior as separate modules rather than expanding drivers.
-7. Consider an opaque or fixed-storage drivetrain handle only if public-layout coupling becomes a maintenance problem; do not introduce heap allocation merely for encapsulation on this embedded target.
+1. Move the motor bench behavior into its own harness and make `main.cpp` an explicit production composition root.
+2. Add native drivetrain state/limit tests using hardware fakes.
+3. Establish one shared wheel identity and one authoritative wheel-geometry calibration source.
+4. Add wheel-to-body kinematics and connect odometry only after its ownership and update timing are defined.
+5. Add application-level UART command handling and tape-following behavior as separate modules rather than expanding drivers.
+6. Consider an opaque or fixed-storage drivetrain handle only if public-layout coupling becomes a maintenance problem; do not introduce heap allocation merely for encapsulation on this embedded target.
