@@ -13,6 +13,8 @@ typedef struct {
     uint32_t stepPulseUs;     // Duration of the high step pulse in microseconds.
     uint32_t stepDelayUs;     // Delay between completed pulses in microseconds.
 
+    uint32_t motionlimitMM;   // Maximum distance in millimeters that the stepper is allowed to move in one direction.
+
     bool isMoving;            // True when an asynchronous move is active.
     long stepsRemaining;      // Number of steps left to execute.
     bool direction;           // Current movement direction.

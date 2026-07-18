@@ -72,6 +72,10 @@ void stepper_x_move_distanceMM(StepperDriver *driver, float distanceMM) {
         return;
     }
 
+    if (distanceMM > driver->motionlimitMM) {
+        distanceMM = driver->motionlimitMM;
+    }
+    
     // Convert linear motion to step count using the belt and pulley geometry.
     long steps = (long)round(distanceMM * (stepsPerRev / (beltPitchMM * pulleyTeeth)));
     stepper_move_steps(driver, steps);
@@ -80,6 +84,10 @@ void stepper_x_move_distanceMM(StepperDriver *driver, float distanceMM) {
 void stepper_z_move_distanceMM(StepperDriver *driver, float distanceMM) {
     if (distanceMM == 0) {
         return;
+    }
+
+    if (distanceMM > driver->motionlimitMM) {
+        distanceMM = driver->motionlimitMM;
     }
 
     // Convert linear motion to step count using the leadscrew geometry.

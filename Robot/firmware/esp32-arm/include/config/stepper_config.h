@@ -12,11 +12,14 @@ struct StepperConfig {
     // Step delay is the time between steps in microseconds.
     uint32_t stepPulseUs;
     uint32_t stepDelayUs;
+
+    // Maximum distance in millimeters that the stepper is allowed to move in one direction.        
+    uint32_t motionlimitMM; 
 };
 
 // Ready-to-use configurations for the four arm stepper axes.
-// Field order is stepPin, dirPin, stepPulseUs, and stepDelayUs.
-inline StepperConfig towerXConfig {16, 15, 3, 3000};
-inline StepperConfig towerZConfig {42, 41, 3, 1500};
-inline StepperConfig habitatXConfig {18, 17, 3, 3000};
-inline StepperConfig habitatZConfig {21, 40, 3, 1500};
+// Field order is stepPin, dirPin, stepPulseUs, stepDelayUs, and motionlimitMM.
+inline StepperConfig towerXConfig {16, 15, 3, 3000, 138};
+inline StepperConfig towerZConfig {42, 41, 3, 1500, 220};
+inline StepperConfig habitatXConfig {18, 17, 3, 3000, 187};
+inline StepperConfig habitatZConfig {21, 40, 3, 1500, 152};
