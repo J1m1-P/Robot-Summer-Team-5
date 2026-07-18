@@ -14,6 +14,7 @@
 #define MOTOR_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define MOTOR_LEDC_TIMER LEDC_TIMER_0
 
+static bool s_ledc_timer_initialized = false;
 
 // Validates GPIOs, PWM settings, duty limits, and channel range.
 bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
@@ -98,18 +99,22 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
         return err;
     }
 
-    // Configure PWM timer
-    ledc_timer_config_t pwm_timer_config = {
-        .speed_mode = MOTOR_LEDC_MODE, 
-        .timer_num = MOTOR_LEDC_TIMER, 
-        .duty_resolution = (ledc_timer_bit_t)config->pwm_resolution, 
-        .freq_hz = config->pwm_frequency, 
-        .clk_cfg = LEDC_AUTO_CLK
-    };
+    // Configure the shared PWM timer once for all motor channels.
+    if (!s_ledc_timer_initialized) {
+        ledc_timer_config_t pwm_timer_config = {
+            .speed_mode = MOTOR_LEDC_MODE, 
+            .timer_num = MOTOR_LEDC_TIMER, 
+            .duty_resolution = (ledc_timer_bit_t)config->pwm_resolution, 
+            .freq_hz = config->pwm_frequency, 
+            .clk_cfg = LEDC_AUTO_CLK
+        };
 
-    err = ledc_timer_config(&pwm_timer_config);
-    if (err != ESP_OK) {
-        return err;
+        err = ledc_timer_config(&pwm_timer_config);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        s_ledc_timer_initialized = true;
     }
 
     // Configure PWM channel
