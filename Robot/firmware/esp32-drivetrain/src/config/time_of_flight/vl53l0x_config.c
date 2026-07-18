@@ -20,7 +20,7 @@ const VL53L0XConfig LEFT_VL53L0X_CONFIG = {
     .id = VL53L0X_SENSOR_LEFT, 
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
-    .defalut_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
+    .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
     .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + LEFT_OFFSET, 
     
     .xshut_pin = PIN_TOF1_XSHUT, 
@@ -34,7 +34,7 @@ const VL53L0XConfig MID_VL53L0X_CONFIG = {
     .id = VL53L0X_SENSOR_MID, 
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
-    .defalut_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
+    .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
     .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + MID_OFFSET, 
     
     .xshut_pin = PIN_TOF2_XSHUT, 
@@ -48,7 +48,7 @@ const VL53L0XConfig RIGHT_VL53L0X_CONFIG = {
     .id = VL53L0X_SENSOR_RIGHT, 
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
-    .defalut_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
+    .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
     .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + RIGHT_OFFSET, 
     
     .xshut_pin = GPIO_NUM_NC, 
