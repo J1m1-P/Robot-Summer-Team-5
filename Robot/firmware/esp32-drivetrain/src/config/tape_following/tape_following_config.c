@@ -10,15 +10,15 @@ const TapeSensorMuxConfig TAPE_SENSOR_MUX_CONFIG = {
 };
 
 const TapeSensorDriverConfig FRONT_TAPE_SENSOR_CONFIG = {
-    .module_output_pin = PIN_TF1_INPUT,
+    .module_output_pin = PIN_TF_FRONT_INPUT,
 };
 
 const TapeSensorDriverConfig BACK_TAPE_SENSOR_CONFIG = {
-    .module_output_pin = PIN_TF2_INPUT,
+    .module_output_pin = PIN_TF_BACK_INPUT,
 };
 
 const TapeSensorDriverConfig LEFT_TAPE_SENSOR_CONFIG = {
-    .module_output_pin = PIN_TF3_INPUT,
+    .module_output_pin = PIN_TF_LEFT_INPUT,
 };
 
 /* Guidance-channel weights ordered from the robot's left to right. */

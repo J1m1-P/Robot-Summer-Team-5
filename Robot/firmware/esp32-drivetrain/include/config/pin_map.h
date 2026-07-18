@@ -2,9 +2,9 @@
 #pragma once
 
 // Tape Following Pins
-#define PIN_TF1_INPUT           1   // Pin for Tape Following output 1
-#define PIN_TF2_INPUT           2   // Pin for Tape Following output 2
-#define PIN_TF3_INPUT           3   // Pin for Tape Following output 3
+#define PIN_TF_FRONT_INPUT      3   // Pin for Tape Following output 1
+#define PIN_TF_BACK_INPUT       2   // Pin for Tape Following output 2
+#define PIN_TF_LEFT_INPUT       1   // Pin for Tape Following output 3
 #define PIN_TF_CHSEL1_PIN       39  // Pin for Tape Following channel select 1
 #define PIN_TF_CHSEL2_PIN       38  // Pin for Tape Following channel select 2
 
