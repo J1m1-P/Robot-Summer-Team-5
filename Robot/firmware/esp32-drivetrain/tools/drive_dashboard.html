@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Drive Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --wheel-fl:       #2a78d6;
+    --wheel-fr:       #008300;
+    --wheel-bl:       #4a3aa7;
+    --wheel-br:       #e34948;
+    --danger:         #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --wheel-fl:       #3987e5;
+      --wheel-fr:       #008300;
+      --wheel-bl:       #9085e9;
+      --wheel-br:       #e66767;
+      --danger:         #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --wheel-fl:       #3987e5;
+    --wheel-fr:       #008300;
+    --wheel-bl:       #9085e9;
+    --wheel-br:       #e66767;
+    --danger:         #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  .viz-root { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 16px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 16px;
+  }
+  button {
+    font: inherit; font-size: 13px; font-weight: 600;
+    padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); cursor: pointer;
+  }
+  button.primary { background: var(--wheel-fl); color: #fff; border-color: transparent; }
+  button.stop { background: var(--danger); color: #fff; border-color: transparent; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #status { font-size: 13px; color: var(--text-secondary); }
+  #status.connected { color: var(--wheel-fr); font-weight: 600; }
+  #status.error { color: var(--danger); font-weight: 600; }
+  input[type="text"], input[type="number"] {
+    font: inherit; font-size: 13px; padding: 6px 8px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary);
+  }
+
+  .panel {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; margin-bottom: 16px;
+  }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+  .row label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .row input { width: 90px; }
+
+  table.compass { border-collapse: collapse; }
+  table.compass td { padding: 3px; }
+
+  .gains { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .gains .control label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+  .gains .control .row { flex-wrap: nowrap; margin: 0; }
+  .gains .control input { width: 100%; }
+
+  .chart-card { padding-bottom: 8px; }
+  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+  .chart-title { font-size: 13px; font-weight: 700; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  canvas { display: block; width: 100%; height: 200px; cursor: crosshair; }
+  .tooltip {
+    position: absolute; pointer-events: none; font-size: 11px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; color: var(--text-primary);
+    box-shadow: 0 2px 8px var(--border); display: none; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-wrap { position: relative; }
+
+  #log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px; height: 110px; overflow-y: auto;
+    white-space: pre-wrap; margin-bottom: 16px;
+  }
+
+  .hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <h1>Drive Test</h1>
+  <p class="subtitle">Drives all 4 wheels via control/drivetrain/velocity_kinematics.h and
+  control/drivetrain/wheel_velocity_pi.h (src/harnesses/drive_main.cpp, platformio.ini's [env:drive]). Battery
+  must be powering the motors -- USB/WiFi are control/telemetry only. Connect via USB
+  (Chrome or Edge only, Web Serial API) or WiFi (any browser, board runs a debug-only open
+  AP "esp32-drivetrain").</p>
+
+  <div class="toolbar">
+    <button id="connectBtn" class="primary">Connect (USB)</button>
+    <label for="wsHost">ws://</label>
+    <input id="wsHost" type="text" value="192.168.4.1:81" size="16" />
+    <button id="wsConnectBtn">Connect (WiFi)</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <span id="status">Not connected</span>
+  </div>
+
+  <div class="panel">
+    <p><b>Forward = angle 0, Right = angle 90</b> (matches DrivetrainBodyVelocity: +vx
+    forward, +vy strafe right). Test Forward first and confirm the robot actually goes
+    forward before trying anything else.</p>
+
+    <div class="row">
+      <label for="velocityInput">Velocity (m/s)</label><input id="velocityInput" type="number" step="0.05" value="0.4" />
+      <label for="durationInput">Duration (ms)</label><input id="durationInput" type="number" step="100" value="1000" />
+    </div>
+
+    <table class="compass">
+      <tr>
+        <td><button data-angle="315">Fwd-Left (315)</button></td>
+        <td><button data-angle="0">Forward (0)</button></td>
+        <td><button data-angle="45">Fwd-Right (45)</button></td>
+      </tr>
+      <tr>
+        <td><button data-angle="270">Left (270)</button></td>
+        <td><button id="stopBtn" class="stop">STOP</button></td>
+        <td><button data-angle="90">Right (90)</button></td>
+      </tr>
+      <tr>
+        <td><button data-angle="225">Back-Left (225)</button></td>
+        <td><button data-angle="180">Back (180)</button></td>
+        <td><button data-angle="135">Back-Right (135)</button></td>
+      </tr>
+    </table>
+
+    <h3>Turn (by angle, open-loop)</h3>
+    <div class="row">
+      <label for="turnAngleInput">Angle (deg)</label><input id="turnAngleInput" type="number" step="1" value="90" />
+      <label for="turnOmegaInput">Angular velocity (rad/s)</label><input id="turnOmegaInput" type="number" step="0.1" value="1.0" />
+      <button id="turnCcwBtn">Rotate CCW</button> <button id="turnCwBtn">Rotate CW</button>
+    </div>
+
+    <h3>Spin (directly-commanded, sustained)</h3>
+    <div class="row">
+      <label for="spinOmegaInput">Angular velocity (rad/s)</label><input id="spinOmegaInput" type="number" step="0.1" value="1.0" />
+      <label for="spinDurationInput">Duration (ms)</label><input id="spinDurationInput" type="number" step="100" value="1000" />
+      <button id="spinCcwBtn">Spin CCW</button> <button id="spinCwBtn">Spin CW</button>
+    </div>
+    <p class="hint">"Turn" sweeps a target angle (duration computed from angle/omega, not
+    sensor-verified). "Spin" just holds an angular velocity for a fixed duration -- useful
+    for watching sustained rotation behavior on the charts below.</p>
+  </div>
+
+  <div class="panel gains">
+    <div class="control" style="grid-column: 1 / -1;"><label>PI gains (control/drivetrain/wheel_velocity_pi.h), shared by all 4 wheels</label></div>
+    <div class="control">
+      <label for="ff">Feedforward slope (ff)</label>
+      <div class="row"><input id="ff" type="number" step="0.01" /><button data-cmd="ff">Set</button></div>
+    </div>
+    <div class="control">
+      <label for="ffo">Feedforward offset (ffo)</label>
+      <div class="row"><input id="ffo" type="number" step="0.001" /><button data-cmd="ffo">Set</button></div>
+    </div>
+    <div class="control">
+      <label for="kp">Proportional (kp)</label>
+      <div class="row"><input id="kp" type="number" step="0.01" /><button data-cmd="kp">Set</button></div>
+    </div>
+    <div class="control">
+      <label for="ki">Integral (ki)</label>
+      <div class="row"><input id="ki" type="number" step="0.001" /><button data-cmd="ki">Set</button></div>
+    </div>
+    <p class="hint" style="grid-column: 1 / -1;">Live-tunes config/drivetrain/drivetrain_config.c's
+    defaults in RAM only -- watch the effect on the charts below, then copy final values
+    into that file by hand once you're happy.</p>
+  </div>
+
+  <div class="panel chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Velocity per wheel -- solid = measured, dashed = target (m/s)</span>
+      <span class="legend" id="veloLegend"></span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="veloCanvas"></canvas>
+      <div class="tooltip" id="veloTooltip"></div>
+    </div>
+  </div>
+
+  <div class="panel chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Duty cycle per wheel</span>
+      <span class="legend" id="dutyLegend"></span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="dutyCanvas"></canvas>
+      <div class="tooltip" id="dutyTooltip"></div>
+    </div>
+  </div>
+
+  <h3>Log</h3>
+  <div id="log"></div>
+</div>
+
+<script>
+(() => {
+  const WINDOW_MS = 20000; // rolling time window shown on the charts
+  // Physical connector order (matches drive_main.cpp's kMotorConfigs/
+  // kEncoderConfigs/target_mps reordering): M1=FL, M2=BL, M3=FR, M4=BR.
+  const WHEELS = { 1: "fl", 2: "bl", 3: "fr", 4: "br" };
+
+  // Two transports, one command protocol: serial writes/reads
+  // newline-terminated text over Web Serial, ws sends/receives the same
+  // text as whole WebSocket frames (no newline needed -- each frame is one
+  // command/reply/telemetry line already). Only one is active at a time.
+  const state = {
+    port: null, reader: null, writer: null, keepReading: false, rxBuffer: "",
+    ws: null,
+    // wheel key ("fl"/"fr"/"bl"/"br") -> [{t, target, measured, duty}]
+    samplesByWheel: { fl: [], fr: [], bl: [], br: [] },
+    latestT: 0, // newest millis() seen across ALL wheels -- drives the rolling-window cutoff
+  };
+
+  const statusEl = document.getElementById("status");
+  const connectBtn = document.getElementById("connectBtn");
+  const wsConnectBtn = document.getElementById("wsConnectBtn");
+  const disconnectBtn = document.getElementById("disconnectBtn");
+  const logEl = document.getElementById("log");
+
+  function log(msg) {
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(mode, cls) {
+    statusEl.textContent = mode ? ("Connected (" + mode + ")") : "Not connected";
+    statusEl.className = cls || "";
+    connectBtn.disabled = !!mode;
+    wsConnectBtn.disabled = !!mode;
+    disconnectBtn.disabled = !mode;
+  }
+
+  // --- USB (Web Serial) transport ---
+
+  async function connect() {
+    if (!("serial" in navigator)) {
+      setStatus(null, "error");
+      log("# Web Serial not supported. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      state.port = await navigator.serial.requestPort();
+      await state.port.open({ baudRate: 115200 });
+
+      const textDecoder = new TextDecoderStream();
+      state.port.readable.pipeTo(textDecoder.writable);
+      state.reader = textDecoder.readable.getReader();
+
+      const textEncoder = new TextEncoderStream();
+      textEncoder.readable.pipeTo(state.port.writable);
+      state.writer = textEncoder.writable.getWriter();
+
+      state.keepReading = true;
+      setStatus("USB", "connected");
+      log("# connected (USB)");
+      readLoop();
+    } catch (err) {
+      setStatus(null, "error");
+      log("# connect error: " + err.message);
+    }
+  }
+
+  async function readLoop() {
+    while (state.keepReading) {
+      let chunk;
+      try {
+        const { value, done } = await state.reader.read();
+        if (done) break;
+        chunk = value;
+      } catch (err) {
+        log("# read error: " + err.message);
+        break;
+      }
+      state.rxBuffer += chunk;
+      let idx;
+      while ((idx = state.rxBuffer.indexOf("\n")) >= 0) {
+        const line = state.rxBuffer.slice(0, idx).trim();
+        state.rxBuffer = state.rxBuffer.slice(idx + 1);
+        if (line) handleLine(line);
+      }
+    }
+  }
+
+  // --- WiFi (WebSocket) transport ---
+
+  function connectWs() {
+    const host = document.getElementById("wsHost").value.trim();
+    state.ws = new WebSocket("ws://" + host);
+    state.ws.onopen = () => { setStatus("WiFi", "connected"); log("# connected (WiFi)"); };
+    state.ws.onmessage = (evt) => handleLine(evt.data);
+    state.ws.onerror = () => log("# ws error");
+    state.ws.onclose = () => { state.ws = null; setStatus(null); log("# disconnected"); };
+  }
+
+  async function disconnect() {
+    state.keepReading = false;
+    try {
+      if (state.reader) { await state.reader.cancel(); state.reader = null; }
+      if (state.writer) { await state.writer.close(); state.writer = null; }
+      if (state.port) { await state.port.close(); state.port = null; }
+    } catch (err) {
+      log("# disconnect error: " + err.message);
+    }
+    if (state.ws) { state.ws.close(); state.ws = null; }
+    setStatus(null);
+    log("# disconnected");
+  }
+
+  async function send(cmd) {
+    if (state.ws) { state.ws.send(cmd); return; }
+    if (!state.writer) { log("# not connected"); return; }
+    await state.writer.write(cmd + "\n");
+  }
+
+  // --- Telemetry parsing (shared by both transports) ---
+
+  function handleLine(line) {
+    if (line.startsWith("#")) { log(line); return; }
+    if (line.startsWith("millis")) return; // CSV header
+
+    const parts = line.split(",");
+    if (parts.length !== 5) { log(line); return; }
+
+    const t = Number(parts[0]);
+    const wheelNum = Number(parts[1]);
+    const target = Number(parts[2]);
+    const measured = Number(parts[3]);
+    const duty = Number(parts[4]);
+    const wheelKey = WHEELS[wheelNum];
+    if ([t, wheelNum, target, measured, duty].some(Number.isNaN) || !wheelKey) {
+      log(line);
+      return;
+    }
+
+    // A large backward jump in millis() means the board rebooted/reflashed
+    // mid-session -- start the rolling window over.
+    if (t < state.latestT - 1000) {
+      for (const k of Object.values(WHEELS)) state.samplesByWheel[k] = [];
+      log("# board clock reset detected (reboot/reflash) -- charts cleared");
+    }
+    state.latestT = Math.max(state.latestT, t);
+
+    state.samplesByWheel[wheelKey].push({ t, target, measured, duty });
+
+    const cutoff = state.latestT - WINDOW_MS;
+    for (const k of Object.values(WHEELS)) {
+      const a = state.samplesByWheel[k];
+      while (a.length && a[0].t < cutoff) a.shift();
+    }
+
+    drawAll();
+  }
+
+  // --- Charts (hand-rolled canvas line charts, one axis each) ---
+
+  const veloCanvas = document.getElementById("veloCanvas");
+  const dutyCanvas = document.getElementById("dutyCanvas");
+  const veloTooltip = document.getElementById("veloTooltip");
+  const dutyTooltip = document.getElementById("dutyTooltip");
+
+  function cssVar(name) {
+    return getComputedStyle(document.querySelector(".viz-root")).getPropertyValue(name).trim();
+  }
+
+  function fitCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, width: rect.width, height: rect.height };
+  }
+
+  function niceRange(values, padFrac) {
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * padFrac;
+    return [lo - pad, hi + pad];
+  }
+
+  function drawChart(canvas, seriesList, opts) {
+    const { ctx, width, height } = fitCanvas(canvas);
+    ctx.clearRect(0, 0, width, height);
+
+    const margin = { top: 8, right: 10, bottom: 18, left: 40 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+
+    const nonEmpty = seriesList.filter(s => s.points.length > 0);
+    if (nonEmpty.length === 0) {
+      ctx.fillStyle = cssVar("--text-muted");
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText("Waiting for data…", margin.left, margin.top + plotH / 2);
+      return null;
+    }
+
+    let tMin = Infinity, tMax = -Infinity;
+    for (const s of nonEmpty) {
+      tMin = Math.min(tMin, s.points[0].t);
+      tMax = Math.max(tMax, s.points[s.points.length - 1].t);
+    }
+
+    const allValues = nonEmpty.flatMap(s => s.points.map(p => p.value));
+    const [yMin, yMax] = opts.fixedRange || niceRange(allValues, 0.15);
+
+    const xOf = t => margin.left + ((t - tMin) / Math.max(1, tMax - tMin)) * plotW;
+    const yOf = v => margin.top + plotH - ((v - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
+
+    ctx.strokeStyle = cssVar("--grid");
+    ctx.lineWidth = 1;
+    const gridLines = 4;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = margin.top + (plotH / gridLines) * i;
+      ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
+    }
+
+    ctx.fillStyle = cssVar("--text-muted");
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= gridLines; i++) {
+      const v = yMax - ((yMax - yMin) / gridLines) * i;
+      const y = margin.top + (plotH / gridLines) * i;
+      ctx.fillText(v.toFixed(2), margin.left - 6, y);
+    }
+
+    ctx.strokeStyle = cssVar("--baseline");
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top + plotH);
+    ctx.lineTo(margin.left + plotW, margin.top + plotH);
+    ctx.stroke();
+
+    for (const ser of nonEmpty) {
+      ctx.strokeStyle = ser.color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.setLineDash(ser.dash || []);
+      ctx.beginPath();
+      ser.points.forEach((p, i) => {
+        const x = xOf(p.t), y = yOf(p.value);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    return { margin, plotW, plotH, tMin, tMax, xOf, yOf, seriesList: nonEmpty };
+  }
+
+  function attachCrosshair(canvas, tooltip, getGeom) {
+    canvas.addEventListener("mousemove", (evt) => {
+      const geom = getGeom();
+      if (!geom) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = evt.clientX - rect.left;
+
+      const relX = (mouseX - geom.margin.left) / geom.plotW;
+      if (relX < 0 || relX > 1) { tooltip.style.display = "none"; return; }
+      const targetT = geom.tMin + relX * (geom.tMax - geom.tMin);
+
+      const lines = [];
+      for (const ser of geom.seriesList) {
+        let nearest = ser.points[0], bestDist = Infinity;
+        for (const p of ser.points) {
+          const d = Math.abs(p.t - targetT);
+          if (d < bestDist) { bestDist = d; nearest = p; }
+        }
+        lines.push(ser.label + ": " + nearest.value.toFixed(4));
+      }
+
+      tooltip.innerHTML = "t≈" + Math.round(targetT) + "ms<br>" + lines.join("<br>");
+      tooltip.style.display = "block";
+      tooltip.style.left = Math.min(mouseX + 10, canvas.clientWidth - 140) + "px";
+      tooltip.style.top = "4px";
+    });
+    canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+  }
+
+  let veloGeom = null, dutyGeom = null;
+  const WHEEL_LABELS = { fl: "FL", fr: "FR", bl: "BL", br: "BR" };
+
+  function buildWheelSeries(getter) {
+    return Object.keys(WHEEL_LABELS).map(k => ({
+      points: state.samplesByWheel[k].map(s => ({ t: s.t, value: getter(s) })),
+      color: cssVar("--wheel-" + k),
+      label: WHEEL_LABELS[k],
+    }));
+  }
+
+  function renderLegends() {
+    const veloLegend = document.getElementById("veloLegend");
+    const dutyLegend = document.getElementById("dutyLegend");
+    let html = "";
+    for (const k of Object.keys(WHEEL_LABELS)) {
+      html += '<span><span class="swatch" style="background:var(--wheel-' + k + ')"></span>' + WHEEL_LABELS[k] + '</span>';
+    }
+    veloLegend.innerHTML = html;
+    dutyLegend.innerHTML = html;
+  }
+
+  function drawAll() {
+    const measured = buildWheelSeries(s => s.measured);
+    const target = buildWheelSeries(s => s.target).map(s => ({ ...s, dash: [4, 3] }));
+    veloGeom = drawChart(veloCanvas, [...measured, ...target], {});
+
+    dutyGeom = drawChart(dutyCanvas, buildWheelSeries(s => s.duty), { fixedRange: [-1, 1] });
+
+    renderLegends();
+  }
+
+  attachCrosshair(veloCanvas, veloTooltip, () => veloGeom);
+  attachCrosshair(dutyCanvas, dutyTooltip, () => dutyGeom);
+
+  window.addEventListener("resize", () => drawAll());
+
+  // --- Wire up UI ---
+
+  connectBtn.addEventListener("click", connect);
+  wsConnectBtn.addEventListener("click", connectWs);
+  disconnectBtn.addEventListener("click", disconnect);
+
+  document.getElementById("stopBtn").addEventListener("click", () => send("stop"));
+  document.querySelectorAll("button[data-angle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const velocity = document.getElementById("velocityInput").value;
+      const duration = document.getElementById("durationInput").value;
+      send("drive " + btn.getAttribute("data-angle") + " " + velocity + " " + duration);
+    });
+  });
+
+  function turnAngle() {
+    return Math.abs(Number(document.getElementById("turnAngleInput").value));
+  }
+  function turnOmega() {
+    return document.getElementById("turnOmegaInput").value;
+  }
+  document.getElementById("turnCcwBtn").addEventListener("click", () => send("turn " + turnAngle() + " " + turnOmega()));
+  document.getElementById("turnCwBtn").addEventListener("click", () => send("turn " + (-turnAngle()) + " " + turnOmega()));
+
+  function spinOmega() {
+    return Math.abs(Number(document.getElementById("spinOmegaInput").value));
+  }
+  function spinDuration() {
+    return document.getElementById("spinDurationInput").value;
+  }
+  document.getElementById("spinCcwBtn").addEventListener("click", () => send("spin " + spinOmega() + " " + spinDuration()));
+  document.getElementById("spinCwBtn").addEventListener("click", () => send("spin " + (-spinOmega()) + " " + spinDuration()));
+
+  document.querySelectorAll("button[data-cmd]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-cmd");
+      const input = document.getElementById(key);
+      send(key + " " + input.value);
+    });
+  });
+
+  drawAll();
+})();
+</script>
+</body>
+</html>

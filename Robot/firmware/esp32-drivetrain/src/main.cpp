@@ -4,8 +4,8 @@
 #include "esp_err.h"
 #include <robot_common/app_log.h>
 
-#include "drivers/motor_driver.h"
-#include "config/motor_config.h"
+#include "drivers/motor/motor_driver.h"
+#include "config/drivetrain/motor_config.h"
 
 // Runtime state for the single-motor bench test.
 static MotorDriver motor1 = {0};

@@ -28,9 +28,13 @@ void stepper_begin(StepperDriver *driver, StepperConfig config);
 // Use stepper_update() from loop() to advance motion.
 void stepper_move_steps(StepperDriver *driver, long steps);
 
-// Starts a signed distance movement asynchronously.
+// Starts a signed x-distance movement asynchronously.
 // The conversion uses the configured belt and pulley geometry.
-void stepper_move_distanceMM(StepperDriver*driver, long distanceMM);
+void stepper_x_move_distanceMM(StepperDriver*driver, float distanceMM);
+
+// Starts a signed z-distance movement asynchronously.
+// The conversion uses the leadscrew geometry.
+void stepper_z_move_distanceMM(StepperDriver*driver, float distanceMM);
 
 // Advances the stepper state machine; call frequently from loop().
 // This function returns immediately and generates pulses over time.

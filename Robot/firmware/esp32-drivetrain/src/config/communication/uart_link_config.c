@@ -1,5 +1,5 @@
 /* Defines the drivetrain UART peripheral, pins, speed, and buffer sizes. */
-#include "config/uart_link_config.h"
+#include "config/communication/uart_link_config.h"
 
 #include "config/pin_map.h"
 

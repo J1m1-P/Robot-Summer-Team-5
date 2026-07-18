@@ -1,5 +1,5 @@
 /* Implements ESP32 pulse-counter quadrature tracking and velocity estimation. */
-#include "drivers/encoder_driver.h"
+#include "drivers/encoder/encoder_driver.h"
 
 #include <math.h>
 #include <stddef.h>

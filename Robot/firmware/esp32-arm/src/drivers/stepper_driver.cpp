@@ -1,11 +1,16 @@
 #include "drivers/stepper_driver.h"
 #include <Arduino.h>
 
-// Mechanical constants used to convert linear travel into motor steps.
+// Stepper motor constants
 const float stepAngle = 1.8;
+const float stepsPerRev = 360.0 / stepAngle;
+
+// X axis mechanical constants used to convert linear travel into motor steps.
 const float beltPitchMM = 2.0;
 const uint8_t pulleyTeeth = 20;
-const float stepsPerRev = 360.0 / stepAngle;
+
+// Z axis mechanical constants used to convert linear travel into motor steps.
+const float leadscrewPitchMM = 8.0;
 
 // Set the current direction pin state and record the chosen direction.
 static void stepper_set_direction(StepperDriver *driver, bool direction) {
@@ -62,13 +67,23 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
     digitalWrite(driver->stepPin, LOW);
 }
 
-void stepper_move_distanceMM(StepperDriver *driver, long distanceMM) {
+void stepper_x_move_distanceMM(StepperDriver *driver, float distanceMM) {
     if (distanceMM == 0) {
         return;
     }
 
     // Convert linear motion to step count using the belt and pulley geometry.
     long steps = (long)round(distanceMM * (stepsPerRev / (beltPitchMM * pulleyTeeth)));
+    stepper_move_steps(driver, steps);
+}
+
+void stepper_z_move_distanceMM(StepperDriver *driver, float distanceMM) {
+    if (distanceMM == 0) {
+        return;
+    }
+
+    // Convert linear motion to step count using the leadscrew geometry.
+    long steps = (long)round(distanceMM * (stepsPerRev / leadscrewPitchMM));
     stepper_move_steps(driver, steps);
 }
 

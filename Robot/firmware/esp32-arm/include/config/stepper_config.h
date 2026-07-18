@@ -2,7 +2,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include "drivers/stepper_driver.h"
 
 // Defines the pins and pulse timing for one stepper motor.
 struct StepperConfig {
@@ -17,7 +16,7 @@ struct StepperConfig {
 
 // Ready-to-use configurations for the four arm stepper axes.
 // Field order is stepPin, dirPin, stepPulseUs, and stepDelayUs.
-inline StepperConfig towerXConfig {42, 41, 3, 1000};
-inline StepperConfig towerZConfig {15, 16, 3, 1000};
-inline StepperConfig habitatXConfig {17, 18, 3, 1000};
-inline StepperConfig habitatZConfig {21, 40, 3, 1000};
+inline StepperConfig towerXConfig {16, 15, 3, 3000};
+inline StepperConfig towerZConfig {42, 41, 3, 1500};
+inline StepperConfig habitatXConfig {18, 17, 3, 3000};
+inline StepperConfig habitatZConfig {21, 40, 3, 1500};

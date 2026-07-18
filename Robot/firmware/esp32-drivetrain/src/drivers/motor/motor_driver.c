@@ -1,5 +1,5 @@
 /* Implements ESP32 GPIO and LEDC control for one bidirectional DC motor. */
-#include "drivers/motor_driver.h"
+#include "drivers/motor/motor_driver.h"
 
 #include <stddef.h>
 #include <math.h>

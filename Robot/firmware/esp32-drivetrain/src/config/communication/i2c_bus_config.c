@@ -1,6 +1,6 @@
 /* Defines the drivetrain sensor I2C bus pins, speed, and timeout. */
 #include "config/pin_map.h"
-#include "config/i2c_bus_config.h"
+#include "config/communication/i2c_bus_config.h"
 
 // Master-bus configuration shared by drivetrain I2C sensors.
 const I2cBusConfig SENSOR_I2C_BUS_CONFIG = {
