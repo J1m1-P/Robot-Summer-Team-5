@@ -26,7 +26,7 @@ typedef struct {
     VL53L0XSensorId id;
     VL53L0XProfile profile;
 
-    uint8_t defalut_i2c_address;
+    uint8_t default_i2c_address;
     uint8_t target_i2c_address;
 
     gpio_num_t xshut_pin;

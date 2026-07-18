@@ -46,7 +46,8 @@ selected ST package expects and perform the conversion in exactly one place.
 include/
 |-- config/
 |   `-- time_of_flight/
-|       `-- tof_config.h
+|       |-- vl53l0x_config.h
+|       `-- vl53l5cx_config.h
 |-- drivers/
 |   `-- time_of_flight/
 |       |-- vl53l0x_driver.h
@@ -59,7 +60,8 @@ include/
 src/
 |-- config/
 |   `-- time_of_flight/
-|       `-- tof_config.c
+|       |-- vl53l0x_config.c
+|       `-- vl53l5cx_config.c
 |-- drivers/
 |   `-- time_of_flight/
 |       |-- vl53l0x_driver.c
@@ -93,12 +95,20 @@ The VL53L0X signal is called `XSHUT`. The similar VL53L5CX signal is normally
 called `LPn`. `LPn` disables communication and enters low-power idle, but is not
 equivalent to a guaranteed full power reset.
 
-Suggested `pin_map.h` excerpt:
+The current `pin_map.h` provides only two ToF control pins, and the current
+VL53L0X configuration assigns them to the left and middle sensors. Therefore no
+control pin is currently available for VL53L5CX LPn. Do not reuse one GPIO for
+two sensor control inputs unless the PCB intentionally wires them together and
+the address-startup design accounts for that coupling.
+
+Suggested future `pin_map.h` excerpt after the wiring is confirmed:
 
 ```c
 // Time-of-Flight sensor control pins.
-#define PIN_VL53L0X_XSHUT       21
-#define PIN_VL53L5CX_LPN        40
+#define PIN_VL53L0X_LEFT_XSHUT  21
+#define PIN_VL53L0X_MID_XSHUT   40
+#define PIN_VL53L0X_RIGHT_XSHUT /* real routed GPIO */
+#define PIN_VL53L5CX_FRONT_LPN  /* real routed GPIO */
 
 // Add these only if the PCB actually routes them to the ESP32.
 // #define PIN_VL53L5CX_PWREN    ...
@@ -113,18 +123,61 @@ Why model-specific names are useful:
 - Physical sensor roles can later change without names such as `TOF1` becoming
   misleading.
 
-Before renaming the existing macros, verify that GPIO 21 really connects to the
-VL53L0X and GPIO 40 really connects to VL53L5CX LPn.
+Until that extra wiring is known, the VL53L5CX sample configuration uses
+`GPIO_NUM_NC`. This records the truth about the current board definition, but it
+also means the VL53L5CX must not be enabled on the shared bus alongside another
+sensor that is still answering at default address `0x29`.
 
 ---
 
 ## 2. Sensor configuration
 
 Configuration describes fixed choices: wiring, addresses, measurement timing,
-and mounting orientation. Runtime samples and error counters do not belong in
+and sensor modes. Runtime samples and error counters do not belong in
 configuration objects.
 
-### `include/config/time_of_flight/tof_config.h`
+The current implementation has several good design choices:
+
+- VL53L0X configuration has its own header/source pair instead of being mixed
+  with runtime driver state.
+- `VL53L0XSensorId` names physical sensor positions.
+- `VL53L0XProfile` makes ranging intent clearer than scattered register values.
+- `extern const` declarations keep one immutable definition of each sensor.
+- Default and final addresses are both recorded, which supports startup address
+  reassignment.
+
+Improvements to make before implementing the driver:
+
+1. Rename `defalut_i2c_address` to `default_i2c_address`.
+2. Remove the second `VL53L0XConfig` and `VL53L0XProfile` definitions from
+   `vl53l0x_driver.h`; that header should include `vl53l0x_config.h` instead.
+3. Remove `#pragma once` and the `extern "C"` block from the `.c` file. They are
+   useful in headers, but a source file is compiled once and exports C symbols
+   because it is a `.c` file.
+4. Prefix file-local macros (`VL53L0X_LEFT_ADDRESS`, for example) instead of
+   generic names such as `LEFT_OFFSET` and `DEFAULT_TIMEOUT_MS`.
+5. Give every simultaneously connected default-address sensor its own shutdown
+   or low-power control signal. The right VL53L0X currently has
+   `GPIO_NUM_NC`, and both available pins are already used.
+6. Document whether `timeout_ms` is an I2C transaction timeout, a measurement
+   readiness timeout, or a complete initialization timeout. Those are different
+   limits; the shared I2C bus already owns its transaction timeout.
+7. Define how `profile` and `timing_budget_us` interact. A useful convention is
+   “the profile selects defaults, then a nonzero timing budget overrides only
+   the profile timing budget.”
+8. Make `vl53l0x_driver.h` use the repository's existing
+   `<robot_common/i2c_bus.h>` include and `I2cBus` type. Its current
+   `communication/i2c/i2c_bus.h` and `I2CBus` names do not match the shared
+   library currently used by `i2c_bus_config.h`.
+9. Make `vl53l0x_driver.c` include its own public driver header. It currently
+   includes the removed `config/time_of_flight/tof_config.h`, which stops the
+   ESP32 build before any driver implementation is compiled.
+10. Update the address comments in `pin_map.h`. They currently say `0x31` and
+    `0x32`, while the three VL53L0X configuration objects calculate `0x2A`,
+    `0x2B`, and `0x2C`. Configuration should be the source of truth, and pin
+    comments should describe wiring rather than runtime addresses.
+
+### Recommended `include/config/time_of_flight/vl53l0x_config.h`
 
 ```c
 #pragma once
@@ -137,90 +190,118 @@ configuration objects.
 extern "C" {
 #endif
 
-// All addresses in project-owned structures are unshifted 7-bit addresses.
-#define TOF_DEFAULT_I2C_ADDRESS 0x29U
+typedef enum {
+    VL53L0X_SENSOR_LEFT = 0,
+    VL53L0X_SENSOR_MID,
+    VL53L0X_SENSOR_RIGHT,
+    VL53L0X_SENSOR_COUNT
+} VL53L0XSensorId;
 
 typedef enum {
-    TOF_SENSOR_MODEL_VL53L0X = 0,
-    TOF_SENSOR_MODEL_VL53L5CX,
-} TofSensorModel;
-
-typedef enum {
-    TOF_GRID_ROTATION_0 = 0,
-    TOF_GRID_ROTATION_90,
-    TOF_GRID_ROTATION_180,
-    TOF_GRID_ROTATION_270,
-} TofGridRotation;
+    VL53L0X_PROFILE_DEFAULT = 0,
+    VL53L0X_PROFILE_HIGH_SPEED,
+    VL53L0X_PROFILE_HIGH_ACCURACY,
+    VL53L0X_PROFILE_LONG_RANGE
+} VL53L0XProfile;
 
 typedef struct {
-    TofSensorModel model;
+    VL53L0XSensorId id;
+    VL53L0XProfile profile;
+    uint8_t default_i2c_address;
+    uint8_t target_i2c_address;
     gpio_num_t xshut_pin;
-    uint8_t default_address;
-    uint8_t assigned_address;
+    gpio_num_t intr_pin;
     uint32_t timing_budget_us;
-    uint32_t inter_measurement_ms;
-    uint32_t maximum_sample_age_ms;
-} Vl53l0xConfig;
+    uint32_t timeout_ms;
+} VL53L0XConfig;
 
-typedef struct {
-    TofSensorModel model;
-    gpio_num_t lpn_pin;
-    uint8_t default_address;
-    uint8_t assigned_address;
-    uint8_t resolution;             // Use 16 for 4x4 or 64 for 8x8.
-    uint8_t ranging_frequency_hz;
-    uint32_t maximum_sample_age_ms;
-    TofGridRotation mounting_rotation;
-} Vl53l5cxConfig;
-
-extern const Vl53l0xConfig REAR_POINT_TOF_CONFIG;
-extern const Vl53l5cxConfig FRONT_GRID_TOF_CONFIG;
+extern const VL53L0XConfig LEFT_VL53L0X_CONFIG;
+extern const VL53L0XConfig MID_VL53L0X_CONFIG;
+extern const VL53L0XConfig RIGHT_VL53L0X_CONFIG;
 
 #ifdef __cplusplus
 }
 #endif
 ```
 
-Why use two configuration types instead of one large `TofConfig`:
-
-- The VL53L0X has a scalar timing budget; the VL53L5CX has a grid resolution
-  and frame frequency.
-- Separate types prevent nonsensical configurations such as assigning a grid
-  rotation to the point sensor.
-- The compiler helps catch accidental sensor/type mix-ups.
-
-### `src/config/time_of_flight/tof_config.c`
+### Recommended address constants in `vl53l0x_config.c`
 
 ```c
-#include "config/time_of_flight/tof_config.h"
+#define VL53L0X_DEFAULT_I2C_ADDRESS  0x29U
+#define VL53L0X_LEFT_I2C_ADDRESS     0x2AU
+#define VL53L0X_MID_I2C_ADDRESS      0x2BU
+#define VL53L0X_RIGHT_I2C_ADDRESS    0x2CU
+```
 
-#include "config/pin_map.h"
+Explicit names are easier to search and audit than arithmetic offsets. The
+values remain the same as the current implementation.
 
-const Vl53l0xConfig REAR_POINT_TOF_CONFIG = {
-    .model = TOF_SENSOR_MODEL_VL53L0X,
-    .xshut_pin = PIN_VL53L0X_XSHUT,
-    .default_address = TOF_DEFAULT_I2C_ADDRESS,
-    .assigned_address = 0x31U,
-    .timing_budget_us = 33000U,
-    .inter_measurement_ms = 50U,
-    .maximum_sample_age_ms = 150U,
-};
+### `include/config/time_of_flight/vl53l5cx_config.h`
 
-const Vl53l5cxConfig FRONT_GRID_TOF_CONFIG = {
-    .model = TOF_SENSOR_MODEL_VL53L5CX,
-    .lpn_pin = PIN_VL53L5CX_LPN,
-    .default_address = TOF_DEFAULT_I2C_ADDRESS,
-    .assigned_address = 0x32U,
-    .resolution = 16U,
-    .ranging_frequency_hz = 10U,
-    .maximum_sample_age_ms = 250U,
-    .mounting_rotation = TOF_GRID_ROTATION_0,
+```c
+typedef enum {
+    VL53L5CX_SENSOR_FRONT = 0,
+    VL53L5CX_SENSOR_COUNT
+} VL53L5CXSensorId;
+
+typedef enum {
+    VL53L5CX_RESOLUTION_4X4 = 16,
+    VL53L5CX_RESOLUTION_8X8 = 64
+} VL53L5CXResolution;
+
+typedef enum {
+    VL53L5CX_RANGING_MODE_CONTINUOUS = 0,
+    VL53L5CX_RANGING_MODE_AUTONOMOUS
+} VL53L5CXRangingMode;
+
+typedef struct {
+    VL53L5CXSensorId id;
+    VL53L5CXResolution resolution;
+    VL53L5CXRangingMode ranging_mode;
+    uint8_t default_i2c_address;
+    uint8_t target_i2c_address;
+    gpio_num_t lpn_pin;
+    gpio_num_t intr_pin;
+    uint8_t ranging_frequency_hz;
+    uint32_t timeout_ms;
+} VL53L5CXConfig;
+
+extern const VL53L5CXConfig FRONT_VL53L5CX_CONFIG;
+```
+
+The resolution enum stores the actual number of zones. That makes loops and
+validation straightforward: 16 means 4x4 and 64 means 8x8. Ranging mode is kept
+separate because autonomous timing has different behavior from continuous mode.
+
+### `src/config/time_of_flight/vl53l5cx_config.c`
+
+```c
+#include "config/time_of_flight/vl53l5cx_config.h"
+
+#define VL53L5CX_DEFAULT_I2C_ADDRESS  0x29U
+#define VL53L5CX_FRONT_I2C_ADDRESS    0x32U
+#define VL53L5CX_DEFAULT_RANGING_FREQUENCY_HZ  10U
+#define VL53L5CX_DEFAULT_TIMEOUT_MS            100U
+
+const VL53L5CXConfig FRONT_VL53L5CX_CONFIG = {
+    .id = VL53L5CX_SENSOR_FRONT,
+    .resolution = VL53L5CX_RESOLUTION_4X4,
+    .ranging_mode = VL53L5CX_RANGING_MODE_CONTINUOUS,
+    .default_i2c_address = VL53L5CX_DEFAULT_I2C_ADDRESS,
+    .target_i2c_address = VL53L5CX_FRONT_I2C_ADDRESS,
+
+    // Replace with the actual routed LPn pin before shared-bus startup.
+    .lpn_pin = GPIO_NUM_NC,
+    .intr_pin = GPIO_NUM_NC,
+
+    .ranging_frequency_hz = VL53L5CX_DEFAULT_RANGING_FREQUENCY_HZ,
+    .timeout_ms = VL53L5CX_DEFAULT_TIMEOUT_MS,
 };
 ```
 
-These are conservative bring-up settings. Start with a 4x4 VL53L5CX frame and
-a modest frequency. Move to 8x8 only after initialization, bus traffic, frame
-orientation, and RAM usage are understood.
+The assigned address `0x32` does not collide with the current VL53L0X addresses
+`0x2A`, `0x2B`, and `0x2C`. The 4x4/10 Hz starting mode keeps bus traffic and
+debug output manageable. Move to 8x8 only after basic bring-up succeeds.
 
 ---
 
@@ -240,7 +321,7 @@ the ST API from the manager and application.
 #include "esp_err.h"
 #include <robot_common/i2c_bus.h>
 
-#include "config/time_of_flight/tof_config.h"
+#include "config/time_of_flight/vl53l0x_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -254,7 +335,7 @@ typedef struct {
 } Vl53l0xReading;
 
 typedef struct {
-    const Vl53l0xConfig *config;
+    const VL53L0XConfig *config;
     I2cDevice device;
     bool initialized;
     bool ranging;
@@ -265,13 +346,13 @@ typedef struct {
     // vendor package. Do not expose that type to higher layers.
 } Vl53l0xDriver;
 
-bool vl53l0x_driver_config_is_valid(const Vl53l0xConfig *config);
+bool vl53l0x_driver_config_is_valid(const VL53L0XConfig *config);
 
 // Assumes the manager has activated only this sensor at its default address.
 esp_err_t vl53l0x_driver_init(
     Vl53l0xDriver *driver,
     I2cBus *bus,
-    const Vl53l0xConfig *config
+    const VL53L0XConfig *config
 );
 
 esp_err_t vl53l0x_driver_start(Vl53l0xDriver *driver);
@@ -308,22 +389,26 @@ static bool address_is_valid(uint8_t address)
     return address > 0U && address <= 0x7FU;
 }
 
-bool vl53l0x_driver_config_is_valid(const Vl53l0xConfig *config)
+bool vl53l0x_driver_config_is_valid(const VL53L0XConfig *config)
 {
     return config != NULL &&
-           config->model == TOF_SENSOR_MODEL_VL53L0X &&
-           GPIO_IS_VALID_OUTPUT_GPIO(config->xshut_pin) &&
-           address_is_valid(config->default_address) &&
-           address_is_valid(config->assigned_address) &&
-           config->default_address != config->assigned_address &&
+           config->id >= VL53L0X_SENSOR_LEFT &&
+           config->id < VL53L0X_SENSOR_COUNT &&
+           config->profile >= VL53L0X_PROFILE_DEFAULT &&
+           config->profile <= VL53L0X_PROFILE_LONG_RANGE &&
+           (config->xshut_pin == GPIO_NUM_NC ||
+            GPIO_IS_VALID_OUTPUT_GPIO(config->xshut_pin)) &&
+           address_is_valid(config->default_i2c_address) &&
+           address_is_valid(config->target_i2c_address) &&
+           config->default_i2c_address != config->target_i2c_address &&
            config->timing_budget_us > 0U &&
-           config->inter_measurement_ms > 0U;
+           config->timeout_ms > 0U;
 }
 
 esp_err_t vl53l0x_driver_init(
     Vl53l0xDriver *driver,
     I2cBus *bus,
-    const Vl53l0xConfig *config
+    const VL53L0XConfig *config
 )
 {
     if (driver == NULL || bus == NULL ||
@@ -336,10 +421,10 @@ esp_err_t vl53l0x_driver_init(
     driver->config = config;
 
     esp_err_t error = i2c_device_init(
-        &driver->device, bus, config->default_address);
+        &driver->device, bus, config->default_i2c_address);
     if (error != ESP_OK) goto fail;
 
-    error = i2c_bus_probe(bus, config->default_address);
+    error = i2c_bus_probe(bus, config->default_i2c_address);
     if (error != ESP_OK) goto fail;
 
     /*
@@ -359,17 +444,17 @@ esp_err_t vl53l0x_driver_init(
      */
 
     /*
-     * TODO(ST API): program config->assigned_address into the sensor.
+     * TODO(ST API): program config->target_i2c_address into the sensor.
      * Convert between 7-bit and 8-bit forms here if this ST API requires it.
      */
 
     // Rebind the project-owned handle to the new 7-bit address.
     memset(&driver->device, 0, sizeof(driver->device));
     error = i2c_device_init(
-        &driver->device, bus, config->assigned_address);
+        &driver->device, bus, config->target_i2c_address);
     if (error != ESP_OK) goto fail;
 
-    error = i2c_bus_probe(bus, config->assigned_address);
+    error = i2c_bus_probe(bus, config->target_i2c_address);
     if (error != ESP_OK) goto fail;
 
     driver->initialized = true;
@@ -469,7 +554,7 @@ instead of immediately reducing the frame to one number.
 #include "esp_err.h"
 #include <robot_common/i2c_bus.h>
 
-#include "config/time_of_flight/tof_config.h"
+#include "config/time_of_flight/vl53l5cx_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -487,7 +572,7 @@ typedef struct {
 } Vl53l5cxFrame;
 
 typedef struct {
-    const Vl53l5cxConfig *config;
+    const VL53L5CXConfig *config;
     I2cDevice device;
     bool initialized;
     bool ranging;
@@ -498,12 +583,12 @@ typedef struct {
     // importing a pinned ULD version.
 } Vl53l5cxDriver;
 
-bool vl53l5cx_driver_config_is_valid(const Vl53l5cxConfig *config);
+bool vl53l5cx_driver_config_is_valid(const VL53L5CXConfig *config);
 
 esp_err_t vl53l5cx_driver_init(
     Vl53l5cxDriver *driver,
     I2cBus *bus,
-    const Vl53l5cxConfig *config
+    const VL53L5CXConfig *config
 );
 
 esp_err_t vl53l5cx_driver_start(Vl53l5cxDriver *driver);
@@ -634,9 +719,11 @@ largest requested transfer can be sent as one I2C transaction.
 #include <stddef.h>
 #include <string.h>
 
-bool vl53l5cx_driver_config_is_valid(const Vl53l5cxConfig *config)
+bool vl53l5cx_driver_config_is_valid(const VL53L5CXConfig *config)
 {
-    if (config == NULL || config->model != TOF_SENSOR_MODEL_VL53L5CX) {
+    if (config == NULL ||
+        config->id < VL53L5CX_SENSOR_FRONT ||
+        config->id >= VL53L5CX_SENSOR_COUNT) {
         return false;
     }
 
@@ -645,21 +732,25 @@ bool vl53l5cx_driver_config_is_valid(const Vl53l5cxConfig *config)
     const uint8_t maximum_frequency =
         config->resolution == 16U ? 60U : 15U;
 
-    return GPIO_IS_VALID_OUTPUT_GPIO(config->lpn_pin) &&
-           config->default_address > 0U &&
-           config->default_address <= 0x7FU &&
-           config->assigned_address > 0U &&
-           config->assigned_address <= 0x7FU &&
-           config->default_address != config->assigned_address &&
+    return (config->lpn_pin == GPIO_NUM_NC ||
+            GPIO_IS_VALID_OUTPUT_GPIO(config->lpn_pin)) &&
+           config->default_i2c_address > 0U &&
+           config->default_i2c_address <= 0x7FU &&
+           config->target_i2c_address > 0U &&
+           config->target_i2c_address <= 0x7FU &&
+           config->default_i2c_address != config->target_i2c_address &&
            resolution_valid &&
+           config->ranging_mode >= VL53L5CX_RANGING_MODE_CONTINUOUS &&
+           config->ranging_mode <= VL53L5CX_RANGING_MODE_AUTONOMOUS &&
            config->ranging_frequency_hz > 0U &&
-           config->ranging_frequency_hz <= maximum_frequency;
+           config->ranging_frequency_hz <= maximum_frequency &&
+           config->timeout_ms > 0U;
 }
 
 esp_err_t vl53l5cx_driver_init(
     Vl53l5cxDriver *driver,
     I2cBus *bus,
-    const Vl53l5cxConfig *config
+    const VL53L5CXConfig *config
 )
 {
     if (driver == NULL || bus == NULL ||
@@ -672,10 +763,10 @@ esp_err_t vl53l5cx_driver_init(
     driver->config = config;
 
     esp_err_t error = i2c_device_init(
-        &driver->device, bus, config->default_address);
+        &driver->device, bus, config->default_i2c_address);
     if (error != ESP_OK) goto fail;
 
-    error = i2c_bus_probe(bus, config->default_address);
+    error = i2c_bus_probe(bus, config->default_i2c_address);
     if (error != ESP_OK) goto fail;
 
     /*
@@ -695,10 +786,10 @@ esp_err_t vl53l5cx_driver_init(
 
     memset(&driver->device, 0, sizeof(driver->device));
     error = i2c_device_init(
-        &driver->device, bus, config->assigned_address);
+        &driver->device, bus, config->target_i2c_address);
     if (error != ESP_OK) goto fail;
 
-    error = i2c_bus_probe(bus, config->assigned_address);
+    error = i2c_bus_probe(bus, config->target_i2c_address);
     if (error != ESP_OK) goto fail;
 
     driver->initialized = true;
@@ -822,8 +913,8 @@ typedef struct {
 esp_err_t tof_manager_init(
     TofManager *manager,
     I2cBus *bus,
-    const Vl53l0xConfig *point_config,
-    const Vl53l5cxConfig *grid_config
+    const VL53L0XConfig *point_config,
+    const VL53L5CXConfig *grid_config
 );
 
 esp_err_t tof_manager_start(TofManager *manager);
@@ -855,6 +946,9 @@ esp_err_t tof_manager_get_snapshot(
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#define POINT_MAXIMUM_SAMPLE_AGE_MS 150U
+#define GRID_MAXIMUM_SAMPLE_AGE_MS  250U
+
 static esp_err_t configure_control_pin_low(gpio_num_t pin)
 {
     gpio_config_t config = {0};
@@ -882,8 +976,8 @@ static bool timestamp_is_fresh(
 esp_err_t tof_manager_init(
     TofManager *manager,
     I2cBus *bus,
-    const Vl53l0xConfig *point_config,
-    const Vl53l5cxConfig *grid_config
+    const VL53L0XConfig *point_config,
+    const VL53L5CXConfig *grid_config
 )
 {
     if (manager == NULL || bus == NULL || point_config == NULL ||
@@ -892,6 +986,12 @@ esp_err_t tof_manager_init(
     }
     if (!i2c_bus_is_initialized(bus)) return ESP_ERR_INVALID_STATE;
     if (manager->initialized) return ESP_ERR_INVALID_STATE;
+
+    // Two default-address sensors require independently controllable pins.
+    if (point_config->xshut_pin == GPIO_NUM_NC ||
+        grid_config->lpn_pin == GPIO_NUM_NC) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
 
     memset(manager, 0, sizeof(*manager));
     manager->bus = bus;
@@ -1017,7 +1117,7 @@ esp_err_t tof_manager_get_snapshot(
         timestamp_is_fresh(
             now_us,
             snapshot.point_reading.timestamp_us,
-            manager->point_sensor.config->maximum_sample_age_ms);
+            POINT_MAXIMUM_SAMPLE_AGE_MS);
 
     snapshot.grid_sensor_healthy =
         grid_error == ESP_OK &&
@@ -1025,7 +1125,7 @@ esp_err_t tof_manager_get_snapshot(
         timestamp_is_fresh(
             now_us,
             snapshot.grid_frame.timestamp_us,
-            manager->grid_sensor.config->maximum_sample_age_ms);
+            GRID_MAXIMUM_SAMPLE_AGE_MS);
 
     *snapshot_out = snapshot;
     return ESP_OK;
@@ -1069,7 +1169,8 @@ Illustrative `setup()` and `loop()` integration:
 #include <robot_common/i2c_bus.h>
 
 #include "config/communication/i2c_bus_config.h"
-#include "config/time_of_flight/tof_config.h"
+#include "config/time_of_flight/vl53l0x_config.h"
+#include "config/time_of_flight/vl53l5cx_config.h"
 #include "control/time_of_flight/tof_manager.h"
 
 static I2cBus sensor_bus = {0};
@@ -1090,8 +1191,8 @@ void setup()
     error = tof_manager_init(
         &tof_manager,
         &sensor_bus,
-        &REAR_POINT_TOF_CONFIG,
-        &FRONT_GRID_TOF_CONFIG);
+        &LEFT_VL53L0X_CONFIG,
+        &FRONT_VL53L5CX_CONFIG);
     if (error != ESP_OK) {
         Serial.printf("ToF init failed: %s\n", esp_err_to_name(error));
         return;
@@ -1143,7 +1244,8 @@ behavior simultaneously. A focused harness makes each failure visible.
 #include <robot_common/i2c_bus.h>
 
 #include "config/communication/i2c_bus_config.h"
-#include "config/time_of_flight/tof_config.h"
+#include "config/time_of_flight/vl53l0x_config.h"
+#include "config/time_of_flight/vl53l5cx_config.h"
 #include "control/time_of_flight/tof_manager.h"
 
 static I2cBus bus = {0};
@@ -1181,8 +1283,8 @@ void setup()
     error = tof_manager_init(
         &manager,
         &bus,
-        &REAR_POINT_TOF_CONFIG,
-        &FRONT_GRID_TOF_CONFIG);
+        &LEFT_VL53L0X_CONFIG,
+        &FRONT_VL53L5CX_CONFIG);
     if (error != ESP_OK) {
         Serial.printf("FAIL manager init: %s\n", esp_err_to_name(error));
         return;
@@ -1259,7 +1361,8 @@ build_src_filter =
     +<harnesses/tof_test_main.cpp>
     +<drivers/time_of_flight/>
     +<control/time_of_flight/tof_manager.c>
-    +<config/time_of_flight/tof_config.c>
+    +<config/time_of_flight/vl53l0x_config.c>
+    +<config/time_of_flight/vl53l5cx_config.c>
     +<config/communication/i2c_bus_config.c>
 ```
 
