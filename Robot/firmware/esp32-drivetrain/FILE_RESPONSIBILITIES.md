@@ -224,6 +224,15 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should not contain:** GPIO operations, direct drivetrain calls, task detection, or board-specific tuning constants.
 - **Consumers:** future robot-manager integration and native tape-following tests.
 
+### `include/control/tape_following/tape_following_kinematics.h` and `src/control/tape_following/tape_following_kinematics.c`
+
+- **Layer:** pure motion-command mathematics.
+- **Why they exist:** convert longitudinal and lateral tape-following velocity into a smooth angular-velocity request.
+- **Header owns:** heading-mapping configuration and the stateless conversion API.
+- **Source owns:** travel-angle conversion, forward/reverse steering polarity, angular-velocity clamping, and angular-acceleration limiting.
+- **Should not contain:** sensor selection, line estimation, PID correction, tape-loss state, or drivetrain calls.
+- **Consumers:** `tape_follower.c` owns the previous-command history; native tape-following tests verify the mapping directly.
+
 ## Application and harness files
 
 ### `src/main.cpp`

@@ -1,6 +1,5 @@
 /* Declares weighted tape-line position estimation. */
-#ifndef TAPE_LINE_ESTIMATOR_H
-#define TAPE_LINE_ESTIMATOR_H
+#pragma once
 
 #include <stdbool.h>
 
@@ -33,5 +32,3 @@ bool tape_line_estimator_compute_error(const TapeSensor *sensor,
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* TAPE_LINE_ESTIMATOR_H */

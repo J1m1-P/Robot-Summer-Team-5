@@ -416,11 +416,11 @@ void print_tape_tuning() {
                   live_tape_config.controller.integral_gain,
                   live_tape_config.controller.derivative_gain,
                   live_tape_config.controller.integral_limit,
-                  live_tape_config.heading_gain_s_inv,
-                  live_tape_config.max_omega_rad_s,
-                  live_tape_config.max_angular_acceleration_rad_s2,
-                  live_tape_config.search_velocity_mps,
-                  live_tape_config.lost_timeout_s,
+                  live_tape_config.heading.gain_s_inv,
+                  live_tape_config.heading.max_omega_rad_s,
+                  live_tape_config.heading.max_acceleration_rad_s2,
+                  live_tape_config.search.velocity_mps,
+                  live_tape_config.search.timeout_s,
                   live_tape_config.controller_dt_max_s);
 }
 
@@ -546,8 +546,10 @@ void start_tape_center(int sensor_index, float maximum_strafe_mps,
             tape_back_estimator_config.channel_weights[channel] *= polarity;
         }
         tape_follower_config = live_tape_config;
-        tape_follower_config.front_estimator = &tape_front_estimator_config;
-        tape_follower_config.back_estimator = &tape_back_estimator_config;
+        tape_follower_config.estimators[TAPE_FOLLOWER_FRONT] =
+            &tape_front_estimator_config;
+        tape_follower_config.estimators[TAPE_FOLLOWER_BACK] =
+            &tape_back_estimator_config;
         tape_follower_config.controller.correction_min = -maximum_strafe_mps;
         tape_follower_config.controller.correction_max = maximum_strafe_mps;
         tape_follower = {};
@@ -573,20 +575,20 @@ void start_tape_center(int sensor_index, float maximum_strafe_mps,
 
 void service_tape_center(float dt_s) {
     if (tape_follow_velocity_mps != 0.0f) {
-        const TapeFollowerInput input = {
-            &tape_sensors[0], &tape_sensors[1], tape_follow_velocity_mps};
+        const TapeFollowerInput input = {{
+            &tape_sensors[0], &tape_sensors[1]}, tape_follow_velocity_mps};
         TapeFollowerOutput output = {};
         const esp_err_t error = tape_follower_update(
             &tape_follower, &input, dt_s, &output);
         if (error != ESP_OK || !output.motion_valid) {
             command_vx = command_vy = command_omega = 0.0f;
             applied_vx = applied_vy = applied_omega = 0.0f;
-            tape_center_line_present = output.line_present;
+            tape_center_line_present = output.status == TAPE_FOLLOWER_TRACKING;
             tape_center_error = output.line_error;
             tape_center_correction_mps = 0.0f;
             return;
         }
-        tape_center_line_present = output.line_present;
+        tape_center_line_present = output.status == TAPE_FOLLOWER_TRACKING;
         tape_center_error = output.line_error;
         tape_center_correction_mps = output.requested_velocity.vy;
         command_vx = output.requested_velocity.vx;
@@ -859,16 +861,16 @@ void update_tape_parameter(const String &field, float value) {
     else if (field == "ki") candidate.controller.integral_gain = value;
     else if (field == "kd") candidate.controller.derivative_gain = value;
     else if (field == "integral-limit") candidate.controller.integral_limit = value;
-    else if (field == "heading") candidate.heading_gain_s_inv = value;
-    else if (field == "max-omega") candidate.max_omega_rad_s = value;
-    else if (field == "angular-accel") candidate.max_angular_acceleration_rad_s2 = value;
-    else if (field == "search-speed") candidate.search_velocity_mps = value;
-    else if (field == "lost-timeout") candidate.lost_timeout_s = value;
+    else if (field == "heading") candidate.heading.gain_s_inv = value;
+    else if (field == "max-omega") candidate.heading.max_omega_rad_s = value;
+    else if (field == "angular-accel") candidate.heading.max_acceleration_rad_s2 = value;
+    else if (field == "search-speed") candidate.search.velocity_mps = value;
+    else if (field == "lost-timeout") candidate.search.timeout_s = value;
     else if (field == "dt-max") candidate.controller_dt_max_s = value;
     else { Serial.println("# unknown tape tuning field"); return; }
 
     TapeFollower validator = {};
-    if (candidate.max_omega_rad_s > test_config.max_omega_rad_s ||
+    if (candidate.heading.max_omega_rad_s > test_config.max_omega_rad_s ||
         tape_follower_init(&validator, &candidate) != ESP_OK) {
         Serial.println("# tape tuning update rejected");
         return;

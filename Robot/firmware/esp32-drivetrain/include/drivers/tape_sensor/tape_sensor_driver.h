@@ -1,6 +1,5 @@
 /* Declares multiplexed tape-sensor hardware initialization and sampling. */
-#ifndef TAPE_SENSOR_DRIVER_H
-#define TAPE_SENSOR_DRIVER_H
+#pragma once 
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -75,4 +74,3 @@ esp_err_t tape_sensor_driver_read_all_raw(
 }
 #endif
 
-#endif /* TAPE_SENSOR_DRIVER_H */
