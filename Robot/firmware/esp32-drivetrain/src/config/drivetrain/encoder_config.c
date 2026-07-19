@@ -41,6 +41,16 @@
 
  #define ENCODER_GLITCH_FILTER_NS 1000U
 
+ /*
+ * Max time to wait for a full quadrature group (4 counts) before falling
+ * back to a partial-count velocity update. ~5.5ms is the nominal group
+ * period at the 0.05 m/s minimum viable control speed (0.070m wheel,
+ * 3200 counts/rev); 10ms adds margin for loop jitter while staying well
+ * under DRIVETRAIN_CONFIG.max_control_dt_s (50ms).
+ */
+
+ #define ENCODER_LOW_SPEED_TIMEOUT_US 10000U
+
 // Front-left encoder pulse-counter and wheel configuration.
  const EncoderDriverConfig FL_ENCODER_CONFIG = {
     .id = FL_ENCODER, 
@@ -57,10 +67,11 @@
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
 
-    .high_limit = ENCODER_PCNT_HIGH_LIMIT, 
-    .low_limit = ENCODER_PCNT_LOW_LIMIT, 
+    .high_limit = ENCODER_PCNT_HIGH_LIMIT,
+    .low_limit = ENCODER_PCNT_LOW_LIMIT,
 
-    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
+    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS,
+    .low_speed_timeout_us = ENCODER_LOW_SPEED_TIMEOUT_US
  };
 
 // Front-right encoder pulse-counter and wheel configuration.
@@ -85,10 +96,11 @@
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
 
-    .high_limit = ENCODER_PCNT_HIGH_LIMIT, 
-    .low_limit = ENCODER_PCNT_LOW_LIMIT, 
+    .high_limit = ENCODER_PCNT_HIGH_LIMIT,
+    .low_limit = ENCODER_PCNT_LOW_LIMIT,
 
-    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
+    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS,
+    .low_speed_timeout_us = ENCODER_LOW_SPEED_TIMEOUT_US
  };
 
 // Back-left encoder pulse-counter and wheel configuration.
@@ -108,10 +120,11 @@
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
 
-    .high_limit = ENCODER_PCNT_HIGH_LIMIT, 
-    .low_limit = ENCODER_PCNT_LOW_LIMIT, 
+    .high_limit = ENCODER_PCNT_HIGH_LIMIT,
+    .low_limit = ENCODER_PCNT_LOW_LIMIT,
 
-    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
+    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS,
+    .low_speed_timeout_us = ENCODER_LOW_SPEED_TIMEOUT_US
  };
 
 // Back-right encoder pulse-counter and wheel configuration.
@@ -131,10 +144,11 @@
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 
 
-    .high_limit = ENCODER_PCNT_HIGH_LIMIT, 
-    .low_limit = ENCODER_PCNT_LOW_LIMIT, 
+    .high_limit = ENCODER_PCNT_HIGH_LIMIT,
+    .low_limit = ENCODER_PCNT_LOW_LIMIT,
 
-    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS
+    .glitch_filter_ns = ENCODER_GLITCH_FILTER_NS,
+    .low_speed_timeout_us = ENCODER_LOW_SPEED_TIMEOUT_US
  };
 
 // Maps EncoderId values to their corresponding hardware configurations.
