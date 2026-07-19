@@ -34,6 +34,14 @@ typedef struct {
     const TapeLineEstimatorConfig *back_estimator;
     TapeFollowingControllerConfig controller;
 
+    /* Converts the lateral/forward velocity angle into angular velocity so
+     * the leading edge of the robot turns toward its direction of travel. */
+    float heading_gain_s_inv;
+
+    /* Bounds the commanded rotation and its rate of change for smooth turns. */
+    float max_omega_rad_s;
+    float max_angular_acceleration_rad_s2;
+
     /* Lateral body velocity used to search toward the last tape position. */
     float search_velocity_mps;
 
@@ -74,6 +82,7 @@ typedef struct {
     TapeLineEstimatorState back_estimator_state;
     TapeFollowingControllerState controller_state;
     float lost_elapsed_s;
+    float requested_omega_rad_s;
 
     TapeFollowerStatus status;
     int8_t active_direction;

@@ -36,6 +36,12 @@ static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
     }
 
     return controller_config_is_valid(&config->controller) &&
+           isfinite(config->heading_gain_s_inv) &&
+           config->heading_gain_s_inv >= 0.0f &&
+           isfinite(config->max_omega_rad_s) &&
+           config->max_omega_rad_s >= 0.0f &&
+           isfinite(config->max_angular_acceleration_rad_s2) &&
+           config->max_angular_acceleration_rad_s2 > 0.0f &&
            isfinite(config->search_velocity_mps) &&
            config->search_velocity_mps >= 0.0f &&
            config->search_velocity_mps <= 1.0f &&
@@ -49,6 +55,37 @@ static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
 static void reset_controller(TapeFollower *follower)
 {
     tape_following_controller_reset(&follower->controller_state);
+}
+
+static float clamp_value(float value, float minimum, float maximum)
+{
+    if (value < minimum) return minimum;
+    if (value > maximum) return maximum;
+    return value;
+}
+
+/* Points the sensor leading the motion into the lateral correction.  Rotation
+ * is acceleration-limited here so this behavior remains smooth even when its
+ * caller sends body-velocity commands directly to the drivetrain. */
+static float update_heading_turn(TapeFollower *follower,
+                                 float travel_velocity_mps,
+                                 float lateral_velocity_mps,
+                                 float dt_s)
+{
+    const float direction = travel_velocity_mps > 0.0f ? 1.0f : -1.0f;
+    const float travel_angle_rad = atan2f(
+        lateral_velocity_mps, fabsf(travel_velocity_mps));
+    const float target_omega = clamp_value(
+        -direction * follower->config->heading_gain_s_inv * travel_angle_rad,
+        -follower->config->max_omega_rad_s,
+        follower->config->max_omega_rad_s);
+    const float maximum_change =
+        follower->config->max_angular_acceleration_rad_s2 * dt_s;
+    follower->requested_omega_rad_s = clamp_value(
+        target_omega,
+        follower->requested_omega_rad_s - maximum_change,
+        follower->requested_omega_rad_s + maximum_change);
+    return follower->requested_omega_rad_s;
 }
 
 esp_err_t tape_follower_init(TapeFollower *follower,
@@ -82,6 +119,7 @@ esp_err_t tape_follower_reset(TapeFollower *follower)
     reset_controller(follower);
 
     follower->lost_elapsed_s = 0.0f;
+    follower->requested_omega_rad_s = 0.0f;
     follower->status = TAPE_FOLLOWER_IDLE;
     follower->active_direction = 0;
     follower->front_ever_tracked = false;
@@ -121,6 +159,7 @@ esp_err_t tape_follower_update(TapeFollower *follower,
         }
         follower->active_direction = 0;
         follower->lost_elapsed_s = 0.0f;
+        follower->requested_omega_rad_s = 0.0f;
         follower->status = TAPE_FOLLOWER_IDLE;
         output->status = follower->status;
         return ESP_OK;
@@ -130,6 +169,7 @@ esp_err_t tape_follower_update(TapeFollower *follower,
     if (requested_direction != follower->active_direction) {
         reset_controller(follower);
         follower->lost_elapsed_s = 0.0f;
+        follower->requested_omega_rad_s = 0.0f;
         follower->active_direction = requested_direction;
     }
 
@@ -165,7 +205,9 @@ esp_err_t tape_follower_update(TapeFollower *follower,
             &follower->controller_state, &follower->config->controller,
             output->line_error, controller_dt);
         output->requested_velocity.vx = input->travel_velocity_mps;
-        output->requested_velocity.omega = 0.0f;
+        output->requested_velocity.omega = update_heading_turn(
+            follower, input->travel_velocity_mps,
+            output->requested_velocity.vy, controller_dt);
         output->motion_valid = true;
 
         follower->lost_elapsed_s = 0.0f;
@@ -175,6 +217,7 @@ esp_err_t tape_follower_update(TapeFollower *follower,
         /* Search only after this directional sensor has acquired tape. This
          * prevents front-sensor history from affecting backward recovery. */
         reset_controller(follower);
+        follower->requested_omega_rad_s = 0.0f;
         follower->lost_elapsed_s += dt_s;
 
         if (!*active_ever_tracked ||

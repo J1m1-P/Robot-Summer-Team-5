@@ -40,6 +40,9 @@ static TapeFollowerConfig make_follower_config(
     config.controller.integral_limit = 1.0f;
     config.controller.correction_min = -0.3f;
     config.controller.correction_max = 0.3f;
+    config.heading_gain_s_inv = 2.0f;
+    config.max_omega_rad_s = 0.8f;
+    config.max_angular_acceleration_rad_s2 = 1.5f;
     config.search_velocity_mps = 0.15f;
     config.lost_timeout_s = 0.5f;
     config.controller_dt_max_s = 0.05f;
@@ -115,7 +118,33 @@ static void test_follower_outputs_drivetrain_body_velocity()
     TEST_ASSERT_FLOAT_WITHIN(
         0.0001f, 0.1f, output.requested_velocity.vy);
     TEST_ASSERT_FLOAT_WITHIN(
-        0.0001f, 0.0f, output.requested_velocity.omega);
+        0.0001f, -0.015f, output.requested_velocity.omega);
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.01f, &output));
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, -0.030f, output.requested_velocity.omega);
+}
+
+static void test_follower_turns_back_sensor_toward_travel()
+{
+    TapeLineEstimatorConfig front_config = make_estimator_config();
+    TapeLineEstimatorConfig back_config = make_estimator_config();
+    TapeFollowerConfig config = make_follower_config(
+        &front_config, &back_config);
+    TapeFollower follower = {};
+    TapeSensor front = {};
+    TapeSensor back = make_sensor(false, false, true, false);
+    TapeFollowerInput input = {&front, &back, -0.4f};
+    TapeFollowerOutput output = {};
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.1f, &output));
+    TEST_ASSERT_FALSE(output.using_front_sensor);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.4f, output.requested_velocity.vx);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.1f, output.requested_velocity.vy);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.075f, output.requested_velocity.omega);
 }
 
 static void test_follower_searches_then_reports_lost()
@@ -181,6 +210,7 @@ int main(int, char **)
     RUN_TEST(test_line_estimator_0110_is_centered);
     RUN_TEST(test_controller_clamps_and_rejects_invalid_input);
     RUN_TEST(test_follower_outputs_drivetrain_body_velocity);
+    RUN_TEST(test_follower_turns_back_sensor_toward_travel);
     RUN_TEST(test_follower_searches_then_reports_lost);
     RUN_TEST(test_task_detector_debounces_start_and_end);
     return UNITY_END();
