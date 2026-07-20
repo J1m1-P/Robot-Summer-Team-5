@@ -57,7 +57,7 @@ typedef struct {
 
 // Groups closed-loop configuration, telemetry, and timing state.
 typedef struct {
-    WheelVelocityPiConfig active_pi_config;
+    WheelVelocityPiConfig active_pi_config[DRIVETRAIN_MOTOR_MAX];
     float target_wheel_mps[DRIVETRAIN_MOTOR_MAX];
     float last_duty[DRIVETRAIN_MOTOR_MAX];
     int64_t last_command_us;
@@ -104,6 +104,20 @@ esp_err_t drivetrain_set_wheel_pi_config(
 // Copies the live PI configuration for telemetry or interactive tuning.
 esp_err_t drivetrain_get_wheel_pi_config(
     const Drivetrain *drivetrain,
+    WheelVelocityPiConfig *config_out
+);
+
+// Replaces the live PI gains for one wheel without changing the other wheels.
+esp_err_t drivetrain_set_motor_pi_config(
+    Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    const WheelVelocityPiConfig *config
+);
+
+// Copies one wheel's live PI configuration for independent motor tuning.
+esp_err_t drivetrain_get_motor_pi_config(
+    const Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
     WheelVelocityPiConfig *config_out
 );
 

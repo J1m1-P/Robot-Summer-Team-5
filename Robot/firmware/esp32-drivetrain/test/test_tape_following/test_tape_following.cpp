@@ -6,6 +6,7 @@
 extern "C" {
 #include "control/tape_following/tape_follower.h"
 #include "control/tape_following/tape_following_controller.h"
+#include "control/tape_following/tape_following_kinematics.h"
 #include "sensing/tape_following/tape_line_estimator.h"
 #include "sensing/tape_following/tape_task_detection.h"
 }
@@ -34,14 +35,17 @@ static TapeFollowerConfig make_follower_config(
     const TapeLineEstimatorConfig *back)
 {
     TapeFollowerConfig config = {};
-    config.front_estimator = front;
-    config.back_estimator = back;
+    config.estimators[TAPE_FOLLOWER_FRONT] = front;
+    config.estimators[TAPE_FOLLOWER_BACK] = back;
     config.controller.proportional_gain = 0.1f;
     config.controller.integral_limit = 1.0f;
     config.controller.correction_min = -0.3f;
     config.controller.correction_max = 0.3f;
-    config.search_velocity_mps = 0.15f;
-    config.lost_timeout_s = 0.5f;
+    config.heading.gain_s_inv = 2.0f;
+    config.heading.max_omega_rad_s = 0.8f;
+    config.heading.max_acceleration_rad_s2 = 1.5f;
+    config.search.velocity_mps = 0.15f;
+    config.search.timeout_s = 0.5f;
     config.controller_dt_max_s = 0.05f;
     return config;
 }
@@ -101,21 +105,61 @@ static void test_follower_outputs_drivetrain_body_velocity()
     TapeFollower follower = {};
     TapeSensor front = make_sensor(false, false, true, false);
     TapeSensor back = make_sensor(false, true, false, false);
-    TapeFollowerInput input = {&front, &back, 0.4f};
+    TapeFollowerInput input = {{&front, &back}, 0.4f};
     TapeFollowerOutput output = {};
 
     TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
     TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
         &follower, &input, 0.01f, &output));
     TEST_ASSERT_TRUE(output.motion_valid);
-    TEST_ASSERT_TRUE(output.using_front_sensor);
     TEST_ASSERT_EQUAL(TAPE_FOLLOWER_TRACKING, output.status);
     TEST_ASSERT_FLOAT_WITHIN(
         0.0001f, 0.4f, output.requested_velocity.vx);
     TEST_ASSERT_FLOAT_WITHIN(
         0.0001f, 0.1f, output.requested_velocity.vy);
     TEST_ASSERT_FLOAT_WITHIN(
-        0.0001f, 0.0f, output.requested_velocity.omega);
+        0.0001f, -0.015f, output.requested_velocity.omega);
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.01f, &output));
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, -0.030f, output.requested_velocity.omega);
+}
+
+static void test_kinematics_turns_leading_edge_and_limits_acceleration()
+{
+    const TapeFollowingKinematicsConfig config = {2.0f, 0.8f, 1.5f};
+    float omega = 0.0f;
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+        tape_following_kinematics_velocity_to_angular_velocity(
+            &config, 0.4f, 0.1f, 0.0f, 0.1f, &omega));
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.15f, omega);
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+        tape_following_kinematics_velocity_to_angular_velocity(
+            &config, -0.4f, 0.1f, 0.0f, 0.1f, &omega));
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.15f, omega);
+}
+
+static void test_follower_turns_back_sensor_toward_travel()
+{
+    TapeLineEstimatorConfig front_config = make_estimator_config();
+    TapeLineEstimatorConfig back_config = make_estimator_config();
+    TapeFollowerConfig config = make_follower_config(
+        &front_config, &back_config);
+    TapeFollower follower = {};
+    TapeSensor front = {};
+    TapeSensor back = make_sensor(false, false, true, false);
+    TapeFollowerInput input = {{&front, &back}, -0.4f};
+    TapeFollowerOutput output = {};
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.1f, &output));
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.4f, output.requested_velocity.vx);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.1f, output.requested_velocity.vy);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.075f, output.requested_velocity.omega);
 }
 
 static void test_follower_searches_then_reports_lost()
@@ -127,7 +171,7 @@ static void test_follower_searches_then_reports_lost()
     TapeFollower follower = {};
     TapeSensor front = make_sensor(false, false, true, false);
     TapeSensor back = {};
-    TapeFollowerInput input = {&front, &back, 0.4f};
+    TapeFollowerInput input = {{&front, &back}, 0.4f};
     TapeFollowerOutput output = {};
 
     TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
@@ -180,7 +224,9 @@ int main(int, char **)
     RUN_TEST(test_line_estimator_centroid_and_lost_direction);
     RUN_TEST(test_line_estimator_0110_is_centered);
     RUN_TEST(test_controller_clamps_and_rejects_invalid_input);
+    RUN_TEST(test_kinematics_turns_leading_edge_and_limits_acceleration);
     RUN_TEST(test_follower_outputs_drivetrain_body_velocity);
+    RUN_TEST(test_follower_turns_back_sensor_toward_travel);
     RUN_TEST(test_follower_searches_then_reports_lost);
     RUN_TEST(test_task_detector_debounces_start_and_end);
     return UNITY_END();

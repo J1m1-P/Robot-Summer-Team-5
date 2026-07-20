@@ -1,8 +1,9 @@
 /* Declares bounded PID correction for tape-following velocity control. */
-#ifndef TAPE_FOLLOWING_CONTROLLER_H
-#define TAPE_FOLLOWING_CONTROLLER_H
+#pragma once 
 
 #include <stdbool.h>
+
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,7 @@ typedef struct {
 } TapeFollowingControllerState;
 
 // Clears integral and derivative history.
-void tape_following_controller_reset(TapeFollowingControllerState *state);
+esp_err_t tape_following_controller_reset(TapeFollowingControllerState *state);
 
 // Computes one bounded PID correction from the current estimated line error.
 float tape_following_controller_update(TapeFollowingControllerState *state,
@@ -38,4 +39,3 @@ float tape_following_controller_update(TapeFollowingControllerState *state,
 }
 #endif
 
-#endif /* TAPE_FOLLOWING_CONTROLLER_H */

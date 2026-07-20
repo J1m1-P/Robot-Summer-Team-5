@@ -33,8 +33,10 @@ const TapeLineEstimatorConfig BACK_TAPE_LINE_ESTIMATOR_CONFIG = {
 /* Conservative initial values. Verify correction polarity and tune the
  * proportional gain at low speed on the assembled robot. */
 const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
-    .front_estimator = &FRONT_TAPE_LINE_ESTIMATOR_CONFIG,
-    .back_estimator = &BACK_TAPE_LINE_ESTIMATOR_CONFIG,
+    .estimators = {
+        [TAPE_FOLLOWER_BACK] = &BACK_TAPE_LINE_ESTIMATOR_CONFIG,
+        [TAPE_FOLLOWER_FRONT] = &FRONT_TAPE_LINE_ESTIMATOR_CONFIG,
+    },
     .controller = {
         .proportional_gain = 0.10f,
         .integral_gain = 0.0f,
@@ -43,8 +45,15 @@ const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
         .correction_min = -0.30f,
         .correction_max = 0.30f,
     },
-    .search_velocity_mps = 0.15f,
-    .lost_timeout_s = 0.50f,
+    .heading = {
+        .gain_s_inv = 2.0f,
+        .max_omega_rad_s = 0.80f,
+        .max_acceleration_rad_s2 = 1.50f,
+    },
+    .search = {
+        .velocity_mps = 0.15f,
+        .timeout_s = 0.50f,
+    },
     .controller_dt_max_s = 0.05f,
 };
 

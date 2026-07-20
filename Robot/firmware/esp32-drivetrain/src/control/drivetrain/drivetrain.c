@@ -178,7 +178,9 @@ esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config
 
     memset(drivetrain, 0, sizeof(*drivetrain));
     drivetrain->config = config;
-    drivetrain->control.active_pi_config = config->wheel_pi;
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+        drivetrain->control.active_pi_config[index] = config->wheel_pi;
+    }
 
     gpio_config_t brake_config = {0};
     brake_config.pin_bit_mask = 1ULL << config->brake_pin;
@@ -354,7 +356,7 @@ esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us) {
             &drivetrain->devices.encoders[index]);
         error = wheel_velocity_pi_update(
             &drivetrain->devices.wheel_pi[index],
-            &drivetrain->control.active_pi_config,
+            &drivetrain->control.active_pi_config[index],
             drivetrain->control.target_wheel_mps[index],
             measured,
             dt_s,
@@ -380,8 +382,8 @@ esp_err_t drivetrain_set_wheel_pi_config(
     if (!pi_config_fits_drivetrain(config, drivetrain->config->max_duty)) {
         return ESP_ERR_INVALID_ARG;
     }
-    drivetrain->control.active_pi_config = *config;
     for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+        drivetrain->control.active_pi_config[index] = *config;
         wheel_velocity_pi_reset(&drivetrain->devices.wheel_pi[index]);
     }
     return ESP_OK;
@@ -394,7 +396,37 @@ esp_err_t drivetrain_get_wheel_pi_config(
 ) {
     if (drivetrain == NULL || config_out == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
-    *config_out = drivetrain->control.active_pi_config;
+    *config_out = drivetrain->control.active_pi_config[DRIVETRAIN_MOTOR_FL];
+    return ESP_OK;
+}
+
+esp_err_t drivetrain_set_motor_pi_config(
+    Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    const WheelVelocityPiConfig *config
+) {
+    if (drivetrain == NULL || config == NULL || !motor_id_is_valid(motor_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    if (!pi_config_fits_drivetrain(config, drivetrain->config->max_duty)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    drivetrain->control.active_pi_config[motor_id] = *config;
+    wheel_velocity_pi_reset(&drivetrain->devices.wheel_pi[motor_id]);
+    return ESP_OK;
+}
+
+esp_err_t drivetrain_get_motor_pi_config(
+    const Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    WheelVelocityPiConfig *config_out
+) {
+    if (drivetrain == NULL || config_out == NULL || !motor_id_is_valid(motor_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    *config_out = drivetrain->control.active_pi_config[motor_id];
     return ESP_OK;
 }
 

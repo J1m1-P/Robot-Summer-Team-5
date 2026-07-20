@@ -23,32 +23,113 @@ static bool controller_config_is_valid(
 /* Rejects configurations that could produce undefined or unsafe behavior. */
 static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
 {
-    if (config == NULL || config->front_estimator == NULL ||
-        config->back_estimator == NULL) {
+    if (config == NULL) {
         return false;
     }
 
-    for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; channel++) {
-        if (!isfinite(config->front_estimator->channel_weights[channel]) ||
-            !isfinite(config->back_estimator->channel_weights[channel])) {
-            return false;
+    for (int sensor = 0; sensor < TAPE_FOLLOWER_SENSOR_COUNT; sensor++) {
+        if (config->estimators[sensor] == NULL) return false;
+        for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; channel++) {
+            if (!isfinite(
+                    config->estimators[sensor]->channel_weights[channel])) {
+                return false;
+            }
         }
     }
 
     return controller_config_is_valid(&config->controller) &&
-           isfinite(config->search_velocity_mps) &&
-           config->search_velocity_mps >= 0.0f &&
-           config->search_velocity_mps <= 1.0f &&
-           isfinite(config->lost_timeout_s) &&
-           config->lost_timeout_s >= 0.0f &&
+           isfinite(config->heading.gain_s_inv) &&
+           config->heading.gain_s_inv >= 0.0f &&
+           isfinite(config->heading.max_omega_rad_s) &&
+           config->heading.max_omega_rad_s >= 0.0f &&
+           isfinite(config->heading.max_acceleration_rad_s2) &&
+           config->heading.max_acceleration_rad_s2 > 0.0f &&
+           isfinite(config->search.velocity_mps) &&
+           config->search.velocity_mps >= 0.0f &&
+           config->search.velocity_mps <= 1.0f &&
+           isfinite(config->search.timeout_s) &&
+           config->search.timeout_s >= 0.0f &&
            isfinite(config->controller_dt_max_s) &&
            config->controller_dt_max_s > 0.0f;
 }
 
-/* Resets feedback whenever motion direction or tape availability changes. */
-static void reset_controller(TapeFollower *follower)
+/* Clears control outputs that must not cross idle, direction, or tape-loss
+ * transitions. Estimator history is intentionally preserved for searching. */
+static void reset_steering(TapeFollower *follower)
 {
     tape_following_controller_reset(&follower->controller_state);
+    follower->requested_omega_rad_s = 0.0f;
+}
+
+static int8_t direction_from_velocity(float travel_velocity_mps)
+{
+    if (travel_velocity_mps > 0.0f) return 1;
+    if (travel_velocity_mps < 0.0f) return -1;
+    return 0;
+}
+
+static esp_err_t update_tracking(TapeFollower *follower,
+                                 const TapeFollowerInput *input,
+                                 TapeFollowerSensor sensor,
+                                 float dt_s,
+                                 TapeFollowerOutput *output)
+{
+    /* Cap controller dt so a scheduling stall cannot create a large integral
+     * or derivative impulse on the next valid measurement. */
+    float controller_dt_s = dt_s;
+    if (controller_dt_s > follower->config->controller_dt_max_s) {
+        controller_dt_s = follower->config->controller_dt_max_s;
+        tape_following_controller_reset(&follower->controller_state);
+    }
+
+    output->requested_velocity.vx = input->travel_velocity_mps;
+    output->requested_velocity.vy = tape_following_controller_update(
+        &follower->controller_state, &follower->config->controller,
+        output->line_error, controller_dt_s);
+
+    esp_err_t error = tape_following_kinematics_velocity_to_angular_velocity(
+        &follower->config->heading,
+        output->requested_velocity.vx,
+        output->requested_velocity.vy,
+        follower->requested_omega_rad_s,
+        controller_dt_s,
+        &output->requested_velocity.omega);
+    if (error != ESP_OK) return error;
+
+    follower->requested_omega_rad_s = output->requested_velocity.omega;
+    follower->lost_elapsed_s = 0.0f;
+    follower->ever_tracked[sensor] = true;
+    output->status = TAPE_FOLLOWER_TRACKING;
+    output->motion_valid = true;
+    return ESP_OK;
+}
+
+static void update_missing_line(TapeFollower *follower,
+                                TapeLineEstimatorState *estimator_state,
+                                TapeFollowerSensor sensor,
+                                float dt_s,
+                                TapeFollowerOutput *output)
+{
+    reset_steering(follower);
+    follower->lost_elapsed_s += dt_s;
+
+    if (!follower->ever_tracked[sensor] ||
+        follower->lost_elapsed_s >= follower->config->search.timeout_s) {
+        output->status = TAPE_FOLLOWER_LOST;
+        return;
+    }
+
+    float search_direction = 0.0f;
+    if (estimator_state->last_known_error > 0.0f) {
+        search_direction = 1.0f;
+    } else if (estimator_state->last_known_error < 0.0f) {
+        search_direction = -1.0f;
+    }
+
+    output->requested_velocity.vy =
+        search_direction * follower->config->search.velocity_mps;
+    output->status = TAPE_FOLLOWER_SEARCHING;
+    output->motion_valid = search_direction != 0.0f;
 }
 
 esp_err_t tape_follower_init(TapeFollower *follower,
@@ -57,14 +138,12 @@ esp_err_t tape_follower_init(TapeFollower *follower,
     if (follower == NULL || !tape_follower_config_is_valid(config)) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (follower->initialized) {
+    if (follower->config != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     memset(follower, 0, sizeof(*follower));
     follower->config = config;
-    follower->status = TAPE_FOLLOWER_IDLE;
-    follower->initialized = true;
     return ESP_OK;
 }
 
@@ -73,19 +152,19 @@ esp_err_t tape_follower_reset(TapeFollower *follower)
     if (follower == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!follower->initialized || follower->config == NULL) {
+    if (follower->config == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    tape_line_estimator_reset(&follower->front_estimator_state);
-    tape_line_estimator_reset(&follower->back_estimator_state);
-    reset_controller(follower);
+    for (int sensor = 0; sensor < TAPE_FOLLOWER_SENSOR_COUNT; sensor++) {
+        tape_line_estimator_reset(&follower->estimator_states[sensor]);
+        follower->ever_tracked[sensor] = false;
+    }
+    tape_following_controller_reset(&follower->controller_state);
 
     follower->lost_elapsed_s = 0.0f;
-    follower->status = TAPE_FOLLOWER_IDLE;
+    follower->requested_omega_rad_s = 0.0f;
     follower->active_direction = 0;
-    follower->front_ever_tracked = false;
-    follower->back_ever_tracked = false;
     return ESP_OK;
 }
 
@@ -95,107 +174,57 @@ esp_err_t tape_follower_update(TapeFollower *follower,
                                TapeFollowerOutput *output)
 {
     if (follower == NULL || input == NULL || output == NULL ||
-        input->front_sensor == NULL || input->back_sensor == NULL ||
+        input->sensors[TAPE_FOLLOWER_FRONT] == NULL ||
+        input->sensors[TAPE_FOLLOWER_BACK] == NULL ||
         !isfinite(input->travel_velocity_mps) ||
         fabsf(input->travel_velocity_mps) > 1.0f ||
         !isfinite(dt_s) || dt_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!follower->initialized || follower->config == NULL) {
+    if (follower->config == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     memset(output, 0, sizeof(*output));
     /* A zero travel request idles the behavior instead of choosing a sensor or
      * refreshing the drivetrain watchdog with a zero motion command. */
-    int8_t requested_direction = 0;
-    if (input->travel_velocity_mps > 0.0f) {
-        requested_direction = 1;
-    } else if (input->travel_velocity_mps < 0.0f) {
-        requested_direction = -1;
-    }
+    const int8_t requested_direction =
+        direction_from_velocity(input->travel_velocity_mps);
 
     if (requested_direction == 0) { 
         if (follower->active_direction != 0) {
-            reset_controller(follower);
+            reset_steering(follower);
         }
         follower->active_direction = 0;
         follower->lost_elapsed_s = 0.0f;
-        follower->status = TAPE_FOLLOWER_IDLE;
-        output->status = follower->status;
+        follower->requested_omega_rad_s = 0.0f;
+        output->status = TAPE_FOLLOWER_IDLE;
         return ESP_OK;
     }
 
     /* Do not carry derivative or integral history across a direction change. */
     if (requested_direction != follower->active_direction) {
-        reset_controller(follower);
+        reset_steering(follower);
         follower->lost_elapsed_s = 0.0f;
         follower->active_direction = requested_direction;
     }
 
-    const bool moving_forward = requested_direction > 0;
-    const TapeSensor *active_sensor = moving_forward
-                                          ? input->front_sensor
-                                          : input->back_sensor;
-    const TapeLineEstimatorConfig *active_estimator =
-        moving_forward ? follower->config->front_estimator
-                       : follower->config->back_estimator;
-    TapeLineEstimatorState *active_estimator_state =
-        moving_forward ? &follower->front_estimator_state
-                       : &follower->back_estimator_state;
-    bool *active_ever_tracked = moving_forward
-                                    ? &follower->front_ever_tracked
-                                    : &follower->back_ever_tracked;
-
-    output->using_front_sensor = moving_forward;
-    output->line_present = tape_line_estimator_compute_error(
-        active_sensor, active_estimator, active_estimator_state,
+    const TapeFollowerSensor sensor = requested_direction > 0
+                                          ? TAPE_FOLLOWER_FRONT
+                                          : TAPE_FOLLOWER_BACK;
+    TapeLineEstimatorState *estimator_state =
+        &follower->estimator_states[sensor];
+    const bool line_present = tape_line_estimator_compute_error(
+        input->sensors[sensor], follower->config->estimators[sensor],
+        estimator_state,
         &output->line_error);
 
-    if (output->line_present) {
-        /* Cap controller dt so a scheduling stall cannot create a large integral
-         * or derivative impulse on the next valid measurement. */
-        float controller_dt = dt_s;
-        if (controller_dt > follower->config->controller_dt_max_s) {
-            controller_dt = follower->config->controller_dt_max_s;
-            reset_controller(follower);
-        }
-
-        output->requested_velocity.vy = tape_following_controller_update(
-            &follower->controller_state, &follower->config->controller,
-            output->line_error, controller_dt);
-        output->requested_velocity.vx = input->travel_velocity_mps;
-        output->requested_velocity.omega = 0.0f;
-        output->motion_valid = true;
-
-        follower->lost_elapsed_s = 0.0f;
-        follower->status = TAPE_FOLLOWER_TRACKING;
-        *active_ever_tracked = true;
-    } else {
+    if (!line_present) {
         /* Search only after this directional sensor has acquired tape. This
          * prevents front-sensor history from affecting backward recovery. */
-        reset_controller(follower);
-        follower->lost_elapsed_s += dt_s;
-
-        if (!*active_ever_tracked ||
-            follower->lost_elapsed_s >= follower->config->lost_timeout_s) {
-            follower->status = TAPE_FOLLOWER_LOST;
-            output->motion_valid = false;
-        } else {
-            float search_direction = 0.0f;
-            if (active_estimator_state->last_known_error > 0.0f) {
-                search_direction = 1.0f;
-            } else if (active_estimator_state->last_known_error < 0.0f) {
-                search_direction = -1.0f;
-            }
-
-            follower->status = TAPE_FOLLOWER_SEARCHING;
-            output->requested_velocity.vy =
-                search_direction * follower->config->search_velocity_mps;
-            output->motion_valid = search_direction != 0.0f;
-        }
+        update_missing_line(follower, estimator_state, sensor, dt_s, output);
+        return ESP_OK;
     }
 
-    output->status = follower->status;
-    return ESP_OK;
+    return update_tracking(follower, input, sensor, dt_s, output);
 }
