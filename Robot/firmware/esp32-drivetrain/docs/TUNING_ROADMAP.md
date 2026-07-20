@@ -57,6 +57,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 | **World-frame pose integration** | `include/control/drivetrain/odometry.h` / `src/control/drivetrain/odometry.c` | **Implemented and unit-tested (`test/test_drivetrain_odometry/`), but not called anywhere in production code.** | This is most of §1's "error source" module already. `DrivetrainOdometry` accumulates a `DrivetrainPose {x_mm, y_mm, heading_rad}` from repeated `DrivetrainOdometryDelta {forward_mm, lateral_mm, heading_delta_rad}` calls via `drivetrain_odometry_update()`. **What's missing:** something to produce that `DrivetrainOdometryDelta` from encoder counts each cycle and call this on a schedule. |
 | **Wheel-delta → body-delta bridge** | `include/control/drivetrain/drivetrain_odometry_source.h` / `src/control/drivetrain/drivetrain_odometry_source.c` | **Implemented and unit-tested (`test/test_drivetrain_odometry_source/`); §1's error-source module.** | Promoted from the harness-local `get_relative_body_motion()` prototype (`drivetrain_test_main.cpp:279`, still there as a reference/comparison, not removed) into a real module: takes plain `DrivetrainWheelCounts` (no `Drivetrain*`/hardware dependency, so it's `[env:native]`-testable) each cycle, diffs against the previous cycle's counts, and calls `drivetrain_odometry_update()` continuously. **Still not called from any harness or main loop** — nothing yet reads live encoder counts into it on a schedule. |
 | **Off-tape motion PID** | `include/control/drivetrain/off_tape_motion.h` / `src/control/drivetrain/off_tape_motion.c` | **Implemented and unit-tested (`test/test_off_tape_motion/`); §1's shared PID.** | Reuses `tape_following_controller`'s generic bounded PID directly (nested `TapeFollowingControllerConfig`) rather than re-deriving one. Takes a caller-computed scalar `error` + `travel_velocity_mps`, outputs a `DrivetrainBodyVelocity` with the correction applied laterally (`vy`) and `omega` left at `0.0f` for a later per-primitive heading layer (e.g. `MoveP`'s terminal phase). **Not yet consumed by any motion primitive** — §2 doesn't exist yet. |
+| **Jerk-bounded speed ramp** | `include/control/drivetrain/speed_profile.h` / `src/control/drivetrain/speed_profile.c` | **Implemented and unit-tested (`test/test_speed_profile/`); §4's S-curve deliverable.** | Simplified jerk-bounded ramp (not a full 7-segment S-curve — a deliberate scope choice). Rate-limits acceleration each cycle toward whatever bang-bang acceleration would reach the target speed, bounded by `max_accel_mps2` and `SpeedProfileConfig.max_jerk_mps3`. **Not yet called by anything** — no motion primitive exists yet to drive it. |
 | **Encoder velocity + position** | `src/drivers/encoder/encoder_driver.c` | Implemented (includes the SM/T quadrature-grouping + low-speed-timeout work already merged to `tuning`) | `drivetrain_get_encoder_accumulated_count()` gives exact raw ticks (unaffected by the SM/T velocity smoothing); `encoder_driver_get_velocity_mps()` gives smoothed velocity. Use accumulated count for odometry, not velocity. |
 | **Wheel-velocity inner loop** | `include/control/drivetrain/wheel_velocity_controller.h` | Implemented | The existing FF+PI loop `MoveS` relies on solely, and that `MoveL`/`MoveP`/`MoveC` sit on top of via the drivetrain facade. |
 | **Drivetrain facade** | `include/control/drivetrain/drivetrain.h` | Implemented | `drivetrain_set_body_velocity()` / `drivetrain_update()` is the single entry point every motion source (tape following, and eventually the new Move APIs) should command through. Handles watchdog/timeout/coast/brake safety already — don't reimplement this. |
@@ -67,7 +68,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 
 - `[env:native]` — host-compiled, no hardware. Pure modules only (currently
   `x_drive_kinematics.c`, `wheel_velocity_controller.c`, `odometry.c`,
-  `drivetrain_odometry_source.c`, `off_tape_motion.c`,
+  `drivetrain_odometry_source.c`, `off_tape_motion.c`, `speed_profile.c`,
   `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
   `tape_line_estimator.c`, `tape_task_detection.c`). **Add any new pure
   PID/kinematics/planning module here** so it gets unit tested without hardware.
@@ -199,14 +200,23 @@ recipe rather than just ad-hoc gain tweaking.
 
 ## 4. Speed profile shaping (S-curves)
 
-- [ ] Replace/augment simple accel limiting with **S-curve (jerk-limited) speed
+- [x] Replace/augment simple accel limiting with **S-curve (jerk-limited) speed
       profiles** so `MoveS`/`MoveL`/`MoveP`/`MoveC` don't feed the wheel-velocity PI
-      step changes in target speed.
-- [ ] This effectively adds a `max_jerk` (or equivalent) dimension on top of the
+      step changes in target speed. Implemented as a **simplified jerk-bounded
+      ramp** (`speed_profile.c`/`.h`), not a full 7-segment S-curve state machine —
+      a deliberate scope call, not a missed requirement: it rate-limits
+      acceleration toward whatever bang-bang acceleration would reach the target
+      speed, rather than pre-planning distinct accel/cruise/decel segments.
+      Unit-tested in `test/test_speed_profile/`.
+- [x] This effectively adds a `max_jerk` (or equivalent) dimension on top of the
       existing `speed` / `max_accel` parameters — needs a decision on where that
-      value lives (per-call parameter vs. fixed config).
+      value lives (per-call parameter vs. fixed config). Decided: config default
+      (`SpeedProfileConfig.max_jerk_mps3`); no per-call override yet since no
+      caller (§2) exists to need one — add one when a motion primitive does.
 - [ ] This is a dependency of §2 — the motion APIs should call into the S-curve
-      profile generator rather than commanding raw step targets.
+      profile generator rather than commanding raw step targets. Not yet true:
+      `speed_profile.c` is built and tested but unused, since `MoveS`/`MoveL`/
+      `MoveP`/`MoveC` don't exist yet.
 - [ ] `max_accel` defaults should respect the slip-avoidance ceiling derived in §3's
       dynamic calibration.
 
