@@ -1,7 +1,10 @@
 /* Interactive motor/encoder and complete-drivetrain hardware test harness. */
 #include <Arduino.h>
 
+#include <stdarg.h>
 #include <math.h>
+#include <WiFi.h>
+#include <WebSocketsServer.h>
 #include <esp_timer.h>
 
 #include "config/drivetrain/drivetrain_config.h"
@@ -35,6 +38,66 @@ constexpr float kStoppedVelocityMps = 0.015f;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kInverseSqrtTwo = 0.70710678118f;
 constexpr unsigned int kMaxCommandLength = 96;
+constexpr const char *kWifiSsid = "esp32-drivetrain-test";
+constexpr const char *kWifiPassword = "drivetrain-test";
+constexpr uint16_t kWebSocketPort = 81;
+
+WebSocketsServer web_socket(kWebSocketPort);
+bool web_socket_ready = false;
+uint8_t web_socket_clients = 0;
+
+// Mirrors complete Serial output lines to WebSocket clients while retaining
+// terminal editing and USB fallback behavior.
+class TestConsole {
+public:
+    explicit TestConsole(HardwareSerial &serial) : serial_(serial) {}
+    void begin(unsigned long baud) { serial_.begin(baud); }
+    void setTimeout(unsigned long timeout) { serial_.setTimeout(timeout); }
+    int available() { return serial_.available(); }
+    int read() { return serial_.read(); }
+    size_t print(const char *value) { return write_text(value); }
+    size_t print(const String &value) { return write_text(value.c_str()); }
+    size_t println() { return write_text("\r\n"); }
+    size_t println(const char *value) { return write_text(value) + write_text("\r\n"); }
+    size_t println(const String &value) { return println(value.c_str()); }
+    size_t write(uint8_t value) {
+        const char character = static_cast<char>(value);
+        return write_bytes(&character, 1);
+    }
+    int printf(const char *format, ...) {
+        char buffer[512];
+        va_list args;
+        va_start(args, format);
+        const int length = vsnprintf(buffer, sizeof(buffer), format, args);
+        va_end(args);
+        if (length <= 0) return length;
+        write_bytes(buffer, min(static_cast<size_t>(length), sizeof(buffer) - 1));
+        return length;
+    }
+
+private:
+    size_t write_text(const char *value) { return write_bytes(value, strlen(value)); }
+    size_t write_bytes(const char *data, size_t length) {
+        serial_.write(reinterpret_cast<const uint8_t *>(data), length);
+        for (size_t i = 0; i < length; ++i) {
+            if (data[i] == '\n') {
+                if (web_socket_ready && wireless_line_.length() > 0) {
+                    web_socket.broadcastTXT(wireless_line_);
+                }
+                wireless_line_ = "";
+            } else if (data[i] != '\r') {
+                wireless_line_ += data[i];
+            }
+        }
+        return length;
+    }
+
+    HardwareSerial &serial_;
+    String wireless_line_;
+};
+
+TestConsole test_console(Serial);
+#define Serial test_console
 
 enum class TestMode {
     IDLE,
@@ -1217,6 +1280,38 @@ void service_serial_input() {
     }
 }
 
+// Treats each WebSocket text frame as one complete drivetrain-test command.
+void on_websocket_event(uint8_t client, WStype_t type,
+                        uint8_t *payload, size_t length) {
+    if (type == WStype_CONNECTED) {
+        ++web_socket_clients;
+        web_socket.sendTXT(client, "# WiFi control connected");
+    } else if (type == WStype_DISCONNECTED) {
+        if (web_socket_clients > 0) --web_socket_clients;
+        if (web_socket_clients == 0 && mode != TestMode::IDLE) stop_test();
+    } else if (type == WStype_TEXT) {
+        if (length == 0 || length > kMaxCommandLength) {
+            web_socket.sendTXT(client, "# command must be 1..96 characters");
+            return;
+        }
+        process_command(String(reinterpret_cast<char *>(payload), length));
+    }
+}
+
+void initialize_wifi_control() {
+    WiFi.mode(WIFI_AP);
+    if (!WiFi.softAP(kWifiSsid, kWifiPassword)) {
+        Serial.println("# WiFi access point initialization failed");
+        return;
+    }
+    web_socket.begin();
+    web_socket.onEvent(on_websocket_event);
+    web_socket_ready = true;
+    Serial.printf("# WiFi ready: join %s, then connect ws://%s:%u\n",
+                  kWifiSsid, WiFi.softAPIP().toString().c_str(),
+                  static_cast<unsigned int>(kWebSocketPort));
+}
+
 void initialize_test_config() {
     test_config = DRIVETRAIN_CONFIG;
     live_tape_config = TAPE_FOLLOWER_CONFIG;
@@ -1289,6 +1384,7 @@ void setup() {
     Serial.setTimeout(20);
     delay(1000);
     Serial.println("\n# Initializing drivetrain hardware test...");
+    initialize_wifi_control();
 
     initialize_test_config();
     initialize_tape_sensors();
@@ -1307,6 +1403,7 @@ void setup() {
 }
 
 void loop() {
+    if (web_socket_ready) web_socket.loop();
     service_serial_input();
     const uint32_t now_ms = millis();
     if (tape_sensors_ready &&
