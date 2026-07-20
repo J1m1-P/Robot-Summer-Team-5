@@ -160,6 +160,7 @@
   <div class="toolbar">
     <button id="connectBtn" class="primary">Connect</button>
     <button id="disconnectBtn" disabled>Disconnect</button>
+    <button id="showGainsBtn" title="Prints the board's actual current ff/ffo/kp/ki to the log below -- the input fields never auto-sync, so use this to confirm what's really running before hitting Set on an untouched field.">Show current gains</button>
     <button id="tableToggleBtn">Show table view</button>
     <button id="invertBtn" title="Flips the sign of the measured speed reading -- see 'invert' in tuning_main.cpp">Reverse measured direction</button>
     <button id="modeBtn" title="Step mode: target alternates 0/target every period. Continuous mode: target holds steady.">Mode: Step</button>
@@ -178,19 +179,19 @@
     </div>
     <div class="control">
       <label for="ff">Feedforward slope (ff)</label>
-      <div class="row"><input id="ff" type="number" step="0.01" value="0" /><button data-cmd="ff">Set</button></div>
+      <div class="row"><input id="ff" type="number" step="0.01" value="1.14" /><button data-cmd="ff">Set</button></div>
     </div>
     <div class="control">
       <label for="ffo">Feedforward offset (ffo)</label>
-      <div class="row"><input id="ffo" type="number" step="0.001" value="0" /><button data-cmd="ffo">Set</button></div>
+      <div class="row"><input id="ffo" type="number" step="0.001" value="0.069" /><button data-cmd="ffo">Set</button></div>
     </div>
     <div class="control">
       <label for="kp">Proportional (kp)</label>
-      <div class="row"><input id="kp" type="number" step="0.01" value="0" /><button data-cmd="kp">Set</button></div>
+      <div class="row"><input id="kp" type="number" step="0.01" value="0.4" /><button data-cmd="kp">Set</button></div>
     </div>
     <div class="control">
       <label for="ki">Integral (ki)</label>
-      <div class="row"><input id="ki" type="number" step="0.001" value="0" /><button data-cmd="ki">Set</button></div>
+      <div class="row"><input id="ki" type="number" step="0.001" value="0.2" /><button data-cmd="ki">Set</button></div>
     </div>
     <div class="control">
       <label for="target">Step target (m/s)</label>
@@ -201,7 +202,7 @@
       <div class="row"><input id="period" type="number" step="100" value="3000" /><button data-cmd="period">Set</button></div>
     </div>
   </div>
-  <p class="hint">Motor toggles send "motor &lt;n&gt; &lt;0|1&gt;\n"; each gain/target field sends its matching command (e.g. "ff 0.5\n") — all over the same serial link used for telemetry, shared across every enabled motor. Values live in RAM on the board only — copy final ff/ffo/kp/ki into config/drivetrain/drivetrain_config.c by hand once you're happy.</p>
+  <p class="hint">Motor toggles send "motor &lt;n&gt; &lt;0|1&gt;\n"; each gain/target field sends its matching command (e.g. "ff 0.5\n") — all over the same serial link used for telemetry, shared across every enabled motor. Values live in RAM on the board only — copy final ff/ffo/kp/ki into config/drivetrain/drivetrain_config.c by hand once you're happy. The gain fields above default to that file's current compiled-in values, but they never auto-sync from the board (e.g. after someone else's tuning session, or a reconnect) — click "Show current gains" first and check the log before trusting an untouched field.</p>
 
   <div class="chart-card">
     <div class="chart-head">
@@ -610,6 +611,12 @@
 
   connectBtn.addEventListener("click", connect);
   disconnectBtn.addEventListener("click", disconnect);
+
+  const showGainsBtn = document.getElementById("showGainsBtn");
+  showGainsBtn.addEventListener("click", async () => {
+    if (!state.writer) { log("# not connected"); return; }
+    await state.writer.write("show\n");
+  });
 
   const invertBtn = document.getElementById("invertBtn");
   invertBtn.addEventListener("click", () => {

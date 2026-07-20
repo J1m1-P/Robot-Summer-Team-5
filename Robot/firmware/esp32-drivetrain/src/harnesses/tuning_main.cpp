@@ -32,6 +32,13 @@
 // 1..4) -- plottable with tools/tuning_dashboard.html.
 //
 // Serial commands (newline-terminated), typeable any time between steps:
+//   show             -- print the current ff/ffo/kp/ki, e.g. after connecting
+//                     or reconnecting -- the dashboard's input fields don't
+//                     know the board's live values, only what was compiled
+//                     in or last set this session, so this is the only way
+//                     to confirm what's actually running before you touch
+//                     "Set" on a field and possibly overwrite a tuned gain
+//                     with a stale/default one.
 //   ff <value>       -- set feedforward slope gain (kff), shared by all enabled motors
 //   ffo <value>      -- set feedforward offset (kff_offset), shared
 //   kp <value>       -- set proportional gain, shared
@@ -129,7 +136,20 @@ unsigned long step_start_ms = 0;
 bool step_high = false;
 
 void print_usage() {
-    Serial.println("# usage: ff <value> | ffo <value> | kp <value> | ki <value> | target <value> | period <value> | invert <0|1> | continuous <0|1> | motor <1..4> <0|1>");
+    Serial.println("# usage: show | ff <value> | ffo <value> | kp <value> | ki <value> | target <value> | period <value> | invert <0|1> | continuous <0|1> | motor <1..4> <0|1>");
+}
+
+// Prints the gains actually in effect right now -- the only source of
+// truth once a session has diverged from the compiled-in defaults.
+void print_gains() {
+    Serial.print("# kff=");
+    Serial.print(controller_config.kff, 4);
+    Serial.print(" kff_offset=");
+    Serial.print(controller_config.kff_offset, 4);
+    Serial.print(" kp=");
+    Serial.print(controller_config.kp, 4);
+    Serial.print(" ki=");
+    Serial.println(controller_config.ki, 4);
 }
 
 // Enables or disables one motor/encoder pair independently of the other
@@ -171,6 +191,11 @@ void handle_serial_command() {
     String line = Serial.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) return;
+
+    if (line == "show") {
+        print_gains();
+        return;
+    }
 
     const int firstSpace = line.indexOf(' ');
     if (firstSpace < 0) {
@@ -248,6 +273,8 @@ void setup() {
     delay(1000);
 
     set_motor_enabled(0, true); // default to M1/E1 (FL) only
+    print_gains(); // so a freshly connected dashboard/terminal shows the
+                    // real compiled-in values instead of blank/stale fields
 
     Serial.println("millis,motor,target_mps,measured_mps,duty");
 
