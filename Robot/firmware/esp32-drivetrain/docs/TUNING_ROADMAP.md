@@ -12,7 +12,7 @@ read "0. Context for implementers" first before starting any item below.
 
 Follow these unless there's a specific reason not to — they're consistent across
 every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
-`wheel_velocity_pi`, `odometry`):
+`wheel_velocity_controller`, `odometry`):
 
 - **Config vs. state separation.** Every stateful module splits into an immutable
   `const` `*Config` struct (board/tuning values, never mutated) and a separate
@@ -22,7 +22,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
   Config*` pointer; callers own the config's lifetime (global `const` objects in
   `src/config/**` satisfy this).
 - **Pure math stays hardware-free and host-testable.** Modules like
-  `tape_following_controller.c`, `velocity_kinematics.c`, and `odometry.c` take
+  `tape_following_controller.c`, `x_drive_kinematics.c`, and `odometry.c` take
   plain structs/floats in and out, no GPIO/ESP-IDF calls, so they can run in the
   `[env:native]` PlatformIO environment and be unit tested without hardware. Any
   new PID/kinematics/planning math (§1, §3, §4) should follow this pattern and get
@@ -53,24 +53,27 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 
 | Module | Path | Status | Relevance |
 |---|---|---|---|
-| **Body↔wheel kinematics** | `include/control/drivetrain/velocity_kinematics.h` | Implemented, tested | `DrivetrainBodyVelocity {vx, vy, omega}` is the shared output contract for all motion sources. `drivetrain_kinematics_wheel_to_body_velocities()` already converts wheel deltas back to a body-frame delta — see next row. |
+| **Body↔wheel kinematics** | `include/control/drivetrain/x_drive_kinematics.h` | Implemented, tested | `DrivetrainBodyVelocity {vx, vy, omega}` is the shared output contract for all motion sources. `x_drive_kinematics_wheel_to_body_velocities()` already converts wheel deltas back to a body-frame delta — see next row. |
 | **World-frame pose integration** | `include/control/drivetrain/odometry.h` / `src/control/drivetrain/odometry.c` | **Implemented and unit-tested (`test/test_drivetrain_odometry/`), but not called anywhere in production code.** | This is most of §1's "error source" module already. `DrivetrainOdometry` accumulates a `DrivetrainPose {x_mm, y_mm, heading_rad}` from repeated `DrivetrainOdometryDelta {forward_mm, lateral_mm, heading_delta_rad}` calls via `drivetrain_odometry_update()`. **What's missing:** something to produce that `DrivetrainOdometryDelta` from encoder counts each cycle and call this on a schedule. |
-| **Wheel-delta → body-delta bridge (prototype only)** | `get_relative_body_motion()` in `src/harnesses/drivetrain_test_main.cpp` (~line 247) | Working pattern, but harness-local and reset-relative (not continuously integrated) | Reads each wheel's `drivetrain_get_encoder_accumulated_count()` delta since a captured start point, converts ticks → radians, then reuses `drivetrain_kinematics_wheel_to_body_velocities()` (abusing the velocity Jacobian as a linear position-delta map) to get a body-frame displacement. This is the exact shape of bridge §1 needs to feed `DrivetrainOdometry` every cycle — it just needs to become a real module instead of a harness-local one-shot helper, and to call `drivetrain_odometry_update()` continuously instead of only computing a since-start delta. |
+| **Wheel-delta → body-delta bridge** | `include/control/drivetrain/drivetrain_odometry_source.h` / `src/control/drivetrain/drivetrain_odometry_source.c` | **Implemented and unit-tested (`test/test_drivetrain_odometry_source/`); §1's error-source module.** | Promoted from the harness-local `get_relative_body_motion()` prototype (`drivetrain_test_main.cpp:279`, still there as a reference/comparison, not removed) into a real module: takes plain `DrivetrainWheelCounts` (no `Drivetrain*`/hardware dependency, so it's `[env:native]`-testable) each cycle, diffs against the previous cycle's counts, and calls `drivetrain_odometry_update()` continuously. **Still not called from any harness or main loop** — nothing yet reads live encoder counts into it on a schedule. |
+| **Off-tape motion PID** | `include/control/drivetrain/off_tape_motion.h` / `src/control/drivetrain/off_tape_motion.c` | **Implemented and unit-tested (`test/test_off_tape_motion/`); §1's shared PID.** | Reuses `tape_following_controller`'s generic bounded PID directly (nested `TapeFollowingControllerConfig`) rather than re-deriving one. Takes a caller-computed scalar `error` + `travel_velocity_mps`, outputs a `DrivetrainBodyVelocity` with the correction applied laterally (`vy`) and `omega` left at `0.0f` for a later per-primitive heading layer (e.g. `MoveP`'s terminal phase). **Not yet consumed by any motion primitive** — §2 doesn't exist yet. |
 | **Encoder velocity + position** | `src/drivers/encoder/encoder_driver.c` | Implemented (includes the SM/T quadrature-grouping + low-speed-timeout work already merged to `tuning`) | `drivetrain_get_encoder_accumulated_count()` gives exact raw ticks (unaffected by the SM/T velocity smoothing); `encoder_driver_get_velocity_mps()` gives smoothed velocity. Use accumulated count for odometry, not velocity. |
-| **Wheel-velocity inner loop** | `include/control/drivetrain/wheel_velocity_pi.h` | Implemented | The existing FF+PI loop `MoveS` relies on solely, and that `MoveL`/`MoveP`/`MoveC` sit on top of via the drivetrain facade. |
+| **Wheel-velocity inner loop** | `include/control/drivetrain/wheel_velocity_controller.h` | Implemented | The existing FF+PI loop `MoveS` relies on solely, and that `MoveL`/`MoveP`/`MoveC` sit on top of via the drivetrain facade. |
 | **Drivetrain facade** | `include/control/drivetrain/drivetrain.h` | Implemented | `drivetrain_set_body_velocity()` / `drivetrain_update()` is the single entry point every motion source (tape following, and eventually the new Move APIs) should command through. Handles watchdog/timeout/coast/brake safety already — don't reimplement this. |
-| **Closest existing analog of a PID-driven behavior module** | `src/control/tape_following/tape_follower.c` + `tape_following_controller.c` | Implemented, tested, **not wired into any production main loop either** | Best template to mirror for structuring the off-tape movement module (§1): config/state split, a `*_update()` that takes input + `dt_s` and fills an output struct, direction-change/reset handling, bounded PID with clamped output. |
+| **Closest existing analog of a PID-driven behavior module** | `src/control/tape_following/tape_follower.c` + `tape_following_controller.c` | Implemented, tested, **not wired into any production main loop either** | Template mirrored for structuring `off_tape_motion.c` (§1, see above): config/state split, a `*_update()` that takes input + `dt_s` and fills an output struct, bounded PID with clamped output. |
 | **Diagnostic harness + dashboard pattern to extend** | `src/harnesses/drivetrain_test_main.cpp` + `tools/drivetrain_test_dashboard.html` | Implemented | This is the pattern §5's tuning harness/webpage and §6's jog/program-builder webpage should extend, not a new harness built from scratch. Serial command protocol + HTML dashboard already exist for the drivetrain/tape-following diagnostics. |
 
 ### Build environments (`platformio.ini`)
 
 - `[env:native]` — host-compiled, no hardware. Pure modules only (currently
-  `velocity_kinematics.c`, `wheel_velocity_pi.c`, `odometry.c`,
-  `tape_following_controller.c`, `tape_follower.c`, `tape_line_estimator.c`,
-  `tape_task_detection.c`). **Add any new pure PID/kinematics/planning module here**
-  so it gets unit tested without hardware.
+  `x_drive_kinematics.c`, `wheel_velocity_controller.c`, `odometry.c`,
+  `drivetrain_odometry_source.c`, `off_tape_motion.c`,
+  `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
+  `tape_line_estimator.c`, `tape_task_detection.c`). **Add any new pure
+  PID/kinematics/planning module here** so it gets unit tested without hardware.
 - `[env:drivetrain-test]` — the harness referenced throughout this doc
-  (`drivetrain_test_main.cpp`); this is almost certainly where §2's Move APIs get
+  (`drivetrain_test_main.cpp`, now also builds `odometry.c` so §1's pose bridge
+  can run on hardware); this is almost certainly where §2's Move APIs get
   exercised first and where §5/§6's webpages attach.
 - `[env:tuning]` / `[env:drive]` — single-wheel PI tuning and full closed-loop
   drive harnesses; not directly relevant to this roadmap but shows the existing
@@ -88,27 +91,32 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
   yet implemented**, informs §3 below (`F_lon`/`F_lat`/`F_ang` static correction +
   dynamic max-acceleration index). Read this paper before implementing §3.
 
-### Related branch (not merged into `tuning`)
+### Now-merged reference module
 
-`origin/TapeFollowing` (fetch it — it's not local by default) adds a
-`tape_following_kinematics.c/h` module that maps a requested `{vx, vy}` into a
+`tape_following_kinematics.c/h` (`src/control/tape_following/`,
+`include/control/tape_following/`) is merged into `tuning` as of the
+`TapeFollowing`/`DrivetrainCleanup` PRs. It maps a requested `{vx, vy}` into a
 coordinated turn `omega` (turns the robot to face the direction it's currently
 strafing, rate-limited). It's a useful reference pattern for `MoveC`'s arc-tracking
 math (§2), even though its actual purpose there is tape-following, not off-tape
-motion. It doesn't touch any encoder files, so merging it wouldn't conflict with the
-SM/T work already on `tuning`. That branch also has a thorough architecture-doc
-example (`docs/TAPE_FOLLOWING_SYSTEM.md`) worth matching in style if this roadmap's
-modules get similar documentation later.
+motion. `docs/subsystem/TAPE_FOLLOWING_SYSTEM.md` is also merged and worth matching
+in style if this roadmap's modules get similar documentation later.
 
 ## 1. Off-tape movement module
 
-- [ ] PID-based movement controller for when the robot is **not** following tape
-      (open-field point-to-point / vector / arc moves).
-- [ ] The controller must consume an **error function from a separate module**,
+- [x] PID-based movement controller for when the robot is **not** following tape
+      (open-field point-to-point / vector / arc moves). The shared PID itself is
+      implemented (`off_tape_motion.c`/`.h`, reusing `tape_following_controller`'s
+      generic bounded PID rather than re-deriving one, per §0's reuse guidance) and
+      unit-tested (`test/test_off_tape_motion/`). Still open: no motion primitive
+      (§2) calls it yet, so it's unexercised outside its own tests.
+- [x] The controller must consume an **error function from a separate module**,
       not compute it inline — mirrors the existing split between
       `tape_line_estimator` (pure math) and `tape_sensor_driver` (hardware), so the
-      PID stays agnostic to where the error comes from.
-- [ ] For now, the error source is **encoder-based odometry only**. Most of this
+      PID stays agnostic to where the error comes from. `off_tape_motion_update()`
+      takes a caller-computed `error` field (`OffTapeMotionInput`); the module
+      itself never computes an error.
+- [x] For now, the error source is **encoder-based odometry only**. Most of this
       already exists (see §0's building-blocks table) — `DrivetrainOdometry`
       (`odometry.c`) already integrates world-frame pose from body-frame deltas,
       and `get_relative_body_motion()` in `drivetrain_test_main.cpp` already shows
@@ -116,13 +124,22 @@ modules get similar documentation later.
       packaging that bridge into a real module that calls
       `drivetrain_odometry_update()` continuously every cycle (not just as a
       since-start snapshot), rather than reimplementing odometry from scratch.
+      Done: `drivetrain_odometry_source.c`/`.h` is that module (takes plain
+      `DrivetrainWheelCounts` + config, no hardware/`Drivetrain*` dependency, so it
+      stays `[env:native]`-testable); unit-tested in
+      `test/test_drivetrain_odometry_source/`. Not yet wired into any harness or
+      main loop that actually reads live encoder counts each cycle (`platformio.ini`
+      only builds it, doesn't call it from anywhere yet).
 - [ ] Design the error-source interface so a **PMW3610 optical flow sensor** can
       replace or supplement encoder odometry later without changing the PID or the
-      motion API layer above it.
+      motion API layer above it. Partially addressed: `off_tape_motion_update()`'s
+      input is already a caller-computed scalar `error`, so a future optical-flow
+      error source only has to produce that same scalar. No second implementation
+      exists yet to confirm the interface actually generalizes.
 - [ ] This single PID instance is reused by `MoveL`, `MoveP`, and `MoveC` (§2) —
       only the error function each one tracks differs (distance-along-line vs.
       distance-to-point vs. distance-off-arc). `MoveS` intentionally does **not**
-      use it.
+      use it. Not yet true: none of `MoveL`/`MoveP`/`MoveC` exist.
 
 ## 2. Motion API layer
 
@@ -139,8 +156,10 @@ Four motion primitives, all taking `speed` and `max_accel` parameters:
 - [ ] Implement `MoveL`
 - [ ] Implement `MoveP`
 - [ ] Implement `MoveC`
-- [ ] Determine whether `MoveP` needs a dedicated path-planning helper module, or
+- [x] Determine whether `MoveP` needs a dedicated path-planning helper module, or
       whether it can reuse `MoveL` plus a terminal heading-correction phase.
+      Decided: dedicated `path_planner.c` module (not yet implemented — this is a
+      design decision, not a completed module).
 - [ ] `MoveC` needs its own arc-tracking error function (distance/heading off the
       target arc) feeding the shared off-tape PID (§1) — this is a distinct control
       problem from `MoveP`'s "reach a point, end at a heading," so keep it a
