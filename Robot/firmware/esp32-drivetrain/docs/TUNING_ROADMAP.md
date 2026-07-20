@@ -58,6 +58,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 | **Wheel-delta → body-delta bridge** | `include/control/drivetrain/drivetrain_odometry_source.h` / `src/control/drivetrain/drivetrain_odometry_source.c` | **Implemented and unit-tested (`test/test_drivetrain_odometry_source/`); §1's error-source module.** | Promoted from the harness-local `get_relative_body_motion()` prototype (`drivetrain_test_main.cpp:279`, still there as a reference/comparison, not removed) into a real module: takes plain `DrivetrainWheelCounts` (no `Drivetrain*`/hardware dependency, so it's `[env:native]`-testable) each cycle, diffs against the previous cycle's counts, and calls `drivetrain_odometry_update()` continuously. **Still not called from any harness or main loop** — nothing yet reads live encoder counts into it on a schedule. |
 | **Off-tape motion PID** | `include/control/drivetrain/off_tape_motion.h` / `src/control/drivetrain/off_tape_motion.c` | **Implemented and unit-tested (`test/test_off_tape_motion/`); §1's shared PID.** | Reuses `tape_following_controller`'s generic bounded PID directly (nested `TapeFollowingControllerConfig`) rather than re-deriving one. Takes a caller-computed scalar `error` + `travel_velocity_mps`, outputs a `DrivetrainBodyVelocity` with the correction applied laterally (`vy`) and `omega` left at `0.0f` for a later per-primitive heading layer (e.g. `MoveP`'s terminal phase). **Not yet consumed by any motion primitive** — §2 doesn't exist yet. |
 | **Jerk-bounded speed ramp** | `include/control/drivetrain/speed_profile.h` / `src/control/drivetrain/speed_profile.c` | **Implemented and unit-tested (`test/test_speed_profile/`); §4's S-curve deliverable.** | Simplified jerk-bounded ramp (not a full 7-segment S-curve — a deliberate scope choice). Rate-limits acceleration each cycle toward whatever bang-bang acceleration would reach the target speed, bounded by `max_accel_mps2` and `SpeedProfileConfig.max_jerk_mps3`. **Not yet called by anything** — no motion primitive exists yet to drive it. |
+| **`MoveS`** | `include/control/drivetrain/move_s.h` / `src/control/drivetrain/move_s.c` | **Implemented and unit-tested (`test/test_move_s/`); §2's first motion primitive.** | Open-loop dead-reckoned straight move: `speed_profile.c` for jerk-bounded ramping, a stopping-distance target for the final approach, progress tracked against a `DrivetrainPose` the caller supplies each cycle. No outer PID (relies solely on the drivetrain facade's own wheel-velocity PI). **Not yet called from any harness or main loop**, and `F_lon`/`F_lat`/`F_ang` aren't threaded in yet (§3). |
 | **Encoder velocity + position** | `src/drivers/encoder/encoder_driver.c` | Implemented (includes the SM/T quadrature-grouping + low-speed-timeout work already merged to `tuning`) | `drivetrain_get_encoder_accumulated_count()` gives exact raw ticks (unaffected by the SM/T velocity smoothing); `encoder_driver_get_velocity_mps()` gives smoothed velocity. Use accumulated count for odometry, not velocity. |
 | **Wheel-velocity inner loop** | `include/control/drivetrain/wheel_velocity_controller.h` | Implemented | The existing FF+PI loop `MoveS` relies on solely, and that `MoveL`/`MoveP`/`MoveC` sit on top of via the drivetrain facade. |
 | **Drivetrain facade** | `include/control/drivetrain/drivetrain.h` | Implemented | `drivetrain_set_body_velocity()` / `drivetrain_update()` is the single entry point every motion source (tape following, and eventually the new Move APIs) should command through. Handles watchdog/timeout/coast/brake safety already — don't reimplement this. |
@@ -69,7 +70,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 - `[env:native]` — host-compiled, no hardware. Pure modules only (currently
   `x_drive_kinematics.c`, `wheel_velocity_controller.c`, `odometry.c`,
   `drivetrain_odometry_source.c`, `off_tape_motion.c`, `speed_profile.c`,
-  `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
+  `move_s.c`, `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
   `tape_line_estimator.c`, `tape_task_detection.c`). **Add any new pure
   PID/kinematics/planning module here** so it gets unit tested without hardware.
 - `[env:drivetrain-test]` — the harness referenced throughout this doc
@@ -153,7 +154,23 @@ Four motion primitives, all taking `speed` and `max_accel` parameters:
 | **MoveP** ("point") | Move to a point and finish at a specific ending heading; may need a path-planning helper to blend translation and final rotation | Off-tape PID (§1) + path planning | distance, heading, end heading, speed, max accel |
 | **MoveC** ("circular") | Move along a circular arc (turns, smooth curves) — coordinated `vx` + `omega` tracking a defined radius, not a straight segment or a single end-orientation target | Off-tape PID (§1) | radius, arc angle (or start/end heading), speed, max accel |
 
-- [ ] Implement `MoveS`
+- [x] Implement `MoveS`. `move_s.c`/`.h` — takes `{distance, heading, speed,
+      max_accel}`, drives purely open-loop (no outer PID; `off_tape_motion` is
+      never called), using `speed_profile.c` for jerk-bounded accel/decel and a
+      stopping-distance target (`sqrt(2*max_accel*remaining)`) to come to a
+      smooth stop at `distance`. The drivetrain facade's own `drivetrain_update()`
+      still does body→wheel kinematics and the wheel-velocity PI — `MoveS` only
+      produces a `DrivetrainBodyVelocity` for the caller to apply via
+      `drivetrain_set_body_velocity()`, same output contract as `tape_follower`.
+      Progress is tracked against a world-frame direction captured once at
+      `move_s_start()`, from a caller-supplied `DrivetrainPose` (i.e.
+      `drivetrain_odometry_source`, §1) each cycle — deliberately not
+      re-derived from the live heading each cycle, so heading drift isn't
+      silently absorbed instead of measured. `F_lon`/`F_lat`/`F_ang` are not
+      threaded in yet (see §3 — `move_calibration.c` doesn't exist, and `F_lat`
+      needs a per-wheel hook the drivetrain facade doesn't currently expose).
+      Unit-tested in `test/test_move_s/`, including a full simulated run to
+      completion. **Not yet exercised on hardware or from any harness.**
 - [ ] Implement `MoveL`
 - [ ] Implement `MoveP`
 - [ ] Implement `MoveC`
