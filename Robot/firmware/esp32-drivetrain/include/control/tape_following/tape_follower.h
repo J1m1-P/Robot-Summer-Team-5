@@ -6,7 +6,7 @@
 
 #include "esp_err.h"
 
-#include "control/drivetrain/velocity_kinematics.h"
+#include "control/drivetrain/x_drive_kinematics.h"
 #include "control/tape_following/tape_following_controller.h"
 #include "control/tape_following/tape_following_kinematics.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"

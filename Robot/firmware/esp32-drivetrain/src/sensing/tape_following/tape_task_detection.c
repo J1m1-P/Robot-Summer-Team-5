@@ -28,13 +28,12 @@ esp_err_t tape_task_detector_init(TapeTaskDetector *detector,
         config->confirmation_samples == 0 || config->release_samples == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (detector->initialized) {
+    if (detector->config != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     memset(detector, 0, sizeof(*detector));
     detector->config = config;
-    detector->initialized = true;
     return ESP_OK;
 }
 
@@ -43,7 +42,7 @@ esp_err_t tape_task_detector_reset(TapeTaskDetector *detector)
     if (detector == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!detector->initialized || detector->config == NULL) {
+    if (detector->config == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -60,7 +59,7 @@ esp_err_t tape_task_detector_update(TapeTaskDetector *detector,
     if (detector == NULL || left_sensor == NULL || output == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!detector->initialized || detector->config == NULL) {
+    if (detector->config == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 

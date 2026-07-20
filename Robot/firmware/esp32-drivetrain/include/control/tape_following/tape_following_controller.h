@@ -26,6 +26,10 @@ typedef struct {
     bool has_previous_error;
 } TapeFollowingControllerState;
 
+// Checks gains and limits before they enter a running controller.
+bool tape_following_controller_config_is_valid(
+    const TapeFollowingControllerConfig *config);
+
 // Clears integral and derivative history.
 esp_err_t tape_following_controller_reset(TapeFollowingControllerState *state);
 

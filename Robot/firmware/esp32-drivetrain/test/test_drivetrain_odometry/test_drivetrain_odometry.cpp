@@ -65,6 +65,7 @@ void test_invalid_cycle_holds_pose() {
     TEST_ASSERT_EQUAL(
         static_cast<int>(DRIVETRAIN_ODOMETRY_FAULT_INVALID_CYCLE),
         static_cast<int>(odometry.last_fault));
+    TEST_ASSERT_TRUE(odometry.fault_latched);
 }
 
 // Confirms non-finite motion is rejected without changing the pose.

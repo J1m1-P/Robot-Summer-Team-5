@@ -24,7 +24,7 @@ constexpr uint16_t kWebSocketPort = 81;
 
 WebSocketsServer web_socket(kWebSocketPort);
 Drivetrain drivetrain;
-WheelVelocityPiConfig pi_config = DRIVETRAIN_CONFIG.wheel_pi;
+WheelVelocityControllerConfig controller_config = DRIVETRAIN_CONFIG.wheel_controller;
 
 // Maps logical FL/FR/BL/BR order to physical connector order M1/M2/M3/M4.
 const DrivetrainMotorId kDisplayOrder[DRIVETRAIN_MOTOR_MAX] = {
@@ -43,6 +43,10 @@ unsigned long drive_end_ms = 0;
 unsigned long last_print_ms = 0;
 bool drivetrain_ready = false;
 bool driving = false;
+
+// Real-time tuning implementation is grouped at the bottom of this namespace.
+bool apply_controller_config();
+void update_controller_tuning(const String &key, float value);
 
 // Sends one response to USB serial and every connected dashboard.
 void output_line(String line) {
@@ -148,16 +152,6 @@ void stop_drive() {
     output_line("# stopped");
 }
 
-// Installs edited gains and restores the accepted values if validation fails.
-bool apply_pi_config() {
-    const esp_err_t error = drivetrain_set_wheel_pi_config(
-        &drivetrain, &pi_config);
-    if (error == ESP_OK) return true;
-    drivetrain_get_wheel_pi_config(&drivetrain, &pi_config);
-    output_line("# invalid PI configuration rejected");
-    return false;
-}
-
 // Parses and executes one complete serial or WebSocket command line.
 void process_command_line(String line) {
     line.trim();
@@ -199,12 +193,7 @@ void process_command_line(String line) {
         turn_speed_rad_s = tokens[0].toFloat();
         output_line("# turn_speed_rad_s = " + String(turn_speed_rad_s, 4));
     } else if (key == "ff" || key == "ffo" || key == "kp" || key == "ki") {
-        const float value = tokens[0].toFloat();
-        if (key == "ff") pi_config.kff = value;
-        if (key == "ffo") pi_config.kff_offset = value;
-        if (key == "kp") pi_config.kp = value;
-        if (key == "ki") pi_config.ki = value;
-        if (apply_pi_config()) output_line("# " + key + " = " + String(value, 4));
+        update_controller_tuning(key, tokens[0].toFloat());
     } else {
         print_usage();
     }
@@ -230,6 +219,7 @@ void print_telemetry(unsigned long now_ms) {
                     String(drivetrain_get_applied_duty(&drivetrain, wheel), 4));
     }
 }
+
 
 }  // namespace
 
@@ -285,3 +275,32 @@ void loop() {
         print_telemetry(now_ms);
     }
 }
+
+namespace {
+
+// -----------------------------------------------------------------------------
+// Real-time tuning only
+// -----------------------------------------------------------------------------
+
+// Installs edited gains and restores the accepted values if validation fails.
+bool apply_controller_config() {
+    const esp_err_t error = drivetrain_set_wheel_controller_config(
+        &drivetrain, &controller_config);
+    if (error == ESP_OK) return true;
+    drivetrain_get_wheel_controller_config(&drivetrain, &controller_config);
+    output_line("# invalid PI configuration rejected");
+    return false;
+}
+
+// Applies one RAM-only gain edit through the drivetrain's validated tuning API.
+void update_controller_tuning(const String &key, float value) {
+    if (key == "ff") controller_config.kff = value;
+    if (key == "ffo") controller_config.kff_offset = value;
+    if (key == "kp") controller_config.kp = value;
+    if (key == "ki") controller_config.ki = value;
+    if (apply_controller_config()) {
+        output_line("# " + key + " = " + String(value, 4));
+    }
+}
+
+}  // namespace

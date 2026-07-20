@@ -26,7 +26,6 @@ typedef struct {
     uint8_t active_sample_count;
     uint8_t inactive_sample_count;
     bool detected;
-    bool initialized;
 } TapeTaskDetector;
 
 /* Reports the stable level plus one-update transition events for RobotManager. */

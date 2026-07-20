@@ -85,6 +85,11 @@ static void test_controller_clamps_and_rejects_invalid_input()
         1.0f, 0.5f, 0.0f, 0.2f, -0.3f, 0.3f};
     TapeFollowingControllerState state = {};
 
+    TEST_ASSERT_TRUE(tape_following_controller_config_is_valid(&config));
+    TEST_ASSERT_EQUAL(ESP_OK, tape_following_controller_reset(&state));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      tape_following_controller_reset(nullptr));
+
     float correction = tape_following_controller_update(
         &state, &config, 2.0f, 0.1f);
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.3f, correction);
@@ -94,6 +99,24 @@ static void test_controller_clamps_and_rejects_invalid_input()
         &state, &config, NAN, 0.1f);
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, correction);
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.2f, state.integral);
+
+    config.correction_min = 1.0f;
+    config.correction_max = -1.0f;
+    TEST_ASSERT_FALSE(tape_following_controller_config_is_valid(&config));
+}
+
+static void test_line_estimator_rejects_non_finite_weights()
+{
+    TapeLineEstimatorConfig config = make_estimator_config();
+    config.channel_weights[1] = NAN;
+    TapeLineEstimatorState state = {};
+    TapeSensor sensor = make_sensor(false, true, false, false);
+    float error = 42.0f;
+
+    TEST_ASSERT_FALSE(tape_line_estimator_config_is_valid(&config));
+    TEST_ASSERT_FALSE(tape_line_estimator_compute_error(
+        &sensor, &config, &state, &error));
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 42.0f, error);
 }
 
 static void test_follower_outputs_drivetrain_body_velocity()
@@ -201,6 +224,8 @@ static void test_task_detector_debounces_start_and_end()
     TapeSensor inactive = {};
 
     TEST_ASSERT_EQUAL(ESP_OK, tape_task_detector_init(&detector, &config));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      tape_task_detector_init(&detector, &config));
     TEST_ASSERT_EQUAL(ESP_OK, tape_task_detector_update(
         &detector, &active, &output));
     TEST_ASSERT_FALSE(output.detected);
@@ -223,6 +248,7 @@ int main(int, char **)
     UNITY_BEGIN();
     RUN_TEST(test_line_estimator_centroid_and_lost_direction);
     RUN_TEST(test_line_estimator_0110_is_centered);
+    RUN_TEST(test_line_estimator_rejects_non_finite_weights);
     RUN_TEST(test_controller_clamps_and_rejects_invalid_input);
     RUN_TEST(test_kinematics_turns_leading_edge_and_limits_acceleration);
     RUN_TEST(test_follower_outputs_drivetrain_body_velocity);
