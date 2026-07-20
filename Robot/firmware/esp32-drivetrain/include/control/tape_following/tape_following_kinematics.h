@@ -1,6 +1,8 @@
 /* Declares the pure tape-following velocity-to-turn-rate mapping. */
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -12,6 +14,10 @@ typedef struct {
     float max_omega_rad_s;
     float max_acceleration_rad_s2;
 } TapeFollowingKinematicsConfig;
+
+// Checks turn-rate and acceleration limits before runtime use.
+bool tape_following_kinematics_config_is_valid(
+    const TapeFollowingKinematicsConfig *config);
 
 /* Turns the leading edge toward the requested translation direction while
  * limiting angular velocity and its change from the previous request. */

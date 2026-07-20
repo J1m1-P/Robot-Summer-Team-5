@@ -1,7 +1,17 @@
 /* Implements weighted tape-line position estimation. */
 #include "sensing/tape_following/tape_line_estimator.h"
 
+#include <math.h>
 #include <stddef.h>
+
+bool tape_line_estimator_config_is_valid(const TapeLineEstimatorConfig *config)
+{
+    if (config == NULL) return false;
+    for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; channel++) {
+        if (!isfinite(config->channel_weights[channel])) return false;
+    }
+    return true;
+}
 
 void tape_line_estimator_reset(TapeLineEstimatorState *state)
 {
@@ -16,7 +26,8 @@ bool tape_line_estimator_compute_error(const TapeSensor *sensor,
                                        TapeLineEstimatorState *state,
                                        float *out_error)
 {
-    if (sensor == NULL || config == NULL || state == NULL || out_error == NULL) {
+    if (sensor == NULL || !tape_line_estimator_config_is_valid(config) ||
+        state == NULL || out_error == NULL) {
         return false;
     }
 

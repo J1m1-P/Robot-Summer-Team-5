@@ -9,6 +9,19 @@
 #define TAPE_SENSOR_ACTIVE_LEVEL 1
 #define TAPE_SENSOR_MUX_SETTLE_US 5
 
+static bool mux_config_is_valid(const TapeSensorMuxConfig *config)
+{
+    return config != NULL &&
+           GPIO_IS_VALID_OUTPUT_GPIO(config->channel_select_a_pin) &&
+           GPIO_IS_VALID_OUTPUT_GPIO(config->channel_select_b_pin) &&
+           config->channel_select_a_pin != config->channel_select_b_pin;
+}
+
+static bool sensor_config_is_valid(const TapeSensorDriverConfig *config)
+{
+    return config != NULL && GPIO_IS_VALID_GPIO(config->module_output_pin);
+}
+
 /* Drives mux address A and B. Per the CD4052 truth table,
  * channel = 2*B + A (A is the LSB). */
 static void tape_sensor_driver_select_channel(const TapeSensorMux *mux,
@@ -22,12 +35,12 @@ static void tape_sensor_driver_select_channel(const TapeSensorMux *mux,
 esp_err_t tape_sensor_mux_init(TapeSensorMux *mux,
                                const TapeSensorMuxConfig *config)
 {
-    if (mux == NULL || config == NULL) {
+    if (mux == NULL || !mux_config_is_valid(config)) {
         return ESP_ERR_INVALID_ARG;
     }
 
     if (mux->initialized) {
-        return ESP_OK;
+        return mux->config == config ? ESP_OK : ESP_ERR_INVALID_STATE;
     }
 
     mux->config = config;
@@ -53,15 +66,19 @@ esp_err_t tape_sensor_driver_init(TapeSensor *sensor,
                                   const TapeSensorDriverConfig *config,
                                   TapeSensorMux *mux)
 {
-    if (sensor == NULL || config == NULL || mux == NULL) {
+    if (sensor == NULL || !sensor_config_is_valid(config) || mux == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!mux->initialized || mux->config == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (config->module_output_pin == mux->config->channel_select_a_pin ||
+        config->module_output_pin == mux->config->channel_select_b_pin) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    sensor->config = config;
-    sensor->mux = mux;
+    sensor->config = NULL;
+    sensor->mux = NULL;
     sensor->channel_0 = false;
     sensor->channel_1 = false;
     sensor->channel_2 = false;
@@ -78,6 +95,9 @@ esp_err_t tape_sensor_driver_init(TapeSensor *sensor,
     if (error != ESP_OK) {
         return error;
     }
+
+    sensor->config = config;
+    sensor->mux = mux;
     return ESP_OK;
 }
 
@@ -98,7 +118,8 @@ esp_err_t tape_sensor_driver_read_all(TapeSensor *sensors[TAPE_SENSOR_MODULE_COU
     for (int module = 0; module < TAPE_SENSOR_MODULE_COUNT; module++) {
         if (sensors[module] == NULL || sensors[module]->config == NULL ||
             sensors[module]->mux == NULL || !sensors[module]->mux->initialized ||
-            sensors[module]->mux->config == NULL) {
+            sensors[module]->mux->config == NULL ||
+            (module > 0 && sensors[module]->mux != sensors[0]->mux)) {
             return ESP_ERR_INVALID_ARG;
         }
     }

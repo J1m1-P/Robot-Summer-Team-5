@@ -112,7 +112,7 @@ float motion_progress = 0.0f;
 float motion_max_speed = 0.0f;
 int motion_turn_sign = 1;
 uint32_t position_timeout_at_ms = 0;
-WheelVelocityPiConfig live_pi_configs[DRIVETRAIN_MOTOR_MAX] = {};
+WheelVelocityControllerConfig live_controller_configs[DRIVETRAIN_MOTOR_MAX] = {};
 
 TapeSensorMux tape_sensor_mux = {};
 TapeSensor tape_sensors[TAPE_SENSOR_MODULE_COUNT] = {};
@@ -135,6 +135,22 @@ TapeFollowerConfig tape_follower_config = {};
 TapeFollowerConfig live_tape_config = {};
 TapeLineEstimatorConfig tape_front_estimator_config = {};
 TapeLineEstimatorConfig tape_back_estimator_config = {};
+
+// Real-time tuning implementations are grouped at the bottom of this namespace.
+void print_controller_config();
+void print_tape_tuning();
+void set_inversion(const String &kind, int wheel, const String *value);
+void update_pi_parameter(int wheel, const String &field, float value);
+void reset_controller_config(int wheel = -1);
+void update_tape_parameter(const String &field, float value);
+void reset_tape_tuning();
+void print_runtime_settings();
+void print_config();
+void update_ramp_tuning(float acceleration, float deceleration);
+void update_distance_tolerance_tuning(float value_m);
+void update_angle_tolerance_tuning(float value_deg);
+void update_telemetry_period_tuning(long value_ms);
+void update_motion_timeout_tuning(long value_ms);
 
 bool time_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
@@ -271,14 +287,14 @@ esp_err_t get_relative_body_motion(DrivetrainBodyVelocity *motion_out) {
                          (2.0f * kPi) /
                          static_cast<float>(config->counts_per_revolution);
     }
-    const DrivetrainWheelVelocity wheels = {
+    const XDriveWheelVelocity wheels = {
         .fl = wheel_angle[DRIVETRAIN_MOTOR_FL],
         .fr = wheel_angle[DRIVETRAIN_MOTOR_FR],
         .bl = wheel_angle[DRIVETRAIN_MOTOR_BL],
         .br = wheel_angle[DRIVETRAIN_MOTOR_BR],
     };
-    return drivetrain_kinematics_wheel_to_body_velocities(
-        &test_config.kinematics, &wheels, motion_out);
+    return x_drive_kinematics_wheel_to_body_velocities(
+        &test_config.x_drive_kinematics, &wheels, motion_out);
 }
 
 bool direction_vector(const String &name, float *x_out, float *y_out) {
@@ -374,8 +390,8 @@ void enable_test() {
     drivetrain_ready = true;
     last_control_us = esp_timer_get_time();
     for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
-        drivetrain_get_motor_pi_config(
-            &drivetrain, static_cast<DrivetrainMotorId>(i), &live_pi_configs[i]);
+        drivetrain_get_motor_controller_config(
+            &drivetrain, static_cast<DrivetrainMotorId>(i), &live_controller_configs[i]);
     }
     Serial.println("# drivetrain enabled; motors coasting");
 }
@@ -395,54 +411,6 @@ void reset_all_encoders() {
     }
     capture_motion_start_counts();
     Serial.println("# all encoder counts reset to zero");
-}
-
-void print_pi_config() {
-    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
-        drivetrain_get_motor_pi_config(
-            &drivetrain, static_cast<DrivetrainMotorId>(i), &live_pi_configs[i]);
-        const WheelVelocityPiConfig &config = live_pi_configs[i];
-        Serial.printf("# PI %s kff=%.5f offset=%.5f kp=%.5f ki=%.5f slew=%.5f\n",
-                      kWheelNames[i], config.kff, config.kff_offset,
-                      config.kp, config.ki, config.duty_slew_per_s);
-    }
-}
-
-void print_tape_tuning() {
-    Serial.printf("# TAPE kp=%.4f ki=%.4f kd=%.4f integral_limit=%.3f "
-                  "heading=%.3f max_omega=%.3f angular_accel=%.3f "
-                  "search_speed=%.3f lost_timeout=%.3f dt_max=%.3f\n",
-                  live_tape_config.controller.proportional_gain,
-                  live_tape_config.controller.integral_gain,
-                  live_tape_config.controller.derivative_gain,
-                  live_tape_config.controller.integral_limit,
-                  live_tape_config.heading.gain_s_inv,
-                  live_tape_config.heading.max_omega_rad_s,
-                  live_tape_config.heading.max_acceleration_rad_s2,
-                  live_tape_config.search.velocity_mps,
-                  live_tape_config.search.timeout_s,
-                  live_tape_config.controller_dt_max_s);
-}
-
-void print_runtime_settings() {
-    Serial.printf("# limits translation=%.3f_mps turn=%.3f_rad_s duty=%.3f pair_duty=%.3f\n",
-                  test_config.max_vx_mps, test_config.max_omega_rad_s,
-                  test_config.max_duty, kMaxPairDuty);
-    Serial.printf("# runtime ramp_accel=%.3f ramp_decel=%.3f distance_tolerance=%.4f_m "
-                  "angle_tolerance=%.2f_deg timeout=%lu_ms telemetry=%lu_ms\n",
-                  acceleration_per_s2, deceleration_per_s2,
-                  distance_tolerance_m, angle_tolerance_rad * 180.0f / kPi,
-                  static_cast<unsigned long>(motion_timeout_ms),
-                  static_cast<unsigned long>(telemetry_period_ms));
-}
-
-void print_config() {
-    Serial.println("# wheel,motor_inverted,encoder_inverted");
-    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
-        Serial.printf("# %s,%d,%d\n", kWheelNames[i],
-                      test_motor_configs[i].direction_inverted,
-                      test_encoder_configs[i].direction_inverted);
-    }
 }
 
 void format_tape_bits(uint8_t bits, char output[5]) {
@@ -783,102 +751,6 @@ void start_sequence(float speed, uint32_t duration_ms) {
     start_sequence_step();
 }
 
-void set_inversion(const String &kind, int wheel, const String *value) {
-    stop_test(false);
-    bool *setting = nullptr;
-    if (kind == "motor") setting = &test_motor_configs[wheel].direction_inverted;
-    if (kind == "encoder") setting = &test_encoder_configs[wheel].direction_inverted;
-    if (setting == nullptr) {
-        Serial.println("# usage: invert motor|encoder <wheel> [0|1]");
-        return;
-    }
-
-    *setting = value == nullptr ? !*setting : value->toInt() != 0;
-    if (kind == "encoder") {
-        const esp_err_t error = encoder_driver_reset(&drivetrain.devices.encoders[wheel]);
-        if (error != ESP_OK) {
-            report_error("encoder reset", error);
-            return;
-        }
-    }
-    Serial.printf("# %s inversion for %s = %d (RAM only)\n",
-                  kind.c_str(), kWheelNames[wheel], *setting);
-}
-
-void update_pi_parameter(int wheel, const String &field, float value) {
-    if (!isfinite(value)) {
-        Serial.println("# PI value must be finite");
-        return;
-    }
-    const int first = wheel < 0 ? 0 : wheel;
-    const int last = wheel < 0 ? DRIVETRAIN_MOTOR_MAX : wheel + 1;
-    for (int index = first; index < last; ++index) {
-        drivetrain_get_motor_pi_config(
-            &drivetrain, static_cast<DrivetrainMotorId>(index),
-            &live_pi_configs[index]);
-        WheelVelocityPiConfig &config = live_pi_configs[index];
-        if (field == "kff") config.kff = value;
-        else if (field == "offset") config.kff_offset = value;
-        else if (field == "kp") config.kp = value;
-        else if (field == "ki") config.ki = value;
-        else if (field == "slew") config.duty_slew_per_s = value;
-        else {
-            Serial.println("# PI field must be kff|offset|kp|ki|slew");
-            return;
-        }
-        const esp_err_t error = drivetrain_set_motor_pi_config(
-            &drivetrain, static_cast<DrivetrainMotorId>(index), &config);
-        if (error != ESP_OK) {
-            Serial.printf("# PI update rejected for %s: %s\n",
-                          kWheelNames[index], esp_err_to_name(error));
-            return;
-        }
-    }
-    print_pi_config();
-}
-
-void reset_pi_config(int wheel = -1) {
-    const int first = wheel < 0 ? 0 : wheel;
-    const int last = wheel < 0 ? DRIVETRAIN_MOTOR_MAX : wheel + 1;
-    for (int index = first; index < last; ++index) {
-        live_pi_configs[index] = test_config.wheel_pi;
-        const esp_err_t error = drivetrain_set_motor_pi_config(
-            &drivetrain, static_cast<DrivetrainMotorId>(index),
-            &live_pi_configs[index]);
-        if (error != ESP_OK) {
-            Serial.printf("# PI reset failed: %s\n", esp_err_to_name(error));
-            return;
-        }
-    }
-    Serial.println("# PI restored to compiled defaults");
-    print_pi_config();
-}
-
-void update_tape_parameter(const String &field, float value) {
-    if (!isfinite(value)) { Serial.println("# tape value must be finite"); return; }
-    TapeFollowerConfig candidate = live_tape_config;
-    if (field == "kp") candidate.controller.proportional_gain = value;
-    else if (field == "ki") candidate.controller.integral_gain = value;
-    else if (field == "kd") candidate.controller.derivative_gain = value;
-    else if (field == "integral-limit") candidate.controller.integral_limit = value;
-    else if (field == "heading") candidate.heading.gain_s_inv = value;
-    else if (field == "max-omega") candidate.heading.max_omega_rad_s = value;
-    else if (field == "angular-accel") candidate.heading.max_acceleration_rad_s2 = value;
-    else if (field == "search-speed") candidate.search.velocity_mps = value;
-    else if (field == "lost-timeout") candidate.search.timeout_s = value;
-    else if (field == "dt-max") candidate.controller_dt_max_s = value;
-    else { Serial.println("# unknown tape tuning field"); return; }
-
-    TapeFollower validator = {};
-    if (candidate.heading.max_omega_rad_s > test_config.max_omega_rad_s ||
-        tape_follower_init(&validator, &candidate) != ESP_OK) {
-        Serial.println("# tape tuning update rejected");
-        return;
-    }
-    live_tape_config = candidate;
-    print_tape_tuning();
-}
-
 void process_command(String line) {
     line.trim();
     line.toLowerCase();
@@ -897,7 +769,7 @@ void process_command(String line) {
     }
     if (command == "limits" || command == "settings") {
         print_runtime_settings();
-        print_pi_config();
+        print_controller_config();
         print_tape_tuning();
         return;
     }
@@ -912,11 +784,11 @@ void process_command(String line) {
     if (command == "reset-encoders") { reset_all_encoders(); return; }
 
     if (command == "pi") {
-        if (count == 1 || tokens[1] == "show") { print_pi_config(); return; }
+        if (count == 1 || tokens[1] == "show") { print_controller_config(); return; }
         if (tokens[1] == "reset") {
             const int wheel = count >= 3 ? parse_wheel(tokens[2]) : -1;
             if (count >= 3 && wheel < 0) { Serial.println("# invalid wheel"); return; }
-            reset_pi_config(wheel);
+            reset_controller_config(wheel);
             return;
         }
         if (count < 4) {
@@ -932,9 +804,7 @@ void process_command(String line) {
     if (command == "tape-tune") {
         if (count == 1 || tokens[1] == "show") { print_tape_tuning(); return; }
         if (tokens[1] == "reset") {
-            live_tape_config = TAPE_FOLLOWER_CONFIG;
-            Serial.println("# tape tuning restored to compiled defaults");
-            print_tape_tuning();
+            reset_tape_tuning();
             return;
         }
         if (count < 3) {
@@ -947,63 +817,29 @@ void process_command(String line) {
 
     if (command == "ramp") {
         if (count < 3) { Serial.println("# usage: ramp <accel> <decel>"); return; }
-        const float accel = tokens[1].toFloat();
-        const float decel = tokens[2].toFloat();
-        if (!isfinite(accel) || !isfinite(decel) || accel <= 0.0f ||
-            decel <= 0.0f || accel > 10.0f || decel > 10.0f) {
-            Serial.println("# ramp values must be >0 and <=10");
-            return;
-        }
-        acceleration_per_s2 = accel;
-        deceleration_per_s2 = decel;
-        print_runtime_settings();
+        update_ramp_tuning(tokens[1].toFloat(), tokens[2].toFloat());
         return;
     }
 
     if (command == "distance-tolerance") {
         if (count < 2) { Serial.println("# usage: distance-tolerance <meters>"); return; }
-        const float value = tokens[1].toFloat();
-        if (!isfinite(value) || value <= 0.0f || value > 0.5f) {
-            Serial.println("# distance tolerance must be >0 and <=0.5 m");
-            return;
-        }
-        distance_tolerance_m = value;
-        print_runtime_settings();
+        update_distance_tolerance_tuning(tokens[1].toFloat());
         return;
     }
 
     if (command == "angle-tolerance") {
         if (count < 2) { Serial.println("# usage: angle-tolerance <degrees>"); return; }
-        const float value = tokens[1].toFloat();
-        if (!isfinite(value) || value <= 0.0f || value > 45.0f) {
-            Serial.println("# angle tolerance must be >0 and <=45 degrees");
-            return;
-        }
-        angle_tolerance_rad = value * kPi / 180.0f;
-        print_runtime_settings();
+        update_angle_tolerance_tuning(tokens[1].toFloat());
         return;
     }
 
     if (command == "telemetry") {
-        const long value = count >= 2 ? tokens[1].toInt() : 0;
-        if (value < 20 || value > 5000) {
-            Serial.println("# telemetry period must be 20..5000 ms");
-            return;
-        }
-        telemetry_period_ms = static_cast<uint32_t>(value);
-        print_runtime_settings();
+        update_telemetry_period_tuning(count >= 2 ? tokens[1].toInt() : 0);
         return;
     }
 
     if (command == "timeout") {
-        const long value = count >= 2 ? tokens[1].toInt() : 0;
-        if (value < 100 || value > static_cast<long>(kMaxMotionTimeoutMs)) {
-            Serial.printf("# timeout must be 100..%lu ms\n",
-                          static_cast<unsigned long>(kMaxMotionTimeoutMs));
-            return;
-        }
-        motion_timeout_ms = static_cast<uint32_t>(value);
-        print_runtime_settings();
+        update_motion_timeout_tuning(count >= 2 ? tokens[1].toInt() : 0);
         return;
     }
 
@@ -1282,6 +1118,7 @@ void service_sequence(uint32_t now_ms) {
     }
 }
 
+
 }  // namespace
 
 void setup() {
@@ -1373,3 +1210,220 @@ void loop() {
     }
     delay(1);
 }
+
+namespace {
+
+// -----------------------------------------------------------------------------
+// Real-time tuning only
+// All changes in this section are RAM-only and exist for hardware calibration.
+// Copy accepted values into the compiled configuration to make them persistent.
+// -----------------------------------------------------------------------------
+
+void print_runtime_settings() {
+    Serial.printf("# limits translation=%.3f_mps turn=%.3f_rad_s duty=%.3f pair_duty=%.3f\n",
+                  test_config.max_vx_mps, test_config.max_omega_rad_s,
+                  test_config.max_duty, kMaxPairDuty);
+    Serial.printf("# runtime ramp_accel=%.3f ramp_decel=%.3f distance_tolerance=%.4f_m "
+                  "angle_tolerance=%.2f_deg timeout=%lu_ms telemetry=%lu_ms\n",
+                  acceleration_per_s2, deceleration_per_s2,
+                  distance_tolerance_m, angle_tolerance_rad * 180.0f / kPi,
+                  static_cast<unsigned long>(motion_timeout_ms),
+                  static_cast<unsigned long>(telemetry_period_ms));
+}
+
+void print_config() {
+    Serial.println("# wheel,motor_inverted,encoder_inverted");
+    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
+        Serial.printf("# %s,%d,%d\n", kWheelNames[i],
+                      test_motor_configs[i].direction_inverted,
+                      test_encoder_configs[i].direction_inverted);
+    }
+}
+
+void update_ramp_tuning(float acceleration, float deceleration) {
+    if (!isfinite(acceleration) || !isfinite(deceleration) ||
+        acceleration <= 0.0f || deceleration <= 0.0f ||
+        acceleration > 10.0f || deceleration > 10.0f) {
+        Serial.println("# ramp values must be >0 and <=10");
+        return;
+    }
+    acceleration_per_s2 = acceleration;
+    deceleration_per_s2 = deceleration;
+    print_runtime_settings();
+}
+
+void update_distance_tolerance_tuning(float value_m) {
+    if (!isfinite(value_m) || value_m <= 0.0f || value_m > 0.5f) {
+        Serial.println("# distance tolerance must be >0 and <=0.5 m");
+        return;
+    }
+    distance_tolerance_m = value_m;
+    print_runtime_settings();
+}
+
+void update_angle_tolerance_tuning(float value_deg) {
+    if (!isfinite(value_deg) || value_deg <= 0.0f || value_deg > 45.0f) {
+        Serial.println("# angle tolerance must be >0 and <=45 degrees");
+        return;
+    }
+    angle_tolerance_rad = value_deg * kPi / 180.0f;
+    print_runtime_settings();
+}
+
+void update_telemetry_period_tuning(long value_ms) {
+    if (value_ms < 20 || value_ms > 5000) {
+        Serial.println("# telemetry period must be 20..5000 ms");
+        return;
+    }
+    telemetry_period_ms = static_cast<uint32_t>(value_ms);
+    print_runtime_settings();
+}
+
+void update_motion_timeout_tuning(long value_ms) {
+    if (value_ms < 100 || value_ms > static_cast<long>(kMaxMotionTimeoutMs)) {
+        Serial.printf("# timeout must be 100..%lu ms\n",
+                      static_cast<unsigned long>(kMaxMotionTimeoutMs));
+        return;
+    }
+    motion_timeout_ms = static_cast<uint32_t>(value_ms);
+    print_runtime_settings();
+}
+
+void print_controller_config() {
+    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
+        drivetrain_get_motor_controller_config(
+            &drivetrain, static_cast<DrivetrainMotorId>(i),
+            &live_controller_configs[i]);
+        const WheelVelocityControllerConfig &config = live_controller_configs[i];
+        Serial.printf("# PI %s kff=%.5f offset=%.5f kp=%.5f ki=%.5f slew=%.5f\n",
+                      kWheelNames[i], config.kff, config.kff_offset,
+                      config.kp, config.ki, config.duty_slew_per_s);
+    }
+}
+
+void print_tape_tuning() {
+    Serial.printf("# TAPE kp=%.4f ki=%.4f kd=%.4f integral_limit=%.3f "
+                  "heading=%.3f max_omega=%.3f angular_accel=%.3f "
+                  "search_speed=%.3f lost_timeout=%.3f dt_max=%.3f\n",
+                  live_tape_config.controller.proportional_gain,
+                  live_tape_config.controller.integral_gain,
+                  live_tape_config.controller.derivative_gain,
+                  live_tape_config.controller.integral_limit,
+                  live_tape_config.heading.gain_s_inv,
+                  live_tape_config.heading.max_omega_rad_s,
+                  live_tape_config.heading.max_acceleration_rad_s2,
+                  live_tape_config.search.velocity_mps,
+                  live_tape_config.search.timeout_s,
+                  live_tape_config.controller_dt_max_s);
+}
+
+void set_inversion(const String &kind, int wheel, const String *value) {
+    stop_test(false);
+    bool *setting = nullptr;
+    if (kind == "motor") setting = &test_motor_configs[wheel].direction_inverted;
+    if (kind == "encoder") setting = &test_encoder_configs[wheel].direction_inverted;
+    if (setting == nullptr) {
+        Serial.println("# usage: invert motor|encoder <wheel> [0|1]");
+        return;
+    }
+
+    *setting = value == nullptr ? !*setting : value->toInt() != 0;
+    if (kind == "encoder") {
+        const esp_err_t error = encoder_driver_reset(&drivetrain.devices.encoders[wheel]);
+        if (error != ESP_OK) {
+            report_error("encoder reset", error);
+            return;
+        }
+    }
+    Serial.printf("# %s inversion for %s = %d (RAM only)\n",
+                  kind.c_str(), kWheelNames[wheel], *setting);
+}
+
+void update_pi_parameter(int wheel, const String &field, float value) {
+    if (!isfinite(value)) {
+        Serial.println("# PI value must be finite");
+        return;
+    }
+    const int first = wheel < 0 ? 0 : wheel;
+    const int last = wheel < 0 ? DRIVETRAIN_MOTOR_MAX : wheel + 1;
+    for (int index = first; index < last; ++index) {
+        drivetrain_get_motor_controller_config(
+            &drivetrain, static_cast<DrivetrainMotorId>(index),
+            &live_controller_configs[index]);
+        WheelVelocityControllerConfig &config = live_controller_configs[index];
+        if (field == "kff") config.kff = value;
+        else if (field == "offset") config.kff_offset = value;
+        else if (field == "kp") config.kp = value;
+        else if (field == "ki") config.ki = value;
+        else if (field == "slew") config.duty_slew_per_s = value;
+        else {
+            Serial.println("# PI field must be kff|offset|kp|ki|slew");
+            return;
+        }
+        const esp_err_t error = drivetrain_set_motor_controller_config(
+            &drivetrain, static_cast<DrivetrainMotorId>(index), &config);
+        if (error != ESP_OK) {
+            Serial.printf("# PI update rejected for %s: %s\n",
+                          kWheelNames[index], esp_err_to_name(error));
+            return;
+        }
+    }
+    print_controller_config();
+}
+
+void reset_controller_config(int wheel) {
+    const int first = wheel < 0 ? 0 : wheel;
+    const int last = wheel < 0 ? DRIVETRAIN_MOTOR_MAX : wheel + 1;
+    for (int index = first; index < last; ++index) {
+        live_controller_configs[index] = test_config.wheel_controller;
+        const esp_err_t error = drivetrain_set_motor_controller_config(
+            &drivetrain, static_cast<DrivetrainMotorId>(index),
+            &live_controller_configs[index]);
+        if (error != ESP_OK) {
+            Serial.printf("# PI reset failed: %s\n", esp_err_to_name(error));
+            return;
+        }
+    }
+    Serial.println("# PI restored to compiled defaults");
+    print_controller_config();
+}
+
+void update_tape_parameter(const String &field, float value) {
+    if (!isfinite(value)) {
+        Serial.println("# tape value must be finite");
+        return;
+    }
+
+    TapeFollowerConfig candidate = live_tape_config;
+    if (field == "kp") candidate.controller.proportional_gain = value;
+    else if (field == "ki") candidate.controller.integral_gain = value;
+    else if (field == "kd") candidate.controller.derivative_gain = value;
+    else if (field == "integral-limit") candidate.controller.integral_limit = value;
+    else if (field == "heading") candidate.heading.gain_s_inv = value;
+    else if (field == "max-omega") candidate.heading.max_omega_rad_s = value;
+    else if (field == "angular-accel") candidate.heading.max_acceleration_rad_s2 = value;
+    else if (field == "search-speed") candidate.search.velocity_mps = value;
+    else if (field == "lost-timeout") candidate.search.timeout_s = value;
+    else if (field == "dt-max") candidate.controller_dt_max_s = value;
+    else {
+        Serial.println("# unknown tape tuning field");
+        return;
+    }
+
+    TapeFollower validator = {};
+    if (candidate.heading.max_omega_rad_s > test_config.max_omega_rad_s ||
+        tape_follower_init(&validator, &candidate) != ESP_OK) {
+        Serial.println("# tape tuning update rejected");
+        return;
+    }
+    live_tape_config = candidate;
+    print_tape_tuning();
+}
+
+void reset_tape_tuning() {
+    live_tape_config = TAPE_FOLLOWER_CONFIG;
+    Serial.println("# tape tuning restored to compiled defaults");
+    print_tape_tuning();
+}
+
+}  // namespace

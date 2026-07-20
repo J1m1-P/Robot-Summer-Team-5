@@ -4,11 +4,17 @@
 #include <math.h>
 #include <stddef.h>
 
-static float clamp_value(float value, float minimum, float maximum)
+#include <robot_common/math_utils.h>
+
+bool tape_following_kinematics_config_is_valid(
+    const TapeFollowingKinematicsConfig *config)
 {
-    if (value < minimum) return minimum;
-    if (value > maximum) return maximum;
-    return value;
+    return config != NULL &&
+           isfinite(config->gain_s_inv) && config->gain_s_inv >= 0.0f &&
+           isfinite(config->max_omega_rad_s) &&
+           config->max_omega_rad_s >= 0.0f &&
+           isfinite(config->max_acceleration_rad_s2) &&
+           config->max_acceleration_rad_s2 > 0.0f;
 }
 
 esp_err_t tape_following_kinematics_velocity_to_angular_velocity(
@@ -19,12 +25,7 @@ esp_err_t tape_following_kinematics_velocity_to_angular_velocity(
     float dt_s,
     float *omega_out)
 {
-    if (config == NULL || omega_out == NULL ||
-        !isfinite(config->gain_s_inv) || config->gain_s_inv < 0.0f ||
-        !isfinite(config->max_omega_rad_s) ||
-        config->max_omega_rad_s < 0.0f ||
-        !isfinite(config->max_acceleration_rad_s2) ||
-        config->max_acceleration_rad_s2 <= 0.0f ||
+    if (!tape_following_kinematics_config_is_valid(config) || omega_out == NULL ||
         !isfinite(travel_velocity_mps) || travel_velocity_mps == 0.0f ||
         !isfinite(lateral_velocity_mps) || !isfinite(previous_omega_rad_s) ||
         !isfinite(dt_s) || dt_s <= 0.0f) {
@@ -34,13 +35,13 @@ esp_err_t tape_following_kinematics_velocity_to_angular_velocity(
     const float direction = travel_velocity_mps > 0.0f ? 1.0f : -1.0f;
     const float travel_angle_rad = atan2f(
         lateral_velocity_mps, fabsf(travel_velocity_mps));
-    const float target_omega_rad_s = clamp_value(
+    const float target_omega_rad_s = clamp(
         -direction * config->gain_s_inv * travel_angle_rad,
         -config->max_omega_rad_s,
         config->max_omega_rad_s);
     const float maximum_change_rad_s = config->max_acceleration_rad_s2 * dt_s;
 
-    *omega_out = clamp_value(
+    *omega_out = clamp(
         target_omega_rad_s,
         previous_omega_rad_s - maximum_change_rad_s,
         previous_omega_rad_s + maximum_change_rad_s);

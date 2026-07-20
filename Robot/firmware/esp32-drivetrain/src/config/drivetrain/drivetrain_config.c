@@ -15,19 +15,22 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
         &BL_MOTOR_CONFIG,
         &BR_MOTOR_CONFIG,
     },
+
     .encoder_configs = {
         &FL_ENCODER_CONFIG,
         &FR_ENCODER_CONFIG,
         &BL_ENCODER_CONFIG,
         &BR_ENCODER_CONFIG,
     },
-    .kinematics = {
+
+    .x_drive_kinematics = {
         .wheel_radius_m = 0.035f,
         .chassis_half_length_m = 0.100f,
         .chassis_half_width_m = 0.1365f,
         .wheel_angle_rad = DEG_TO_RAD(30.0f),
     },
-    .wheel_pi = {
+
+    .wheel_controller = {
         .kff = 1.14f,
         .kff_offset = 0.069f,
         .kp = 0.4f,

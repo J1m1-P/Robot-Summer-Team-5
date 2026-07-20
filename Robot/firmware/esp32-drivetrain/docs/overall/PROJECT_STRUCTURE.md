@@ -34,8 +34,8 @@ esp32-drivetrain/
 |   |-- control/
 |   |   |-- drivetrain/
 |   |   |   |-- drivetrain.h
-|   |   |   |-- velocity_kinematics.h
-|   |   |   |-- wheel_velocity_pi.h
+|   |   |   |-- x_drive_kinematics.h
+|   |   |   |-- wheel_velocity_controller.h
 |   |   |   `-- odometry.h
 |   |   `-- tape_following/
 |   |       |-- tape_follower.h
@@ -67,8 +67,8 @@ esp32-drivetrain/
 |   |-- control/
 |   |   |-- drivetrain/
 |   |   |   |-- drivetrain.c
-|   |   |   |-- velocity_kinematics.c
-|   |   |   |-- wheel_velocity_pi.c
+|   |   |   |-- x_drive_kinematics.c
+|   |   |   |-- wheel_velocity_controller.c
 |   |   |   `-- odometry.c
 |   |   `-- tape_following/
 |   |       |-- tape_follower.c
@@ -94,10 +94,10 @@ esp32-drivetrain/
 |   |-- native_stubs/
 |   |   |-- esp_err.h
 |   |   `-- driver/gpio.h
-|   |-- test_velocity_kinematics/
-|   |   `-- test_velocity_kinematics.cpp
-|   |-- test_wheel_velocity_pi/
-|   |   `-- test_wheel_velocity_pi.cpp
+|   |-- test_x_drive_kinematics/
+|   |   `-- test_x_drive_kinematics.cpp
+|   |-- test_wheel_velocity_controller/
+|   |   `-- test_wheel_velocity_controller.cpp
 |   |-- test_drivetrain_odometry/
 |   |   `-- test_drivetrain_odometry.cpp
 |   `-- test_tape_following/
@@ -173,8 +173,8 @@ Drivers own direct hardware interaction. Each hardware family has a subfolder so
 
 This is the motion-control layer. Motion modules are grouped by subsystem under `control/drivetrain/` and `control/tape_following/`:
 
-- `velocity_kinematics.*` is pure geometry: it converts between body velocity and four wheel angular velocities in both directions.
-- `wheel_velocity_pi.*` is pure closed-loop math for one wheel.
+- `x_drive_kinematics.*` is pure geometry: it converts between body velocity and four wheel angular velocities in both directions.
+- `wheel_velocity_controller.*` is pure closed-loop math for one wheel.
 - `odometry.*` integrates already-computed body-frame displacement into a world-frame pose.
 - `drivetrain.*` is the hardware-facing facade. It owns four motors, four encoders, four PI states, watchdog timing, braking/coasting behavior, body-command limits, and telemetry.
 

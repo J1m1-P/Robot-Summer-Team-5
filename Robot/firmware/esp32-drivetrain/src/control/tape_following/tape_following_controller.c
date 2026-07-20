@@ -5,11 +5,25 @@
 #include <stddef.h>
 #include <robot_common/math_utils.h>
 
+bool tape_following_controller_config_is_valid(
+    const TapeFollowingControllerConfig *config)
+{
+    return config != NULL &&
+           isfinite(config->proportional_gain) &&
+           isfinite(config->integral_gain) &&
+           isfinite(config->derivative_gain) &&
+           isfinite(config->integral_limit) && config->integral_limit >= 0.0f &&
+           isfinite(config->correction_min) &&
+           isfinite(config->correction_max) &&
+           config->correction_min <= config->correction_max;
+}
+
 esp_err_t tape_following_controller_reset(TapeFollowingControllerState *state) {
     if (state == NULL) return ESP_ERR_INVALID_ARG;
     state->integral = 0.0f;
     state->previous_error = 0.0f;
     state->has_previous_error = false;
+    return ESP_OK;
 }
 
 float tape_following_controller_update(TapeFollowingControllerState *state,
@@ -17,26 +31,17 @@ float tape_following_controller_update(TapeFollowingControllerState *state,
                                        float error,
                                        float dt_s)
 {
-    // Failure check
-    if (state == NULL || config == NULL || !isfinite(error) ||
-        !isfinite(dt_s) || dt_s <= 0.0f ||
-        !isfinite(config->proportional_gain) ||
-        !isfinite(config->integral_gain) ||
-        !isfinite(config->derivative_gain) ||
-        !isfinite(config->integral_limit) || config->integral_limit < 0.0f ||
-        !isfinite(config->correction_min) ||
-        !isfinite(config->correction_max) ||
-        config->correction_min > config->correction_max) {
+    if (state == NULL || !tape_following_controller_config_is_valid(config) ||
+        !isfinite(error) || !isfinite(dt_s) || dt_s <= 0.0f) {
         return 0.0f;
     }
 
-    // P
-    float proportional_term = config->proportional_gain * error;
+    const float proportional_term = config->proportional_gain * error;
 
     // I
     state->integral += error * dt_s;
     state->integral = clamp(state->integral, -config->integral_limit, config->integral_limit);
-    float integral_term = config->integral_gain * state->integral;
+    const float integral_term = config->integral_gain * state->integral;
 
     // D
     float derivative_term = 0.0f;
@@ -45,13 +50,9 @@ float tape_following_controller_update(TapeFollowingControllerState *state,
                           (error - state->previous_error) / dt_s;
     }
 
-    // Update the state
     state->previous_error = error;
     state->has_previous_error = true;
 
-    // Output the final correction
-    float correction = proportional_term + integral_term + derivative_term;
-    correction = clamp(correction, config->correction_min, config->correction_max);
-
-    return correction;
+    return clamp(proportional_term + integral_term + derivative_term,
+                 config->correction_min, config->correction_max);
 }

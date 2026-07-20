@@ -80,7 +80,7 @@ The diagnostic harness owns scheduling, commands, mode transitions, live tuning 
 | `src/control/tape_following/tape_following_kinematics.c` | Heading control math | Applies travel-direction polarity, angular limits, and angular acceleration limits. |
 | `include/control/tape_following/tape_follower.h` | Follower public contract | Defines follower configuration, input/output, status, and retained runtime history. |
 | `src/control/tape_following/tape_follower.c` | Tape behavior coordinator | Selects the leading sensor and coordinates tracking, searching, lost, idle, and direction-change behavior. |
-| `include/control/drivetrain/velocity_kinematics.h` | Shared command type | Declares `DrivetrainBodyVelocity`, the follower/drivetrain integration contract. |
+| `include/control/drivetrain/x_drive_kinematics.h` | Shared command type | Declares `DrivetrainBodyVelocity`, the follower/drivetrain integration contract. |
 | `include/control/drivetrain/drivetrain.h` | Drivetrain facade API | Accepts bounded body commands and exposes drivetrain lifecycle/update operations. |
 | `src/control/drivetrain/drivetrain.c` | Drivetrain command consumer | Converts accepted follower commands into closed-loop wheel duties and enforces timeout/error safety. |
 | `include/config/drivetrain/drivetrain_config.h` | Drivetrain configuration interface | Exposes the hardware and motion limits used by the diagnostic integration. |
@@ -187,7 +187,7 @@ The only complete hardware initialization sequence is in the `drivetrain-test` e
 
 Both mux and follower initialization expect zero-initialized runtime objects. `TapeSensorMux` uses `initialized` to detect repeat initialization; `TapeFollower` uses non-null `config`. The task detector explicitly has an `initialized` flag. `TapeSensor` has no explicit initialized flag.
 
-Partial tape initialization is weakly represented. `tape_sensor_mux_init()` stores `config` before GPIO configuration succeeds. `tape_sensor_driver_init()` stores its pointers and clears samples before its GPIO configuration succeeds. The harness's separate `tape_sensors_ready` gate prevents normal use after a failure, but the driver object itself does not fully encode failed versus successful module initialization.
+The mux stores its configuration before GPIO setup but does not mark itself initialized until setup succeeds. A tape module now publishes its config/mux pointers only after its input GPIO setup succeeds, so null module pointers reliably represent unsuccessful initialization. There is still no deinitialization API for rolling hardware back after a later module fails.
 
 ## 7. Runtime Workflow
 
@@ -245,7 +245,7 @@ The implemented but unintegrated intended branch is:
 | `TapeFollower` | `tape_follower.h` | Diagnostic harness | Harness initializes/updates; component functions mutate history | Namespace-scope runtime object, cleared per follow start. |
 | `TapeFollowerOutput` | `tape_follower.h` | Stack-local per control update | Follower fills; harness reads | Passed by output pointer; one-cycle lifetime. |
 | `TapeTaskDetector` / output | `tape_task_detection.h` | Tests only | Detector functions mutate/read | No application lifetime exists. |
-| `DrivetrainBodyVelocity` | `velocity_kinematics.h` | Follower output then harness command | Follower produces; drivetrain copies values | Passed by value within output, then as three scalars to drivetrain. |
+| `DrivetrainBodyVelocity` | `x_drive_kinematics.h` | Follower output then harness command | Follower produces; drivetrain copies values | Passed by value within output, then as three scalars to drivetrain. |
 
 ## 9. Control Flow and Scheduling
 
@@ -328,11 +328,8 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 4. **Diagnostic state integration is incomplete for loss.** The harness zeroes motion when follower output is invalid but remains in timed `TestMode::TAPE_CENTER`; it does not transition to a distinct lost/fault state.
 5. **No hardware-driver tests.** Mux selection, GPIO init, settling, active level, module ordering, state writes, and nibble packing are untested by the native suite.
 6. **No end-to-end integration tests.** Tests do not cover application scheduling, `TestMode`, sample-to-follower timing, follower-to-drivetrain command handoff, or drivetrain safety response.
-7. **Controller reset has a missing return.** `tape_following_controller_reset()` is declared `esp_err_t` and handles null with `ESP_ERR_INVALID_ARG`, but the successful path reaches the end without returning `ESP_OK`. Callers currently ignore its return, and tests do not assert it.
-8. **A module can appear initialized after failed GPIO setup.** `tape_sensor_driver_init()` stores non-null config/mux pointers before `gpio_config()` succeeds, and `TapeSensor` has no initialized flag. `read_all()` checks those pointers but cannot distinguish successful setup. The harness's readiness flag protects its normal path, but the public driver state is incomplete.
-9. **Shared-mux consistency is not validated.** `read_all()` checks that every sensor has an initialized mux but selects channels only through `sensors[0]->mux`; it does not require all sensor mux pointers/configs to match.
-10. **No tape deinitialization or retry path.** Partial setup is not rolled back, and a runtime sample error makes the diagnostic sensors unavailable until reboot.
-11. **Sample freshness is not represented.** `TapeSensor` stores booleans only; there is no timestamp, generation, validity, or error field. The harness has a single external readiness flag.
+7. **No tape deinitialization or rollback path.** A failed module leaves earlier GPIO setup active, and a runtime sample error makes the diagnostic sensors unavailable until reboot.
+8. **Sample freshness is not represented.** `TapeSensor` stores booleans only; there is no timestamp, generation, validity, or error field. The harness has a single external readiness flag.
 ### Potential Concerns
 
 1. **Unclear search-motion intention.** On line loss, `TapeFollower` emits only lateral `vy`; requested longitudinal travel and angular motion are zero. This is observable, but comments do not explain whether lateral-only recovery is the final desired robot behavior.
@@ -347,10 +344,9 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 
 1. Build the production composition/state-machine layer before describing tape following as production-integrated. Make it the explicit owner of scan scheduling, travel requests, task events, follower status response, and drivetrain command arbitration.
 2. Integrate and test `TapeTaskDetector` only when the intended course-state transitions are defined; do not infer them from the event names.
-3. Return `ESP_OK` from the successful controller-reset path and add reset/error assertions.
-4. Add explicit successful-initialization state (or clear pointers on setup failure) for `TapeSensor`, validate that a scan list shares one mux, and add GPIO/delay fake tests for complete scans and failures.
-5. Add a sample snapshot validity/timestamp mechanism if production scheduling, concurrency, or fault detection requires freshness guarantees.
-6. Keep diagnostic-only centering, polarity experimentation, and RAM tuning in the harness; route production movement through one clearly owned follower/application path.
+3. Add GPIO/delay fake tests for initialization, complete scans, shared-mux rejection, and failures.
+4. Add a sample snapshot validity/timestamp mechanism if production scheduling, concurrency, or fault detection requires freshness guarantees.
+5. Keep diagnostic-only centering, polarity experimentation, and RAM tuning in the harness; route production movement through one clearly owned follower/application path.
 
 ## 15. Example Runtime Sequence
 

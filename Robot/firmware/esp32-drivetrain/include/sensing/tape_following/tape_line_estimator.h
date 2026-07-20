@@ -19,6 +19,9 @@ typedef struct {
     float last_known_error;
 } TapeLineEstimatorState;
 
+// Checks that every channel weight is finite.
+bool tape_line_estimator_config_is_valid(const TapeLineEstimatorConfig *config);
+
 // Clears line-presence and fallback-error history.
 void tape_line_estimator_reset(TapeLineEstimatorState *state);
 

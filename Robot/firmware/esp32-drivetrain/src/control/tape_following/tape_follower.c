@@ -5,21 +5,6 @@
 #include <stddef.h>
 #include <string.h>
 
-/* Validates one bounded PID configuration before it becomes runtime state. */
-static bool controller_config_is_valid(
-    const TapeFollowingControllerConfig *config)
-{
-    return config != NULL &&
-           isfinite(config->proportional_gain) &&
-           isfinite(config->integral_gain) &&
-           isfinite(config->derivative_gain) &&
-           isfinite(config->integral_limit) &&
-           config->integral_limit >= 0.0f &&
-           isfinite(config->correction_min) &&
-           isfinite(config->correction_max) &&
-           config->correction_min <= config->correction_max;
-}
-
 /* Rejects configurations that could produce undefined or unsafe behavior. */
 static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
 {
@@ -28,25 +13,15 @@ static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
     }
 
     for (int sensor = 0; sensor < TAPE_FOLLOWER_SENSOR_COUNT; sensor++) {
-        if (config->estimators[sensor] == NULL) return false;
-        for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; channel++) {
-            if (!isfinite(
-                    config->estimators[sensor]->channel_weights[channel])) {
-                return false;
-            }
+        if (!tape_line_estimator_config_is_valid(config->estimators[sensor])) {
+            return false;
         }
     }
 
-    return controller_config_is_valid(&config->controller) &&
-           isfinite(config->heading.gain_s_inv) &&
-           config->heading.gain_s_inv >= 0.0f &&
-           isfinite(config->heading.max_omega_rad_s) &&
-           config->heading.max_omega_rad_s >= 0.0f &&
-           isfinite(config->heading.max_acceleration_rad_s2) &&
-           config->heading.max_acceleration_rad_s2 > 0.0f &&
+    return tape_following_controller_config_is_valid(&config->controller) &&
+           tape_following_kinematics_config_is_valid(&config->heading) &&
            isfinite(config->search.velocity_mps) &&
            config->search.velocity_mps >= 0.0f &&
-           config->search.velocity_mps <= 1.0f &&
            isfinite(config->search.timeout_s) &&
            config->search.timeout_s >= 0.0f &&
            isfinite(config->controller_dt_max_s) &&
@@ -177,7 +152,6 @@ esp_err_t tape_follower_update(TapeFollower *follower,
         input->sensors[TAPE_FOLLOWER_FRONT] == NULL ||
         input->sensors[TAPE_FOLLOWER_BACK] == NULL ||
         !isfinite(input->travel_velocity_mps) ||
-        fabsf(input->travel_velocity_mps) > 1.0f ||
         !isfinite(dt_s) || dt_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -197,7 +171,6 @@ esp_err_t tape_follower_update(TapeFollower *follower,
         }
         follower->active_direction = 0;
         follower->lost_elapsed_s = 0.0f;
-        follower->requested_omega_rad_s = 0.0f;
         output->status = TAPE_FOLLOWER_IDLE;
         return ESP_OK;
     }

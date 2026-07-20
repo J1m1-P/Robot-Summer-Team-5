@@ -126,11 +126,11 @@ Configuration files bind reusable types to this board. Their source objects are 
 
 ## Control layer
 
-### `include/control/drivetrain/velocity_kinematics.h` and `src/control/drivetrain/velocity_kinematics.c`
+### `include/control/drivetrain/x_drive_kinematics.h` and `src/control/drivetrain/x_drive_kinematics.c`
 
 - **Layer:** pure control mathematics.
 - **Why they exist:** convert between body-frame `vx`, `vy`, angular velocity and front-left/front-right/back-left/back-right wheel angular velocities.
-- **Header owns:** `DrivetrainVelocityKinematicsConfig`, `DrivetrainBodyVelocity`, `DrivetrainWheelVelocity`, and both conversion functions.
+- **Header owns:** `XDriveKinematicsConfig`, `DrivetrainBodyVelocity`, `XDriveWheelVelocity`, and both conversion functions.
 - **Source owns:** finite/geometry/singularity validation plus forward and inverse wheel equations.
 - **Should not contain:** motor duty, encoder reads, PI state, timing, GPIO, or application commands.
 - **Dependencies:** only math, `esp_err`, and its own public types.
@@ -138,11 +138,11 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Interaction:** the drivetrain facade converts the result from radians per second to linear wheel speed using wheel radius before invoking each wheel PI controller.
 - **Position-test use:** the acceptance harness applies the inverse transform to relative encoder wheel angles to estimate translation and heading change.
 
-### `include/control/drivetrain/wheel_velocity_pi.h` and `src/control/drivetrain/wheel_velocity_pi.c`
+### `include/control/drivetrain/wheel_velocity_controller.h` and `src/control/drivetrain/wheel_velocity_controller.c`
 
 - **Layer:** pure closed-loop control mathematics.
 - **Why they exist:** calculate bounded signed motor duty for one wheel from target and measured linear velocity.
-- **Header owns:** tunable `WheelVelocityPiConfig`, runtime `WheelVelocityPi` history, config validation, update, and reset functions.
+- **Header owns:** tunable `WheelVelocityControllerConfig`, runtime `WheelVelocityController` history, config validation, update, and reset functions.
 - **Source owns:** clamping, feedforward/offset, proportional/integral behavior, anti-windup, safe-stop direction behavior, duty slew limiting, and state reset.
 - **Should not contain:** motor-driver calls, encoder reads, wheel selection, chassis geometry, or command watchdog logic.
 - **Dependencies:** math, memory utilities, and `esp_err`.
@@ -283,14 +283,14 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should not contain:** hardware behavior or broad ESP-IDF emulation.
 - **Consumers:** native-compiled headers and control sources via the native include path.
 
-### `test/test_velocity_kinematics/test_velocity_kinematics.cpp`
+### `test/test_x_drive_kinematics/test_x_drive_kinematics.cpp`
 
 - **Responsibility:** verify exact forward/strafe/turn/combined wheel values, geometric scaling, linearity, and invalid input rejection.
 - **Dependencies:** Unity and the C velocity-kinematics API.
 - **Should not test:** motors, encoders, timing, or application protocols.
 - **C++ role:** small reference wrappers keep assertions readable while exercising the pointer-based C interface.
 
-### `test/test_wheel_velocity_pi/test_wheel_velocity_pi.cpp`
+### `test/test_wheel_velocity_controller/test_wheel_velocity_controller.cpp`
 
 - **Responsibility:** verify integral accumulation/reset, safe stopping, anti-push behavior, slew limiting, and configuration validation.
 - **Dependencies:** Unity and the C wheel PI API.

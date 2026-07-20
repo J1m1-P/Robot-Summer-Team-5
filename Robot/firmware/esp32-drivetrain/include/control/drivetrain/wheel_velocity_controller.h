@@ -20,21 +20,21 @@ typedef struct {
     float integral_min;
     float integral_max;
     float duty_slew_per_s;
-} WheelVelocityPiConfig;
+} WheelVelocityControllerConfig;
 
 // Stores integral history and the previous output for one wheel controller.
 typedef struct {
     float integral;
     float last_duty;
-} WheelVelocityPi;
+} WheelVelocityController;
 
 // Checks gains and limits before they enter a running wheel controller.
-bool wheel_velocity_pi_config_is_valid(const WheelVelocityPiConfig *config);
+bool wheel_velocity_controller_config_is_valid(const WheelVelocityControllerConfig *config);
 
 // Advances one wheel controller and returns a bounded signed duty output.
-esp_err_t wheel_velocity_pi_update(
-    WheelVelocityPi *pi,
-    const WheelVelocityPiConfig *config,
+esp_err_t wheel_velocity_controller_update(
+    WheelVelocityController *controller,
+    const WheelVelocityControllerConfig *config,
     float target_mps,
     float measured_mps,
     float dt_s,
@@ -42,7 +42,7 @@ esp_err_t wheel_velocity_pi_update(
 );
 
 // Clears integral history and the previous slew-limited duty.
-void wheel_velocity_pi_reset(WheelVelocityPi *pi);
+void wheel_velocity_controller_reset(WheelVelocityController *controller);
 
 #ifdef __cplusplus
 }

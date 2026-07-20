@@ -33,10 +33,7 @@ bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
 
 // Converts a non-negative, clamped duty fraction into an LEDC counter value.
 static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
-
-    // duty = (1.0f - duty);       // Account for the unknown PWM fliped behaviour
-
-    uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
+    const uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
     return (uint32_t)(duty * (float)max_count);
 }
 
@@ -59,15 +56,7 @@ static esp_err_t motor_driver_set_pwm(MotorDriver *motor, float duty) {
 
 // Applies a logical direction while honoring the motor's inversion setting.
 static esp_err_t motor_driver_set_dir(MotorDriver *motor, bool dir) {
-    bool pin_level;
-
-    if (motor->config->direction_inverted) {
-        pin_level = !dir;
-    }
-    else {
-        pin_level = dir;
-    }
-
+    const bool pin_level = motor->config->direction_inverted ? !dir : dir;
     return gpio_set_level((gpio_num_t)motor->config->dir_pin, pin_level);
 }
 
