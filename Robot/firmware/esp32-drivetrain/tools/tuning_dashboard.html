@@ -21,6 +21,7 @@
     --motor-4:        #e34948; /* M4 */
     --target-line:    #52514e; /* shared target setpoint, not motor-specific */
     --danger:         #d03b3b;
+    --frozen:         #b8860b;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -39,6 +40,7 @@
       --motor-4:        #e66767;
       --target-line:    #c3c2b7;
       --danger:         #e66767;
+      --frozen:         #e0b04a;
     }
   }
   :root[data-theme="dark"] {
@@ -57,6 +59,7 @@
     --motor-4:        #e66767;
     --target-line:    #c3c2b7;
     --danger:         #e66767;
+    --frozen:         #e0b04a;
   }
 
   * { box-sizing: border-box; }
@@ -66,32 +69,34 @@
     background: var(--page);
     color: var(--text-primary);
   }
-  .viz-root { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
+  .viz-root { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
 
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 20px; }
+  h1 { font-size: 17px; margin: 0 0 3px; }
+  .subtitle { color: var(--text-secondary); font-size: 12px; margin: 0 0 16px; }
 
   .toolbar {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 16px;
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
   }
   button {
     font: inherit; font-size: 13px; font-weight: 600;
-    padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border);
     background: var(--surface-1); color: var(--text-primary); cursor: pointer;
   }
   button.primary { background: var(--motor-1); color: #fff; border-color: transparent; }
   button.active { background: var(--danger); color: #fff; border-color: transparent; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
-  #status { font-size: 13px; color: var(--text-secondary); margin-left: auto; }
+  #status { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
   #status.connected { color: var(--motor-2); font-weight: 600; }
   #status.error { color: var(--danger); font-weight: 600; }
+
+  .session-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 
   .motor-toggles { display: flex; gap: 8px; }
   .motor-toggle {
     font: inherit; font-size: 13px; font-weight: 700;
-    padding: 7px 12px; border-radius: 7px; border: 2px solid var(--border);
+    padding: 6px 11px; border-radius: 7px; border: 2px solid var(--border);
     background: var(--page); color: var(--text-secondary); cursor: pointer;
   }
   .motor-toggle.on { color: #fff; border-color: transparent; }
@@ -101,31 +106,39 @@
   .motor-toggle[data-motor="4"].on { background: var(--motor-4); }
 
   .controls {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px; background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 14px; margin-bottom: 16px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; margin-bottom: 10px;
+  }
+  .gain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
   }
   .control label {
-    display: block; font-size: 12px; color: var(--text-secondary);
-    margin-bottom: 4px; font-weight: 600;
+    display: block; font-size: 11px; color: var(--text-secondary);
+    margin-bottom: 3px; font-weight: 600;
   }
   .control .row { display: flex; gap: 6px; }
-  .control input, .control select {
-    font: inherit; font-size: 13px; width: 100%; padding: 6px 8px;
+  .control input {
+    font: inherit; font-size: 13px; width: 100%; padding: 5px 7px;
     border-radius: 6px; border: 1px solid var(--border);
     background: var(--page); color: var(--text-primary);
   }
 
   .chart-card {
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 14px 14px 8px; margin-bottom: 16px;
+    border-radius: 10px; padding: 12px 12px 6px; margin-bottom: 12px;
   }
-  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
-  .chart-title { font-size: 13px; font-weight: 700; }
-  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; gap: 10px; }
+  .chart-title { font-size: 12px; font-weight: 700; }
+  .legend { display: flex; gap: 12px; font-size: 11px; color: var(--text-secondary); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-  canvas { display: block; width: 100%; height: 200px; cursor: crosshair; }
+  .frozen-badge {
+    font-size: 11px; font-weight: 700; color: var(--frozen); display: none;
+    white-space: nowrap;
+  }
+  .frozen-badge.showing { display: inline; }
+  canvas { display: block; width: 100%; height: 190px; cursor: crosshair; }
   .tooltip {
     position: absolute; pointer-events: none; font-size: 11px;
     background: var(--surface-1); border: 1px solid var(--border);
@@ -134,22 +147,15 @@
     font-variant-numeric: tabular-nums;
   }
   .chart-wrap { position: relative; }
+  .chart-wrap.frozen canvas { outline: 2px solid var(--frozen); outline-offset: -2px; border-radius: 4px; }
 
   #log {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px; color: var(--text-secondary);
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px; height: 110px; overflow-y: auto;
-    white-space: pre-wrap; margin-bottom: 16px;
+    border-radius: 10px; padding: 8px 10px; height: 90px; overflow-y: auto;
+    white-space: pre-wrap;
   }
-
-  table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
-  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
-  th:first-child, td:first-child { text-align: left; }
-  th { color: var(--text-muted); font-weight: 600; }
-  #tableWrap { max-height: 260px; overflow-y: auto; display: none; }
-
-  .hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 16px; }
 </style>
 </head>
 <body>
@@ -160,56 +166,56 @@
   <div class="toolbar">
     <button id="connectBtn" class="primary">Connect</button>
     <button id="disconnectBtn" disabled>Disconnect</button>
-    <button id="showGainsBtn" title="Prints the board's actual current ff/ffo/kp/ki to the log below -- the input fields never auto-sync, so use this to confirm what's really running before hitting Set on an untouched field.">Show current gains</button>
-    <button id="tableToggleBtn">Show table view</button>
-    <button id="invertBtn" title="Flips the sign of the measured speed reading -- see 'invert' in tuning_main.cpp">Reverse measured direction</button>
-    <button id="modeBtn" title="Step mode: target alternates 0/target every period. Continuous mode: target holds steady.">Mode: Step</button>
     <span id="status">Not connected</span>
   </div>
 
   <div class="controls">
-    <div class="control" style="grid-column: 1 / -1;">
-      <label>Motors under test (any combination)</label>
-      <div class="motor-toggles">
-        <button class="motor-toggle on" data-motor="1">M1/E1 (FL)</button>
-        <button class="motor-toggle" data-motor="2">M2/E2 (BL)</button>
-        <button class="motor-toggle" data-motor="3">M3/E3 (FR)</button>
-        <button class="motor-toggle" data-motor="4">M4/E4 (BR)</button>
+    <div class="motor-toggles" style="margin-bottom: 10px;">
+      <button class="motor-toggle on" data-motor="1">M1/E1 (FL)</button>
+      <button class="motor-toggle" data-motor="2">M2/E2 (BL)</button>
+      <button class="motor-toggle" data-motor="3">M3/E3 (FR)</button>
+      <button class="motor-toggle" data-motor="4">M4/E4 (BR)</button>
+    </div>
+    <div class="session-row">
+      <button id="showGainsBtn" title="Prints the board's actual current ff/ffo/kp/ki to the log below -- the fields never auto-sync, so use this to confirm what's really running before hitting Set on an untouched field.">Show current gains</button>
+      <button id="invertBtn" title="Flips the sign of the measured speed reading -- see 'invert' in tuning_main.cpp">Reverse measured direction</button>
+      <button id="modeBtn" title="Step mode: target alternates 0/target every period, chart freezes when each step ends. Continuous mode: target holds steady.">Mode: Step</button>
+    </div>
+    <div class="gain-grid">
+      <div class="control">
+        <label for="ff">Feedforward slope (ff)</label>
+        <div class="row"><input id="ff" type="number" step="0.01" value="1.14" /><button data-cmd="ff">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="ffo">Feedforward offset (ffo)</label>
+        <div class="row"><input id="ffo" type="number" step="0.001" value="0.069" /><button data-cmd="ffo">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="kp">Proportional (kp)</label>
+        <div class="row"><input id="kp" type="number" step="0.01" value="0.4" /><button data-cmd="kp">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="ki">Integral (ki)</label>
+        <div class="row"><input id="ki" type="number" step="0.001" value="0.2" /><button data-cmd="ki">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="target">Step target (m/s)</label>
+        <div class="row"><input id="target" type="number" step="0.05" value="1.0" /><button data-cmd="target">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="period">Step period (ms)</label>
+        <div class="row"><input id="period" type="number" step="100" value="3000" /><button data-cmd="period">Set</button></div>
       </div>
     </div>
-    <div class="control">
-      <label for="ff">Feedforward slope (ff)</label>
-      <div class="row"><input id="ff" type="number" step="0.01" value="1.14" /><button data-cmd="ff">Set</button></div>
-    </div>
-    <div class="control">
-      <label for="ffo">Feedforward offset (ffo)</label>
-      <div class="row"><input id="ffo" type="number" step="0.001" value="0.069" /><button data-cmd="ffo">Set</button></div>
-    </div>
-    <div class="control">
-      <label for="kp">Proportional (kp)</label>
-      <div class="row"><input id="kp" type="number" step="0.01" value="0.4" /><button data-cmd="kp">Set</button></div>
-    </div>
-    <div class="control">
-      <label for="ki">Integral (ki)</label>
-      <div class="row"><input id="ki" type="number" step="0.001" value="0.2" /><button data-cmd="ki">Set</button></div>
-    </div>
-    <div class="control">
-      <label for="target">Step target (m/s)</label>
-      <div class="row"><input id="target" type="number" step="0.05" value="1.0" /><button data-cmd="target">Set</button></div>
-    </div>
-    <div class="control">
-      <label for="period">Step period (ms)</label>
-      <div class="row"><input id="period" type="number" step="100" value="3000" /><button data-cmd="period">Set</button></div>
-    </div>
   </div>
-  <p class="hint">Motor toggles send "motor &lt;n&gt; &lt;0|1&gt;\n"; each gain/target field sends its matching command (e.g. "ff 0.5\n") — all over the same serial link used for telemetry, shared across every enabled motor. Values live in RAM on the board only — copy final ff/ffo/kp/ki into config/drivetrain/drivetrain_config.c by hand once you're happy. The gain fields above default to that file's current compiled-in values, but they never auto-sync from the board (e.g. after someone else's tuning session, or a reconnect) — click "Show current gains" first and check the log before trusting an untouched field.</p>
 
   <div class="chart-card">
     <div class="chart-head">
       <span class="chart-title">Velocity — measured per motor, shared target (m/s)</span>
+      <span class="frozen-badge" id="veloFrozenBadge">⏸ step complete — frozen</span>
       <span class="legend" id="veloLegend"></span>
     </div>
-    <div class="chart-wrap">
+    <div class="chart-wrap" id="veloChartWrap">
       <canvas id="veloCanvas"></canvas>
       <div class="tooltip" id="veloTooltip"></div>
     </div>
@@ -220,17 +226,10 @@
       <span class="chart-title">Duty cycle per motor</span>
       <span class="legend" id="dutyLegend"></span>
     </div>
-    <div class="chart-wrap">
+    <div class="chart-wrap" id="dutyChartWrap">
       <canvas id="dutyCanvas"></canvas>
       <div class="tooltip" id="dutyTooltip"></div>
     </div>
-  </div>
-
-  <div id="tableWrap">
-    <table>
-      <thead><tr><th>t (ms)</th><th>motor</th><th>target (m/s)</th><th>measured (m/s)</th><th>duty</th></tr></thead>
-      <tbody id="tableBody"></tbody>
-    </table>
   </div>
 
   <div id="log"></div>
@@ -239,7 +238,6 @@
 <script>
 (() => {
   const WINDOW_MS = 20000; // rolling time window shown on the charts
-  const MAX_TABLE_ROWS = 200;
 
   const state = {
     port: null, reader: null, writer: null, keepReading: false,
@@ -253,15 +251,20 @@
     rxBuffer: "",
     inverted: false,
     continuous: false,
+    // Data keeps accumulating in the background while frozen -- freezing
+    // only pauses the chart redraw, so unfreezing shows the current state
+    // immediately rather than a stale snapshot.
+    frozen: false,
+    previousTarget: null, // last target_mps seen, to detect a step's falling edge
   };
 
   const statusEl = document.getElementById("status");
   const connectBtn = document.getElementById("connectBtn");
   const disconnectBtn = document.getElementById("disconnectBtn");
-  const tableToggleBtn = document.getElementById("tableToggleBtn");
-  const tableWrap = document.getElementById("tableWrap");
-  const tableBody = document.getElementById("tableBody");
   const logEl = document.getElementById("log");
+  const veloChartWrap = document.getElementById("veloChartWrap");
+  const dutyChartWrap = document.getElementById("dutyChartWrap");
+  const veloFrozenBadge = document.getElementById("veloFrozenBadge");
 
   function log(msg) {
     logEl.textContent += msg + "\n";
@@ -294,6 +297,8 @@
       state.writer = textEncoder.writable.getWriter();
 
       state.keepReading = true;
+      state.previousTarget = null;
+      setFrozen(false);
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
       setStatus("Connected", "connected");
@@ -341,6 +346,17 @@
     }
   }
 
+  // Pauses chart redraws so the last step's settled values stay on screen
+  // instead of scrolling away before they can be read off. Toggled off the
+  // moment any command goes out (see writeLine below), since that's the
+  // natural "I'm done reading, testing something new now" signal.
+  function setFrozen(frozen) {
+    state.frozen = frozen;
+    veloChartWrap.classList.toggle("frozen", frozen);
+    dutyChartWrap.classList.toggle("frozen", frozen);
+    veloFrozenBadge.classList.toggle("showing", frozen);
+  }
+
   function handleLine(line) {
     if (line.startsWith("#")) { log(line); return; }
     if (line.startsWith("millis")) return; // CSV header
@@ -364,10 +380,18 @@
     // below would never age them out. Start the rolling window over.
     if (t < state.latestT - 1000) {
       for (const m of Object.keys(state.samplesByMotor)) state.samplesByMotor[m] = [];
-      tableBody.innerHTML = "";
       log("# board clock reset detected (reboot/reflash) -- charts cleared");
     }
     state.latestT = Math.max(state.latestT, t);
+
+    // Step mode's "high" phase just ended (target fell back to 0) -- freeze
+    // so the settled measured velocity from that step is easy to read
+    // instead of scrolling out of the window before you can look at it.
+    if (!state.continuous && state.previousTarget > 0 && target === 0) {
+      setFrozen(true);
+      log("# step complete -- chart frozen, read your values (any command resumes)");
+    }
+    state.previousTarget = target;
 
     const arr = state.samplesByMotor[motor];
     arr.push({ t, target, measured, duty });
@@ -383,32 +407,22 @@
       while (a.length && a[0].t < cutoff) a.shift();
     }
 
-    addTableRow(t, motor, target, measured, duty);
-    drawAll();
+    if (!state.frozen) drawAll();
   }
 
-  async function sendCommand(key, value) {
+  async function writeLine(line) {
     if (!state.writer) { log("# not connected"); return; }
-    const line = key + " " + value + "\n";
+    if (state.frozen) {
+      setFrozen(false);
+      log("# resuming live chart");
+      drawAll(); // catch up to whatever accumulated in the background
+    }
     await state.writer.write(line);
   }
 
-  // --- Table view (accessibility twin of the charts) ---
-
-  function addTableRow(t, motor, target, measured, duty) {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      "<td>" + t + "</td><td>M" + motor + "</td><td>" + target.toFixed(4) + "</td>" +
-      "<td>" + measured.toFixed(4) + "</td><td>" + duty.toFixed(4) + "</td>";
-    tableBody.prepend(tr);
-    while (tableBody.rows.length > MAX_TABLE_ROWS) tableBody.deleteRow(-1);
+  async function sendCommand(key, value) {
+    await writeLine(key + " " + value + "\n");
   }
-
-  tableToggleBtn.addEventListener("click", () => {
-    const showing = tableWrap.style.display === "block";
-    tableWrap.style.display = showing ? "none" : "block";
-    tableToggleBtn.textContent = showing ? "Show table view" : "Hide table view";
-  });
 
   // --- Charts (hand-rolled canvas line charts, one axis each) ---
 
@@ -605,7 +619,7 @@
   attachCrosshair(veloCanvas, veloTooltip, () => veloGeom);
   attachCrosshair(dutyCanvas, dutyTooltip, () => dutyGeom);
 
-  window.addEventListener("resize", () => drawAll());
+  window.addEventListener("resize", () => { if (!state.frozen) drawAll(); });
 
   // --- Wire up UI ---
 
@@ -613,10 +627,7 @@
   disconnectBtn.addEventListener("click", disconnect);
 
   const showGainsBtn = document.getElementById("showGainsBtn");
-  showGainsBtn.addEventListener("click", async () => {
-    if (!state.writer) { log("# not connected"); return; }
-    await state.writer.write("show\n");
-  });
+  showGainsBtn.addEventListener("click", () => writeLine("show\n"));
 
   const invertBtn = document.getElementById("invertBtn");
   invertBtn.addEventListener("click", () => {
@@ -644,7 +655,7 @@
       // different enable session -- clear them so its line doesn't show a
       // misleading discontinuity next time it has data.
       state.samplesByMotor[m] = [];
-      drawAll();
+      if (!state.frozen) drawAll();
       sendCommand("motor", m + " " + (nowOn ? 1 : 0));
     });
   });
