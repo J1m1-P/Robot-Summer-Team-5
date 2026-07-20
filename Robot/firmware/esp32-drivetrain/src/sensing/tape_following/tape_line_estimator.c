@@ -8,7 +8,6 @@ void tape_line_estimator_reset(TapeLineEstimatorState *state)
     if (state == NULL) {
         return;
     }
-    state->line_was_present = false;
     state->last_known_error = 0.0f;
 }
 
@@ -43,13 +42,11 @@ bool tape_line_estimator_compute_error(const TapeSensor *sensor,
     if (active_count > 0) {
         *out_error = weighted_sum / (float)active_count;
         state->last_known_error = *out_error;
-        state->line_was_present = true;
         return true;
     }
 
     *out_error = (state->last_known_error >= 0.0f)
                      ? config->channel_weights[TAPE_SENSOR_CHANNEL_COUNT - 1]
                      : config->channel_weights[0];
-    state->line_was_present = false;
     return false;
 }

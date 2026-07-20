@@ -110,7 +110,7 @@ Mux channel selection is a private helper because callers should request a scan 
 
 The line estimator owns interpretation of an already sampled module. The task detector owns debounced semantic events from the left module. PID owns controller history and correction math. Heading kinematics owns the mapping from the translation vector to angular motion. `TapeFollower` is the behavior coordinator and owns the histories that cross updates.
 
-`TapeLineEstimatorState.line_was_present` is written/reset but no current caller reads it. `last_known_error` is used for follower search direction. `TapeFollowerStatus` is returned per update; it is not itself an application state machine and is not retained as a status field in `TapeFollower`.
+`TapeLineEstimatorState.last_known_error` is used for follower search direction. `TapeFollowerStatus` is returned per update; it is not itself an application state machine and is not retained as a status field in `TapeFollower`.
 
 ### Application and test files
 
@@ -333,8 +333,6 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 9. **Shared-mux consistency is not validated.** `read_all()` checks that every sensor has an initialized mux but selects channels only through `sensors[0]->mux`; it does not require all sensor mux pointers/configs to match.
 10. **No tape deinitialization or retry path.** Partial setup is not rolled back, and a runtime sample error makes the diagnostic sensors unavailable until reboot.
 11. **Sample freshness is not represented.** `TapeSensor` stores booleans only; there is no timestamp, generation, validity, or error field. The harness has a single external readiness flag.
-12. **`TapeLineEstimatorState.line_was_present` has no consumer.** It is maintained but does not affect current follower or application behavior.
-
 ### Potential Concerns
 
 1. **Unclear search-motion intention.** On line loss, `TapeFollower` emits only lateral `vy`; requested longitudinal travel and angular motion are zero. This is observable, but comments do not explain whether lateral-only recovery is the final desired robot behavior.

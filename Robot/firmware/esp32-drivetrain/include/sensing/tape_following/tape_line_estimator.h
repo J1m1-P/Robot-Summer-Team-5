@@ -14,9 +14,8 @@ typedef struct {
     float channel_weights[TAPE_SENSOR_CHANNEL_COUNT];
 } TapeLineEstimatorConfig;
 
-// Retains the line-presence and fallback-error history used by the estimator.
+// Retains the fallback-error history used by the estimator.
 typedef struct {
-    bool line_was_present;
     float last_known_error;
 } TapeLineEstimatorState;
 
