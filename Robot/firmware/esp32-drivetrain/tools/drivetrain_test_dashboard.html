@@ -173,8 +173,8 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
       <div class="setgroup">
         <div class="g2">
           <label>Speed (m/s)<input id="speed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
-          <label>Turn (rad/s)<input id="turnSpeed" type="number" min="0.01" max="1" step="0.05" value="0.60"></label>
-          <label>Button duration (ms)<input id="duration" type="number" min="1" max="10000" step="100" value="1500"></label>
+          <label>Turn (rad/s)<input id="turnSpeed" type="number" min="0.01" max="2" step="0.05" value="1.00"></label>
+          <label>Button duration (ms)<input id="duration" type="number" min="1" max="10000" step="100" value="10000"></label>
           <label>Motor duty<input id="duty" type="number" min="0.01" max="0.8" step="0.01" value="0.25"></label>
         </div>
         <div class="g2">
@@ -240,9 +240,9 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
     <div class="g5" style="align-items:end">
       <label>Guidance module<select id="tapeSensor"><option value="front">Front</option><option value="back">Back</option></select></label>
       <label>Max strafe (m/s)<input id="tapeMaxSpeed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
-      <label>Travel speed (m/s)<input id="tapeTravelSpeed" type="number" min="0.01" max="1" step="0.01" value="0.15"></label>
+      <label>Travel speed (m/s)<input id="tapeTravelSpeed" type="number" min="0.01" max="1" step="0.01" value="0.30"></label>
       <label>Polarity<select id="tapePolarity"><option value="1">Normal (+1)</option><option value="-1">Reversed (−1)</option></select></label>
-      <label>Duration (ms)<input id="tapeDuration" type="number" min="1" max="60000" step="100" value="3000"></label>
+      <label>Duration (ms)<input id="tapeDuration" type="number" min="1" max="60000" step="100" value="10000"></label>
     </div>
     <div class="row" style="margin-top:10px">
       <button id="tapeCenter" class="primary">⊕ Center to 0110</button>
@@ -256,7 +256,7 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
   <section class="panel" data-page="tuning">
     <div class="phead"><span class="ptitle">TAPE FOLLOWING TUNING</span><span class="tag amber">RAM-only</span><button class="sm" data-command="tape-tune reset" style="margin-left:auto;color:var(--muted)">↺ Reset tape defaults</button></div>
     <div class="g5" style="margin-bottom:14px">
-      <label>Lateral P<span class="piw"><input id="tape-kp" type="number" step="0.01" value="0.10"><button data-tape-pi="kp">Set</button></span></label>
+      <label>Lateral P<span class="piw"><input id="tape-kp" type="number" step="0.01" value="20.0"><button data-tape-pi="kp">Set</button></span></label>
       <label>Lateral I<span class="piw"><input id="tape-ki" type="number" step="0.01" value="0"><button data-tape-pi="ki">Set</button></span></label>
       <label>Lateral D<span class="piw"><input id="tape-kd" type="number" step="0.01" value="0"><button data-tape-pi="kd">Set</button></span></label>
       <label>Integral limit<span class="piw"><input id="tape-integral-limit" type="number" min="0" step="0.1" value="1.0"><button data-tape-pi="integral-limit">Set</button></span></label>
@@ -265,9 +265,9 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
     <div class="phead"><span class="ptitle" style="color:var(--amberl)">TURNING / HEADING</span><span class="note">how aggressively the robot points into a correction</span></div>
     <div class="g5" style="margin-bottom:14px">
       <label>Heading gain (/s)<span class="piw"><input id="tape-heading" type="number" min="0" step="0.1" value="2.0"><button data-tape-pi="heading">Set</button></span></label>
-      <label>Max turn (rad/s)<span class="piw"><input id="tape-max-omega" type="number" min="0" max="1" step="0.05" value="0.80"><button data-tape-pi="max-omega">Set</button></span></label>
+      <label>Max turn (rad/s)<span class="piw"><input id="tape-max-omega" type="number" min="0" max="2" step="0.05" value="2.00"><button data-tape-pi="max-omega">Set</button></span></label>
       <label>Turn accel (rad/s²)<span class="piw"><input id="tape-angular-accel" type="number" min="0.01" step="0.1" value="1.50"><button data-tape-pi="angular-accel">Set</button></span></label>
-      <label>Search turn (rad/s)<span class="piw"><input id="tape-search-omega" type="number" min="0" max="1" step="0.05" value="0.40"><button data-tape-pi="search-omega">Set</button></span></label>
+      <label>Search turn (rad/s)<span class="piw"><input id="tape-search-omega" type="number" min="0" max="2" step="0.05" value="1.00"><button data-tape-pi="search-omega">Set</button></span></label>
       <label>Lost timeout (s)<span class="piw"><input id="tape-lost-timeout" type="number" min="0" step="0.05" value="4.00"><button data-tape-pi="lost-timeout">Set</button></span></label>
     </div>
     <p class="note">Tune lateral correction first at low speed, then heading gain, max turn rate, and turn acceleration. Copy confirmed values into tape_following_config.c to persist.</p>
