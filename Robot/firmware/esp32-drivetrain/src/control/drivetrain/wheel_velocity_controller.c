@@ -50,10 +50,16 @@ esp_err_t wheel_velocity_controller_update(
     if (target_mps > 0.0f) feedforward += config->kff_offset;
     if (target_mps < 0.0f) feedforward -= config->kff_offset;
 
+    /* A stop command coasts rather than actively (reverse-polarity) braking:
+     * plugging a spinning motor can draw more current than either running or
+     * locked-rotor, since supply voltage and back-EMF add instead of oppose,
+     * and this driver has no software current limiting to bound that. Forcing
+     * output to exactly zero also satisfies the "don't keep driving forward
+     * while slew catches up" goal the old sign-clamp existed for, without
+     * ever commanding duty opposite the wheel's current motion. */
     float output = feedforward + config->kp * error + config->ki * controller->integral;
     if (target_mps == 0.0f) {
-        if (measured_mps > 0.0f) output = fminf(output, 0.0f);
-        if (measured_mps < 0.0f) output = fmaxf(output, 0.0f);
+        output = 0.0f;
     }
 
     const float bounded = clamp(output, config->output_min, config->output_max);
@@ -67,10 +73,9 @@ esp_err_t wheel_velocity_controller_update(
         *duty_out = bounded;
     }
 
-    // A stop command overrides slew if slew would continue driving with motion.
+    // A stop command overrides slew immediately rather than ramping to zero.
     if (target_mps == 0.0f) {
-        if (measured_mps > 0.0f) *duty_out = fminf(*duty_out, 0.0f);
-        if (measured_mps < 0.0f) *duty_out = fmaxf(*duty_out, 0.0f);
+        *duty_out = 0.0f;
     }
     controller->last_duty = *duty_out;
     return ESP_OK;

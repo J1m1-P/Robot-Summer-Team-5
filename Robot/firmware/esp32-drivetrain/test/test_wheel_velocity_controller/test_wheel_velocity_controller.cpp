@@ -94,7 +94,7 @@ void test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting
     }
 }
 
-void test_stop_command_produces_braking_duty_from_proportional_term_only() {
+void test_stop_command_coasts_to_zero_duty() {
     const WheelVelocityControllerConfig cfg = make_config();
     WheelVelocityController pi = {};
     float duty = 0.0f;
@@ -104,11 +104,11 @@ void test_stop_command_produces_braking_duty_from_proportional_term_only() {
         wheel_velocity_controller_update(pi, cfg, 1.0f, 0.9f, 0.1f, duty);
     }
 
-    // Now stop: error = 0 - 0.9 = -0.9, integral is reset to 0 this same
-    // call, so duty should be exactly kp*error (no kff, no ki contribution).
+    // Now stop: error = 0 - 0.9 = -0.9, which would drive a nonzero
+    // (reverse-polarity, actively braking) duty if it weren't overridden --
+    // duty must be exactly 0 (coast) instead, regardless of kp/ki/kff.
     wheel_velocity_controller_update(pi, cfg, 0.0f, 0.9f, 0.1f, duty);
-    const float expected_duty = cfg.kp * (0.0f - 0.9f);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, expected_duty, duty);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
 }
 
 void test_integral_resumes_accumulating_once_target_goes_nonzero_again() {
@@ -126,17 +126,18 @@ void test_integral_resumes_accumulating_once_target_goes_nonzero_again() {
 
 void test_stop_never_pushes_forward_even_with_misconfigured_positive_output() {
     WheelVelocityControllerConfig cfg = make_config();
-    cfg.kp = -0.5f; // deliberately wrong-signed, to prove the clamp is a real
-                     // enforced invariant and not just an incidental
+    cfg.kp = -0.5f; // deliberately wrong-signed, to prove the override is a
+                     // real enforced invariant and not just an incidental
                      // consequence of kp being positive elsewhere in the file
     WheelVelocityController pi = {};
     float duty = 0.0f;
 
-    // Without the target==0 braking clamp, kp*error = -0.5*(0-0.9) = +0.45
-    // -- exactly the "push forward while supposed to be stopping" case the
-    // clamp exists to prevent, from a wheel still moving forward at 0.9 m/s.
+    // Without the target==0 override, kp*error = -0.5*(0-0.9) = +0.45 --
+    // exactly the "push forward while supposed to be stopping" case the
+    // override exists to prevent, from a wheel still moving forward at
+    // 0.9 m/s. Duty must be exactly 0 (coast), not merely non-positive.
     wheel_velocity_controller_update(pi, cfg, 0.0f, 0.9f, 0.1f, duty);
-    TEST_ASSERT_TRUE(duty <= 0.0f);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
 }
 
 void test_stop_never_pushes_further_backward_when_wheel_already_reversed() {
@@ -147,10 +148,10 @@ void test_stop_never_pushes_further_backward_when_wheel_already_reversed() {
     float duty = 0.0f;
 
     // measured_mps = -0.9 (wheel already spinning backward), target = 0.
-    // Without the clamp, kp*error = -0.5*(0-(-0.9)) = -0.45 -- would drive
-    // it further backward instead of braking it back toward 0.
+    // Without the override, kp*error = -0.5*(0-(-0.9)) = -0.45 -- would
+    // drive it further backward instead of coasting it toward 0.
     wheel_velocity_controller_update(pi, cfg, 0.0f, -0.9f, 0.1f, duty);
-    TEST_ASSERT_TRUE(duty >= 0.0f);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
 }
 
 void test_stop_at_exactly_zero_measured_produces_zero_duty() {
@@ -256,7 +257,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_integral_accumulates_normally_while_target_nonzero);
     RUN_TEST(test_integral_resets_immediately_when_target_becomes_zero);
     RUN_TEST(test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting);
-    RUN_TEST(test_stop_command_produces_braking_duty_from_proportional_term_only);
+    RUN_TEST(test_stop_command_coasts_to_zero_duty);
     RUN_TEST(test_integral_resumes_accumulating_once_target_goes_nonzero_again);
 
     RUN_TEST(test_stop_never_pushes_forward_even_with_misconfigured_positive_output);
