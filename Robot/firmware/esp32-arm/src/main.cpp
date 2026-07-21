@@ -1,36 +1,22 @@
-/* Runs the production arm firmware: bridges the Pi link and the drivetrain link. */
+/* Runs the arm board's production sensor loop. */
 #include <Arduino.h>
 
-#include <robot_common/app_log.h>
+#include "config/tof_config.h"
+#include "control/time_of_flight/tof_manager.h"
 
-#include "comms/pi_bridge.h"
+static TofManager tof_manager = {};
 
-static PiBridge bridge = {0};
-static bool bridge_ready = false;
-
-// Brings up logging and both UART links (Pi-facing and drivetrain-facing).
+// Initializes all three claw sensors and begins continuous ranging.
 void setup() {
-    app_log_init();
-
-    esp_err_t err = pi_bridge_init(&bridge);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_UART, "Pi bridge init failed: %s", esp_err_to_name(err));
-        return;
-    }
-    bridge_ready = true;
-    APP_LOGI(LOG_TAG_UART, "Pi bridge ready");
+    ESP_ERROR_CHECK(tof_manager_init(&tof_manager, &ARM_TOF_CONFIG));
+    ESP_ERROR_CHECK(tof_manager_start(&tof_manager));
 }
 
-// Repeatedly drains both links and relays packets between them.
+// Refreshes each sensor's cached sample without blocking for measurements.
 void loop() {
-    if (!bridge_ready) {
-        delay(100);
-        return;
+    const esp_err_t error = tof_manager_poll(&tof_manager);
+    if (error != ESP_OK && error != ESP_ERR_NOT_FINISHED) {
+        ESP_ERROR_CHECK(error);
     }
-
-    esp_err_t err = pi_bridge_update(&bridge);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_UART, "Pi bridge update failed: %s", esp_err_to_name(err));
-    }
-    delay(5);   // light throttle -- keeps latency low while yielding to the RTOS
+    delay(1);
 }

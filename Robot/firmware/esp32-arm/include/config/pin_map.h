@@ -28,6 +28,8 @@
 // Time of Flight (I2C)
 #define PIN_I2C_SDA         7
 #define PIN_I2C_SCL         8
+#define PIN_TOF_LEFT_XSHUT  43
+#define PIN_TOF_RIGHT_XSHUT 44
 
 // Optical Sensors (SPI)
 #define PIN_PMW_SDIO        9       // Shared bus -- both sensors tied together
