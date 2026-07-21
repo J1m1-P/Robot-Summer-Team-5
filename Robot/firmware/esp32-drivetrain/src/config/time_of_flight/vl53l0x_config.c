@@ -7,25 +7,27 @@ extern "C" {
 
 #define VL53L0X_DEFAULT_I2C_ADDRESS     0x29U
 
-#define LEFT_OFFSET                     0x01U
-#define MID_OFFSET                      0x02U
-#define RIGHT_OFFSET                    0x03U
+#define LEFT_I2C_ADDRESS                0x30U
+#define MID_I2C_ADDRESS                 0x31U
+#define RIGHT_I2C_ADDRESS               0x32U
 
 #define DEFAULT_TIMING_BUDGET_US        33000U
 #define DEFAULT_TIMEOUT_MS              100U
+#define DEFAULT_STALE_AFTER_MS          150U
 
 const VL53L0XConfig LEFT_VL53L0X_CONFIG = {
     .id = VL53L0X_SENSOR_LEFT, 
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
     .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
-    .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + LEFT_OFFSET, 
+    .target_i2c_address = LEFT_I2C_ADDRESS,
     
     .xshut_pin = PIN_TOF1_XSHUT, 
     .intr_pin = GPIO_NUM_NC, 
 
     .timing_budget_us = DEFAULT_TIMING_BUDGET_US, 
     .timeout_ms = DEFAULT_TIMEOUT_MS, 
+    .stale_after_ms = DEFAULT_STALE_AFTER_MS,
 };
 
 const VL53L0XConfig MID_VL53L0X_CONFIG = {
@@ -33,13 +35,14 @@ const VL53L0XConfig MID_VL53L0X_CONFIG = {
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
     .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
-    .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + MID_OFFSET, 
+    .target_i2c_address = MID_I2C_ADDRESS,
     
     .xshut_pin = PIN_TOF2_XSHUT, 
     .intr_pin = GPIO_NUM_NC, 
 
     .timing_budget_us = DEFAULT_TIMING_BUDGET_US, 
     .timeout_ms = DEFAULT_TIMEOUT_MS, 
+    .stale_after_ms = DEFAULT_STALE_AFTER_MS,
 };
 
 const VL53L0XConfig RIGHT_VL53L0X_CONFIG = {
@@ -47,13 +50,14 @@ const VL53L0XConfig RIGHT_VL53L0X_CONFIG = {
     .profile = VL53L0X_PROFILE_DEFAULT, 
 
     .default_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS, 
-    .target_i2c_address = VL53L0X_DEFAULT_I2C_ADDRESS + RIGHT_OFFSET, 
+    .target_i2c_address = RIGHT_I2C_ADDRESS,
     
     .xshut_pin = GPIO_NUM_NC, 
     .intr_pin = GPIO_NUM_NC, 
 
     .timing_budget_us = DEFAULT_TIMING_BUDGET_US, 
     .timeout_ms = DEFAULT_TIMEOUT_MS, 
+    .stale_after_ms = DEFAULT_STALE_AFTER_MS,
 };
 
 #ifdef __cplusplus

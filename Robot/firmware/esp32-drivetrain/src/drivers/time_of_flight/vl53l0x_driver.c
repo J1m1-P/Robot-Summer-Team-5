@@ -38,7 +38,9 @@ static bool vl53l0x_config_is_valid(const VL53L0XConfig *config)
            config->default_i2c_address <= 0x7FU &&
            config->target_i2c_address > 0U &&
            config->target_i2c_address <= 0x7FU &&
-           config->timeout_ms > 0U;
+           (config->timing_budget_us == 0U ||
+            config->timing_budget_us >= 20000U) &&
+           config->timeout_ms > 0U && config->stale_after_ms > 0U;
 }
 
 static VL53L0X_Error vl53l0x_apply_profile(VL53L0X *sensor)
@@ -298,9 +300,29 @@ esp_err_t vl53l0x_read_distance(VL53L0X *sensor, uint16_t *distance_mm)
     return ESP_OK;
 }
 
+esp_err_t vl53l0x_read_sample(VL53L0X *sensor, VL53L0XSample *sample)
+{
+    if (sensor == NULL || sample == NULL) return ESP_ERR_INVALID_ARG;
+    uint16_t distance_mm = 0U;
+    esp_err_t error = vl53l0x_read_distance(sensor, &distance_mm);
+    if (error != ESP_OK) return error;
+    sample->distance_mm = distance_mm;
+    sample->range_status = sensor->last_range_status;
+    sample->timestamp_us = sensor->last_update_us;
+    sample->valid = sensor->measurement_valid;
+    return ESP_OK;
+}
+
 bool vl53l0x_is_measurement_valid(const VL53L0X *sensor)
 {
     return sensor != NULL && sensor->initialized && sensor->measurement_valid;
+}
+
+bool vl53l0x_is_measurement_fresh(const VL53L0X *sensor)
+{
+    return vl53l0x_is_measurement_valid(sensor) &&
+           esp_timer_get_time() - sensor->last_update_us <=
+               (int64_t)sensor->config->stale_after_ms * 1000LL;
 }
 
 uint16_t vl53l0x_get_last_distance_mm(const VL53L0X *sensor)
