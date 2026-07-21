@@ -14,12 +14,12 @@
 #define PIN_LOC_SWITCH      14      // Microswtich on the locating motor
 
 // Stepper Motor Driver
-#define PIN_STEP1           42      // PWM (not really) for Stepper Motor1
-#define PIN_STEP1_DIR       41      // Direction for Stepper Motor1
-#define PIN_STEP2           15      // PWM (not really) for Stepper Motor2
-#define PIN_STEP2_DIR       16      // Direction for Stepper Motor2
-#define PIN_STEP3           17      // PWM (not really) for Stepper Motor3
-#define PIN_STEP3_DIR       18      // Direction for Stepper Motor3
+#define PIN_STEP1           16      // PWM (not really) for Stepper Motor1
+#define PIN_STEP1_DIR       15      // Direction for Stepper Motor1
+#define PIN_STEP2           42      // PWM (not really) for Stepper Motor2
+#define PIN_STEP2_DIR       41      // Direction for Stepper Motor2
+#define PIN_STEP3           18      // PWM (not really) for Stepper Motor3
+#define PIN_STEP3_DIR       17      // Direction for Stepper Motor3
 #define PIN_STEP4           21      // PWM (not really) for Stepper Motor4
 #define PIN_STEP4_DIR       40      // Direction for Stepper Motor4
 

@@ -17,6 +17,7 @@ esp_err_t drivetrain_odometry_update(
         return ESP_ERR_INVALID_ARG;
     }
     if (!valid) {
+        odometry->fault_latched = true;
         odometry->last_fault = DRIVETRAIN_ODOMETRY_FAULT_INVALID_CYCLE;
         return ESP_OK;
     }

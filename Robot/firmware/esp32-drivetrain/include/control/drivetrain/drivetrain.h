@@ -6,8 +6,8 @@
 
 #include "esp_err.h"
 
-#include "control/drivetrain/velocity_kinematics.h"
-#include "control/drivetrain/wheel_velocity_pi.h"
+#include "control/drivetrain/x_drive_kinematics.h"
+#include "control/drivetrain/wheel_velocity_controller.h"
 #include "drivers/encoder/encoder_driver.h"
 #include "drivers/motor/motor_driver.h"
 
@@ -28,8 +28,8 @@ typedef enum {
 typedef struct {
     const MotorDriverConfig *motor_configs[DRIVETRAIN_MOTOR_MAX];
     const EncoderDriverConfig *encoder_configs[DRIVETRAIN_MOTOR_MAX];
-    DrivetrainVelocityKinematicsConfig kinematics;
-    WheelVelocityPiConfig wheel_pi;
+    XDriveKinematicsConfig x_drive_kinematics;
+    WheelVelocityControllerConfig wheel_controller;
     float max_duty;
     float max_vx_mps;
     float max_vy_mps;
@@ -52,12 +52,12 @@ typedef struct {
 typedef struct {
     MotorDriver motors[DRIVETRAIN_MOTOR_MAX];
     EncoderDriver encoders[DRIVETRAIN_MOTOR_MAX];
-    WheelVelocityPi wheel_pi[DRIVETRAIN_MOTOR_MAX];
+    WheelVelocityController wheel_controller[DRIVETRAIN_MOTOR_MAX];
 } DrivetrainDevices;
 
 // Groups closed-loop configuration, telemetry, and timing state.
 typedef struct {
-    WheelVelocityPiConfig active_pi_config;
+    WheelVelocityControllerConfig active_controller_config[DRIVETRAIN_MOTOR_MAX];
     float target_wheel_mps[DRIVETRAIN_MOTOR_MAX];
     float last_duty[DRIVETRAIN_MOTOR_MAX];
     int64_t last_command_us;
@@ -95,18 +95,6 @@ esp_err_t drivetrain_stop(Drivetrain *drivetrain);
 // Runs one bounded-time encoder, kinematics, PI, and motor-output cycle.
 esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us);
 
-// Replaces the live PI gains after validating them against drivetrain limits.
-esp_err_t drivetrain_set_wheel_pi_config(
-    Drivetrain *drivetrain,
-    const WheelVelocityPiConfig *config
-);
-
-// Copies the live PI configuration for telemetry or interactive tuning.
-esp_err_t drivetrain_get_wheel_pi_config(
-    const Drivetrain *drivetrain,
-    WheelVelocityPiConfig *config_out
-);
-
 // Copies the caller-facing lifecycle, watchdog, and target status.
 esp_err_t drivetrain_get_status(
     const Drivetrain *drivetrain,
@@ -141,6 +129,38 @@ float drivetrain_get_target_velocity_mps(
 float drivetrain_get_applied_duty(
     const Drivetrain *drivetrain,
     DrivetrainMotorId motor_id
+);
+
+// -----------------------------------------------------------------------------
+// Real-time tuning only
+// These APIs replace or inspect RAM-only wheel-controller configuration.
+// Production motion code should use the compiled DrivetrainConfig defaults.
+// -----------------------------------------------------------------------------
+
+// Replaces the live controller configuration for all four wheels.
+esp_err_t drivetrain_set_wheel_controller_config(
+    Drivetrain *drivetrain,
+    const WheelVelocityControllerConfig *config
+);
+
+// Copies the shared live configuration (the front-left wheel's current copy).
+esp_err_t drivetrain_get_wheel_controller_config(
+    const Drivetrain *drivetrain,
+    WheelVelocityControllerConfig *config_out
+);
+
+// Replaces one wheel's live configuration without changing the other wheels.
+esp_err_t drivetrain_set_motor_controller_config(
+    Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    const WheelVelocityControllerConfig *config
+);
+
+// Copies one wheel's live configuration for independent tuning.
+esp_err_t drivetrain_get_motor_controller_config(
+    const Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    WheelVelocityControllerConfig *config_out
 );
 
 #ifdef __cplusplus

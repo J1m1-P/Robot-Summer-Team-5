@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 
 #include <robot_common/app_log.h>
+#include <robot_common/math_utils.h>
 
 // Checks wheel identifiers before using them as array indexes.
 static bool motor_id_is_valid(DrivetrainMotorId id) {
@@ -20,31 +21,24 @@ static void record_first_error(esp_err_t *first_error, esp_err_t error) {
     if (*first_error == ESP_OK && error != ESP_OK) *first_error = error;
 }
 
-// Clamps a signed duty to the configured drivetrain safety ceiling.
-static float clamp_duty(float duty, float max_duty) {
-    if (duty > max_duty) return max_duty;
-    if (duty < -max_duty) return -max_duty;
-    return duty;
-}
-
 // Clears velocity targets, PI history, and wheel-output telemetry.
 static void reset_control_state(Drivetrain *drivetrain) {
     memset(&drivetrain->status.target_body, 0, sizeof(drivetrain->status.target_body));
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
-        wheel_velocity_pi_reset(&drivetrain->devices.wheel_pi[index]);
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
+        wheel_velocity_controller_reset(&drivetrain->devices.wheel_controller[index]);
         drivetrain->control.target_wheel_mps[index] = 0.0f;
         drivetrain->control.last_duty[index] = 0.0f;
     }
 }
 
 // Checks PI output bounds against the final drivetrain duty limit.
-static bool pi_config_fits_drivetrain(
-    const WheelVelocityPiConfig *pi_config,
+static bool controller_config_fits_drivetrain(
+    const WheelVelocityControllerConfig *controller_config,
     float max_duty
 ) {
-    return wheel_velocity_pi_config_is_valid(pi_config) &&
-           pi_config->output_min >= -max_duty &&
-           pi_config->output_max <= max_duty;
+    return wheel_velocity_controller_config_is_valid(controller_config) &&
+           controller_config->output_min >= -max_duty &&
+           controller_config->output_max <= max_duty;
 }
 
 // Validates one positive finite motion or timing bound.
@@ -63,16 +57,16 @@ static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
         config->command_timeout_us <= 0) {
         return false;
     }
-    if (!pi_config_fits_drivetrain(&config->wheel_pi, config->max_duty)) return false;
+    if (!controller_config_fits_drivetrain(&config->wheel_controller, config->max_duty)) return false;
 
     DrivetrainBodyVelocity zero_body = {0};
-    DrivetrainWheelVelocity validation_output = {0};
-    if (drivetrain_kinematics_body_to_wheel_velocities(
-            &config->kinematics, &zero_body, &validation_output) != ESP_OK) {
+    XDriveWheelVelocity validation_output = {0};
+    if (x_drive_kinematics_body_to_wheel_velocities(
+            &config->x_drive_kinematics, &zero_body, &validation_output) != ESP_OK) {
         return false;
     }
 
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         const MotorDriverConfig *motor_config = config->motor_configs[index];
         const EncoderDriverConfig *encoder_config = config->encoder_configs[index];
         if (!motor_driver_config_is_valid(motor_config) ||
@@ -109,7 +103,7 @@ static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
 
 // Restores a braked, empty object after partial initialization fails.
 static void cleanup_failed_init(Drivetrain *drivetrain) {
-    for (int index = DRIVETRAIN_MOTOR_MAX - 1; index >= 0; --index) {
+    for (int index = DRIVETRAIN_MOTOR_MAX - 1; index >= 0; index--) {
         EncoderDriver *encoder = &drivetrain->devices.encoders[index];
         MotorDriver *motor = &drivetrain->devices.motors[index];
         if (encoder_driver_is_enabled(encoder)) encoder_driver_stop(encoder);
@@ -121,7 +115,7 @@ static void cleanup_failed_init(Drivetrain *drivetrain) {
 
 // Disables motors already enabled when a later enable step fails.
 static void cleanup_failed_enable(Drivetrain *drivetrain, int enabled_count) {
-    for (int index = enabled_count - 1; index >= 0; --index) {
+    for (int index = enabled_count - 1; index >= 0; index--) {
         motor_driver_disable(&drivetrain->devices.motors[index]);
     }
     gpio_set_level((gpio_num_t)drivetrain->config->brake_pin, 1);
@@ -135,7 +129,7 @@ static void cleanup_failed_enable(Drivetrain *drivetrain, int enabled_count) {
 
 // Updates all encoder estimates or brakes on the first failure.
 static esp_err_t update_encoders(Drivetrain *drivetrain) {
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         esp_err_t error = encoder_driver_update(&drivetrain->devices.encoders[index]);
         if (error != ESP_OK) {
             APP_LOGE(LOG_TAG_DRIVETRAIN, "Encoder %d update failed: %s", index,
@@ -150,12 +144,16 @@ static esp_err_t update_encoders(Drivetrain *drivetrain) {
 // Applies one private logical-order wheel-duty command or brakes on failure.
 static esp_err_t apply_wheel_duties(Drivetrain *drivetrain, const float duties[]) {
     float bounded[DRIVETRAIN_MOTOR_MAX] = {0};
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         if (!isfinite(duties[index])) return ESP_ERR_INVALID_ARG;
-        bounded[index] = clamp_duty(duties[index], drivetrain->config->max_duty);
+        bounded[index] = clamp(
+            duties[index],
+            -drivetrain->config->max_duty,
+            drivetrain->config->max_duty
+        );
     }
 
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         esp_err_t error = motor_driver_set_duty(
             &drivetrain->devices.motors[index], bounded[index]);
         if (error != ESP_OK) {
@@ -178,7 +176,9 @@ esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config
 
     memset(drivetrain, 0, sizeof(*drivetrain));
     drivetrain->config = config;
-    drivetrain->control.active_pi_config = config->wheel_pi;
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
+        drivetrain->control.active_controller_config[index] = config->wheel_controller;
+    }
 
     gpio_config_t brake_config = {0};
     brake_config.pin_bit_mask = 1ULL << config->brake_pin;
@@ -199,7 +199,7 @@ esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config
     }
     drivetrain->status.brake_engaged = true;
 
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         error = motor_driver_init(&drivetrain->devices.motors[index],
                                   config->motor_configs[index]);
         if (error != ESP_OK) {
@@ -232,13 +232,13 @@ esp_err_t drivetrain_enable(Drivetrain *drivetrain) {
     }
 
     int enabled_count = 0;
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         esp_err_t error = motor_driver_enable(&drivetrain->devices.motors[index]);
         if (error != ESP_OK) {
             cleanup_failed_enable(drivetrain, enabled_count);
             return error;
         }
-        ++enabled_count;
+        enabled_count++;
     }
 
     esp_err_t error = gpio_set_level((gpio_num_t)drivetrain->config->brake_pin, 0);
@@ -325,16 +325,16 @@ esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us) {
 
     const float dt_s = (float)(now_us - drivetrain->control.last_update_us) / 1000000.0f;
     if (!isfinite(dt_s) || dt_s > drivetrain->config->max_control_dt_s) {
-        drivetrain_coast(drivetrain);
-        return ESP_ERR_INVALID_STATE;
+        const esp_err_t coast_error = drivetrain_coast(drivetrain);
+        return coast_error == ESP_OK ? ESP_ERR_INVALID_STATE : coast_error;
     }
 
     esp_err_t error = update_encoders(drivetrain);
     if (error != ESP_OK) return error;
 
-    DrivetrainWheelVelocity wheel_rad_s = {0};
-    error = drivetrain_kinematics_body_to_wheel_velocities(
-        &drivetrain->config->kinematics,
+    XDriveWheelVelocity wheel_rad_s = {0};
+    error = x_drive_kinematics_body_to_wheel_velocities(
+        &drivetrain->config->x_drive_kinematics,
         &drivetrain->status.target_body,
         &wheel_rad_s);
     if (error != ESP_OK) {
@@ -342,19 +342,25 @@ esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us) {
         return error;
     }
 
-    const float radius = drivetrain->config->kinematics.wheel_radius_m;
-    drivetrain->control.target_wheel_mps[DRIVETRAIN_MOTOR_FL] = wheel_rad_s.fl * radius;
-    drivetrain->control.target_wheel_mps[DRIVETRAIN_MOTOR_FR] = wheel_rad_s.fr * radius;
-    drivetrain->control.target_wheel_mps[DRIVETRAIN_MOTOR_BL] = wheel_rad_s.bl * radius;
-    drivetrain->control.target_wheel_mps[DRIVETRAIN_MOTOR_BR] = wheel_rad_s.br * radius;
+    const float radius = drivetrain->config->x_drive_kinematics.wheel_radius_m;
+    const float wheel_velocities[] = {
+        wheel_rad_s.fl,
+        wheel_rad_s.fr,
+        wheel_rad_s.bl,
+        wheel_rad_s.br,
+    };
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
+        drivetrain->control.target_wheel_mps[index] =
+            wheel_velocities[index] * radius;
+    }
 
     float duties[DRIVETRAIN_MOTOR_MAX] = {0};
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         const float measured = encoder_driver_get_velocity_mps(
             &drivetrain->devices.encoders[index]);
-        error = wheel_velocity_pi_update(
-            &drivetrain->devices.wheel_pi[index],
-            &drivetrain->control.active_pi_config,
+        error = wheel_velocity_controller_update(
+            &drivetrain->devices.wheel_controller[index],
+            &drivetrain->control.active_controller_config[index],
             drivetrain->control.target_wheel_mps[index],
             measured,
             dt_s,
@@ -370,40 +376,13 @@ esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us) {
     return error;
 }
 
-// Validates and installs live tuning gains, then clears prior PI history.
-esp_err_t drivetrain_set_wheel_pi_config(
-    Drivetrain *drivetrain,
-    const WheelVelocityPiConfig *config
-) {
-    if (drivetrain == NULL || config == NULL) return ESP_ERR_INVALID_ARG;
-    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
-    if (!pi_config_fits_drivetrain(config, drivetrain->config->max_duty)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    drivetrain->control.active_pi_config = *config;
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
-        wheel_velocity_pi_reset(&drivetrain->devices.wheel_pi[index]);
-    }
-    return ESP_OK;
-}
-
-// Copies the live gains without exposing mutable controller ownership.
-esp_err_t drivetrain_get_wheel_pi_config(
-    const Drivetrain *drivetrain,
-    WheelVelocityPiConfig *config_out
-) {
-    if (drivetrain == NULL || config_out == NULL) return ESP_ERR_INVALID_ARG;
-    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
-    *config_out = drivetrain->control.active_pi_config;
-    return ESP_OK;
-}
-
 // Copies the caller-facing status snapshot.
 esp_err_t drivetrain_get_status(
     const Drivetrain *drivetrain,
     DrivetrainStatus *status_out
 ) {
     if (drivetrain == NULL || status_out == NULL) return ESP_ERR_INVALID_ARG;
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
     *status_out = drivetrain->status;
     return ESP_OK;
 }
@@ -414,14 +393,14 @@ esp_err_t drivetrain_brake(Drivetrain *drivetrain) {
     if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
 
     esp_err_t first_error = ESP_OK;
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         record_first_error(&first_error,
             motor_driver_coast(&drivetrain->devices.motors[index]));
     }
     const esp_err_t brake_error = gpio_set_level(
         (gpio_num_t)drivetrain->config->brake_pin, 1);
     record_first_error(&first_error, brake_error);
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         if (motor_driver_is_enabled(&drivetrain->devices.motors[index])) {
             record_first_error(&first_error,
                 motor_driver_disable(&drivetrain->devices.motors[index]));
@@ -443,7 +422,7 @@ esp_err_t drivetrain_coast(Drivetrain *drivetrain) {
     if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
 
     esp_err_t first_error = ESP_OK;
-    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         record_first_error(&first_error,
             motor_driver_coast(&drivetrain->devices.motors[index]));
     }
@@ -511,4 +490,67 @@ float drivetrain_get_applied_duty(
         return 0.0f;
     }
     return drivetrain->control.last_duty[motor_id];
+}
+
+// -----------------------------------------------------------------------------
+// Real-time tuning only
+// These functions mutate or inspect RAM-only controller configuration.
+// -----------------------------------------------------------------------------
+
+// Validates and installs live tuning gains, then clears prior controller history.
+esp_err_t drivetrain_set_wheel_controller_config(
+    Drivetrain *drivetrain,
+    const WheelVelocityControllerConfig *config
+) {
+    if (drivetrain == NULL || config == NULL) return ESP_ERR_INVALID_ARG;
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    if (!controller_config_fits_drivetrain(config, drivetrain->config->max_duty)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
+        drivetrain->control.active_controller_config[index] = *config;
+        wheel_velocity_controller_reset(&drivetrain->devices.wheel_controller[index]);
+    }
+    return ESP_OK;
+}
+
+// Copies the live gains without exposing mutable controller ownership.
+esp_err_t drivetrain_get_wheel_controller_config(
+    const Drivetrain *drivetrain,
+    WheelVelocityControllerConfig *config_out
+) {
+    if (drivetrain == NULL || config_out == NULL) return ESP_ERR_INVALID_ARG;
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    *config_out = drivetrain->control.active_controller_config[DRIVETRAIN_MOTOR_FL];
+    return ESP_OK;
+}
+
+esp_err_t drivetrain_set_motor_controller_config(
+    Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    const WheelVelocityControllerConfig *config
+) {
+    if (drivetrain == NULL || config == NULL || !motor_id_is_valid(motor_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    if (!controller_config_fits_drivetrain(config, drivetrain->config->max_duty)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    drivetrain->control.active_controller_config[motor_id] = *config;
+    wheel_velocity_controller_reset(&drivetrain->devices.wheel_controller[motor_id]);
+    return ESP_OK;
+}
+
+esp_err_t drivetrain_get_motor_controller_config(
+    const Drivetrain *drivetrain,
+    DrivetrainMotorId motor_id,
+    WheelVelocityControllerConfig *config_out
+) {
+    if (drivetrain == NULL || config_out == NULL || !motor_id_is_valid(motor_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!drivetrain->status.initialized) return ESP_ERR_INVALID_STATE;
+    *config_out = drivetrain->control.active_controller_config[motor_id];
+    return ESP_OK;
 }

@@ -64,10 +64,12 @@
  };
 
 // Front-right encoder pulse-counter and wheel configuration.
-// Physically wired to connector 3 (not 2) -- see motor_config.c's
-// FR_MOTOR_CONFIG comment; direction_inverted stays with the physical
-// connector (calibrated against that connector's actual count direction),
-// not with the FR label.
+// Physically wired to connector 4 (not 3) -- confirmed against real
+// behavior, mirroring the motor connector 2/3 swap already documented in
+// motor_config.c's FR_MOTOR_CONFIG comment (encoder connectors 3/4 turned
+// out to be swapped independently of that motor swap). direction_inverted
+// stays with the physical connector (calibrated against that connector's
+// actual count direction), not with the FR label.
   const EncoderDriverConfig FR_ENCODER_CONFIG = {
     .id = FR_ENCODER,
 
@@ -75,8 +77,8 @@
     .pcnt_channel_a = PCNT_CHANNEL_0,
     .pcnt_channel_b = PCNT_CHANNEL_1,
 
-    .a_pin = PIN_ENC3_A,
-    .b_pin = PIN_ENC3_B,
+    .a_pin = PIN_ENC4_A,
+    .b_pin = PIN_ENC4_B,
 
     .direction_inverted = true,
 
@@ -113,17 +115,18 @@
  };
 
 // Back-right encoder pulse-counter and wheel configuration.
+// Physically wired to connector 3 (not 4) -- see FR_ENCODER_CONFIG comment.
   const EncoderDriverConfig BR_ENCODER_CONFIG = {
-    .id = BR_ENCODER, 
+    .id = BR_ENCODER,
 
-    .pcnt_unit = PCNT_UNIT_3, 
-    .pcnt_channel_a = PCNT_CHANNEL_0, 
-    .pcnt_channel_b = PCNT_CHANNEL_1, 
+    .pcnt_unit = PCNT_UNIT_3,
+    .pcnt_channel_a = PCNT_CHANNEL_0,
+    .pcnt_channel_b = PCNT_CHANNEL_1,
 
-    .a_pin = PIN_ENC4_A, 
-    .b_pin = PIN_ENC4_B, 
+    .a_pin = PIN_ENC3_A,
+    .b_pin = PIN_ENC3_B,
 
-    .direction_inverted = true, 
+    .direction_inverted = true,
 
     .counts_per_revolution = ENCODER_COUNTS_PER_REVOLUTION, 
     .wheel_diameter_m = ENCODER_WHEEL_DIAMETER_M, 

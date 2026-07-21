@@ -1,5 +1,5 @@
 // Test suite for the velocity Jacobian itself
-// (control/drivetrain/velocity_kinematics.h). This checks the formula's actual
+// (control/drivetrain/x_drive_kinematics.h). This checks the formula's actual
 // numeric output, its structural properties (linearity, radius scaling),
 // and every error path.
 //
@@ -9,7 +9,7 @@
 
 #include <cmath>
 
-#include "control/drivetrain/velocity_kinematics.h"
+#include "control/drivetrain/x_drive_kinematics.h"
 
 namespace {
 
@@ -17,17 +17,17 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr float kEpsilon = 1e-4f;
 
 // Keeps test expressions concise while exercising the pointer-based C API.
-esp_err_t drivetrain_kinematics_body_to_wheel_velocities(
-    const DrivetrainVelocityKinematicsConfig &config,
+esp_err_t x_drive_kinematics_body_to_wheel_velocities(
+    const XDriveKinematicsConfig &config,
     const DrivetrainBodyVelocity &body,
-    DrivetrainWheelVelocity &wheels
+    XDriveWheelVelocity &wheels
 ) {
-    return ::drivetrain_kinematics_body_to_wheel_velocities(
+    return ::x_drive_kinematics_body_to_wheel_velocities(
         &config, &body, &wheels);
 }
 
-DrivetrainVelocityKinematicsConfig make_config(float r, float l, float w, float beta_deg) {
-    DrivetrainVelocityKinematicsConfig cfg = {};
+XDriveKinematicsConfig make_config(float r, float l, float w, float beta_deg) {
+    XDriveKinematicsConfig cfg = {};
     cfg.wheel_radius_m = r;
     cfg.chassis_half_length_m = l;
     cfg.chassis_half_width_m = w;
@@ -43,7 +43,7 @@ DrivetrainBodyVelocity make_body(float vx, float vy, float omega) {
     return body;
 }
 
-void assert_wheels_equal(const DrivetrainWheelVelocity &expected, const DrivetrainWheelVelocity &actual) {
+void assert_wheels_equal(const XDriveWheelVelocity &expected, const XDriveWheelVelocity &actual) {
     TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.fl, actual.fl);
     TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.fr, actual.fr);
     TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.bl, actual.bl);
@@ -63,23 +63,23 @@ void tearDown() {}
 void test_zero_input_gives_zero_wheels() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto body = make_body(0.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     assert_wheels_equal(expected, wheels); // all default-initialized to 0
 }
 
 void test_pure_forward_exact_values() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto body = make_body(2.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
     // cos(30)*2 = 1.7320508 for all four wheels (forward has no strafe/turn coupling)
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = expected.fr = expected.bl = expected.br = 1.7320508f;
     assert_wheels_equal(expected, wheels);
 }
@@ -87,12 +87,12 @@ void test_pure_forward_exact_values() {
 void test_pure_strafe_exact_values() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto body = make_body(0.0f, 1.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
     // sin(30)*1 = 0.5, sign pattern +,-,-,+
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = 0.5f;
     expected.fr = -0.5f;
     expected.bl = -0.5f;
@@ -103,12 +103,12 @@ void test_pure_strafe_exact_values() {
 void test_pure_turn_exact_values() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto body = make_body(0.0f, 0.0f, 1.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
     // arm*1 = 0.0933013, sign pattern -,+,-,+
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = -0.0933013f;
     expected.fr = 0.0933013f;
     expected.bl = -0.0933013f;
@@ -119,12 +119,12 @@ void test_pure_turn_exact_values() {
 void test_combined_motion_exact_values() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto body = make_body(1.0f, 0.5f, 0.2f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
     // cb*vx=0.8660254, sb*vy=0.25, arm*omega=0.01866025
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = 0.8660254f + 0.25f - 0.01866025f;
     expected.fr = 0.8660254f - 0.25f + 0.01866025f;
     expected.bl = 0.8660254f - 0.25f - 0.01866025f;
@@ -139,11 +139,11 @@ void test_zero_moment_arm_removes_turn_coupling() {
     // any wheel, regardless of wheel_angle_rad or omega's magnitude.
     const auto cfg = make_config(1.0f, 0.0f, 0.0f, 30.0f);
     const auto body = make_body(0.0f, 0.0f, 5.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
-    DrivetrainWheelVelocity expected = {}; // all zero
+    XDriveWheelVelocity expected = {}; // all zero
     assert_wheels_equal(expected, wheels);
 }
 
@@ -153,12 +153,12 @@ void test_doubling_wheel_radius_halves_output() {
     const auto cfg_r1 = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     const auto cfg_r2 = make_config(2.0f, 0.1f, 0.05f, 30.0f);
 
-    DrivetrainWheelVelocity wheels_r1 = {};
-    DrivetrainWheelVelocity wheels_r2 = {};
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg_r1, body, wheels_r1));
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg_r2, body, wheels_r2));
+    XDriveWheelVelocity wheels_r1 = {};
+    XDriveWheelVelocity wheels_r2 = {};
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg_r1, body, wheels_r1));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg_r2, body, wheels_r2));
 
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = wheels_r1.fl / 2.0f;
     expected.fr = wheels_r1.fr / 2.0f;
     expected.bl = wheels_r1.bl / 2.0f;
@@ -174,14 +174,14 @@ void test_linearity_superposition() {
     const auto body_b = make_body(-1.1f, 0.4f, -0.2f);
     const auto body_sum = make_body(body_a.vx + body_b.vx, body_a.vy + body_b.vy, body_a.omega + body_b.omega);
 
-    DrivetrainWheelVelocity wheels_a = {};
-    DrivetrainWheelVelocity wheels_b = {};
-    DrivetrainWheelVelocity wheels_sum = {};
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body_a, wheels_a));
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body_b, wheels_b));
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(cfg, body_sum, wheels_sum));
+    XDriveWheelVelocity wheels_a = {};
+    XDriveWheelVelocity wheels_b = {};
+    XDriveWheelVelocity wheels_sum = {};
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body_a, wheels_a));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body_b, wheels_b));
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body_sum, wheels_sum));
 
-    DrivetrainWheelVelocity expected = {};
+    XDriveWheelVelocity expected = {};
     expected.fl = wheels_a.fl + wheels_b.fl;
     expected.fr = wheels_a.fr + wheels_b.fr;
     expected.bl = wheels_a.bl + wheels_b.bl;
@@ -193,53 +193,53 @@ void test_linearity_superposition() {
 
 void test_rejects_non_finite_body_velocity() {
     const auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(cfg, make_body(NAN, 0.0f, 0.0f), wheels));
+        x_drive_kinematics_body_to_wheel_velocities(cfg, make_body(NAN, 0.0f, 0.0f), wheels));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(cfg, make_body(0.0f, INFINITY, 0.0f), wheels));
+        x_drive_kinematics_body_to_wheel_velocities(cfg, make_body(0.0f, INFINITY, 0.0f), wheels));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(cfg, make_body(0.0f, 0.0f, -INFINITY), wheels));
+        x_drive_kinematics_body_to_wheel_velocities(cfg, make_body(0.0f, 0.0f, -INFINITY), wheels));
 }
 
 void test_rejects_non_positive_wheel_radius() {
     const auto body = make_body(1.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(make_config(0.0f, 0.1f, 0.05f, 30.0f), body, wheels));
+        x_drive_kinematics_body_to_wheel_velocities(make_config(0.0f, 0.1f, 0.05f, 30.0f), body, wheels));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(make_config(-1.0f, 0.1f, 0.05f, 30.0f), body, wheels));
+        x_drive_kinematics_body_to_wheel_velocities(make_config(-1.0f, 0.1f, 0.05f, 30.0f), body, wheels));
 }
 
 void test_rejects_non_finite_wheel_radius() {
     auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     cfg.wheel_radius_m = NAN;
     const auto body = make_body(1.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 }
 
 void test_rejects_non_finite_wheel_angle() {
     auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     cfg.wheel_angle_rad = NAN;
     const auto body = make_body(1.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
 
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 }
 
 // Confirms the inverse Jacobian recovers a combined body command.
 void test_round_trip_body_to_wheel_to_body() {
     const auto config = make_config(0.035f, 0.20f, 0.273f, 30.0f);
     const DrivetrainBodyVelocity expected{0.31f, -0.17f, 0.42f};
-    DrivetrainWheelVelocity wheels{};
+    XDriveWheelVelocity wheels{};
     DrivetrainBodyVelocity actual{};
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_body_to_wheel_velocities(
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(
         &config, &expected, &wheels));
-    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_kinematics_wheel_to_body_velocities(
+    TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_wheel_to_body_velocities(
         &config, &wheels, &actual));
     TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.vx, actual.vx);
     TEST_ASSERT_FLOAT_WITHIN(kEpsilon, expected.vy, actual.vy);
@@ -249,23 +249,23 @@ void test_round_trip_body_to_wheel_to_body() {
 // Rejects inverse transforms whose geometry cannot distinguish all axes.
 void test_inverse_rejects_singular_geometry() {
     auto config = make_config(0.035f, 0.20f, 0.273f, 30.0f);
-    const DrivetrainWheelVelocity wheels{};
+    const XDriveWheelVelocity wheels{};
     DrivetrainBodyVelocity body{};
     config.wheel_angle_rad = 0.0f;
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_wheel_to_body_velocities(&config, &wheels, &body));
+        x_drive_kinematics_wheel_to_body_velocities(&config, &wheels, &body));
 }
 
 void test_rejects_invalid_chassis_dimensions() {
     const auto body = make_body(1.0f, 0.0f, 0.0f);
-    DrivetrainWheelVelocity wheels = {};
+    XDriveWheelVelocity wheels = {};
     auto cfg = make_config(1.0f, -0.1f, 0.05f, 30.0f);
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
     cfg = make_config(1.0f, 0.1f, NAN, 30.0f);
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        drivetrain_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 }
 
 int main(int argc, char **argv) {

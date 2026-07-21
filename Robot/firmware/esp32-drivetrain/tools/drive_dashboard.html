@@ -137,8 +137,8 @@
 <body>
 <div class="viz-root">
   <h1>Drive Test</h1>
-  <p class="subtitle">Drives all 4 wheels via control/drivetrain/velocity_kinematics.h and
-  control/drivetrain/wheel_velocity_pi.h (src/harnesses/drive_main.cpp, platformio.ini's [env:drive]). Battery
+  <p class="subtitle">Drives all 4 wheels via control/drivetrain/x_drive_kinematics.h and
+  control/drivetrain/wheel_velocity_controller.h (src/harnesses/drive_main.cpp, platformio.ini's [env:drive]). Battery
   must be powering the motors -- USB/WiFi are control/telemetry only. Connect via USB
   (Chrome or Edge only, Web Serial API) or WiFi (any browser, board runs a debug-only open
   AP "esp32-drivetrain").</p>
@@ -199,7 +199,7 @@
   </div>
 
   <div class="panel gains">
-    <div class="control" style="grid-column: 1 / -1;"><label>PI gains (control/drivetrain/wheel_velocity_pi.h), shared by all 4 wheels</label></div>
+    <div class="control" style="grid-column: 1 / -1;"><label>PI gains (control/drivetrain/wheel_velocity_controller.h), shared by all 4 wheels</label></div>
     <div class="control">
       <label for="ff">Feedforward slope (ff)</label>
       <div class="row"><input id="ff" type="number" step="0.01" /><button data-cmd="ff">Set</button></div>

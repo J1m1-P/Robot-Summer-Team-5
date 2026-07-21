@@ -7,24 +7,19 @@
 // Holds the pins, timing values, and runtime state for one initialized stepper driver.
 // The state machine in stepper_update() uses these fields to generate pulses without blocking.
 typedef struct {
-    uint8_t stepPin;          // GPIO pin used for STEP pulses.
-    uint8_t dirPin;           // GPIO pin used for direction control.
+    StepperConfig config; // Configuration values for this stepper driver.
 
-    uint32_t stepPulseUs;     // Duration of the high step pulse in microseconds.
-    uint32_t stepDelayUs;     // Delay between completed pulses in microseconds.
-
-    uint32_t motionlimitMM;   // Maximum distance in millimeters that the stepper is allowed to move in one direction.
-
-    bool isMoving;            // True when an asynchronous move is active.
-    long stepsRemaining;      // Number of steps left to execute.
-    bool direction;           // Current movement direction.
-    unsigned long lastEventUs;// Timestamp of the last step cycle transition.
-    unsigned long pulseStartUs;// Timestamp when the current pulse was asserted.
-    uint8_t state;            // Internal state: 0=waiting, 1=pulse active.
+    bool isMoving;              // True when an asynchronous move is active.
+    long stepsRemaining;        // Number of steps left to execute.
+    bool direction;             // Current movement direction.
+    unsigned long lastEventUs;  // Timestamp of the last step cycle transition.
+    unsigned long pulseStartUs; // Timestamp when the current pulse was asserted.
+    bool state;                 // Internal state: 0=waiting, 1=pulse active.
 } StepperDriver;
 
 // Initialize the stepper driver with the given configuration.
-void stepper_begin(StepperDriver *driver, StepperConfig config);
+// Returns true on success and false when the driver or configuration is invalid.
+bool stepper_init(StepperDriver *driver, StepperConfig config);
 
 // Starts a signed step movement asynchronously.
 // Use stepper_update() from loop() to advance motion.
@@ -32,11 +27,7 @@ void stepper_move_steps(StepperDriver *driver, long steps);
 
 // Starts a signed x-distance movement asynchronously.
 // The conversion uses the configured belt and pulley geometry.
-void stepper_x_move_distanceMM(StepperDriver*driver, float distanceMM);
-
-// Starts a signed z-distance movement asynchronously.
-// The conversion uses the leadscrew geometry.
-void stepper_z_move_distanceMM(StepperDriver*driver, float distanceMM);
+void stepper_move_distanceMM(StepperDriver*driver, float distanceMM);
 
 // Advances the stepper state machine; call frequently from loop().
 // This function returns immediately and generates pulses over time.

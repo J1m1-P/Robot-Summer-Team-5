@@ -2,18 +2,23 @@
 
 #include "config/drivetrain/drivetrain_config.h"
 #include "control/drivetrain/drivetrain.h"
-#include "control/drivetrain/wheel_velocity_pi.h"
+#include "control/drivetrain/wheel_velocity_controller.h"
 #include "drivers/encoder/encoder_driver.h"
 #include "drivers/motor/motor_driver.h"
+
+// -----------------------------------------------------------------------------
+// Real-time tuning only
+// This entire file is an isolated RAM-only wheel-controller tuning application.
+// -----------------------------------------------------------------------------
 
 // Multi-wheel PI tuning harness -- see platformio.ini's [env:tuning]. Not
 // the production entry point; kept entirely separate from main.cpp.
 //
 // Any subset of the 4 motor/encoder pairs can be enabled simultaneously
 // (see the "motor" command below) -- each enabled one gets its own
-// MotorDriver/EncoderDriver/WheelVelocityPi instance and runs the control
+// MotorDriver/EncoderDriver/WheelVelocityController instance and runs the control
 // loop independently, but all enabled motors share one
-// WheelVelocityPiConfig (ff/ffo/kp/ki) and one step/continuous schedule,
+// WheelVelocityControllerConfig (ff/ffo/kp/ki) and one step/continuous schedule,
 // so multiple wheels driven with the same gains can be compared side by
 // side in one run.
 //
@@ -108,10 +113,10 @@ const char *const kMotorNames[kMotorCount] = {
 
 MotorDriver motors[kMotorCount] = {};
 EncoderDriver encoders[kMotorCount];
-WheelVelocityPi pi_states[kMotorCount];
+WheelVelocityController controller_states[kMotorCount];
 bool motor_enabled[kMotorCount] = {true, false, false, false}; // M1 enabled by default, matching the old single-motor default
 
-WheelVelocityPiConfig pi_config = DRIVETRAIN_CONFIG.wheel_pi;
+WheelVelocityControllerConfig controller_config = DRIVETRAIN_CONFIG.wheel_controller;
 
 float step_target_mps = kDefaultStepTargetMps;
 unsigned long step_period_ms = kDefaultStepPeriodMs;
@@ -147,7 +152,7 @@ void set_motor_enabled(int index, bool enabled) {
         motor_driver_init(&motors[index], kMotorConfigs[index]);
         motor_driver_enable(&motors[index]);
 
-        wheel_velocity_pi_reset(&pi_states[index]);
+        wheel_velocity_controller_reset(&controller_states[index]);
     } else {
         motor_driver_disable(&motors[index]);
         encoder_driver_stop(&encoders[index]);
@@ -192,21 +197,21 @@ void handle_serial_command() {
     const float value = rest.toFloat();
 
     if (key == "ff") {
-        pi_config.kff = value;
+        controller_config.kff = value;
         Serial.print("# kff = ");
-        Serial.println(pi_config.kff, 4);
+        Serial.println(controller_config.kff, 4);
     } else if (key == "ffo") {
-        pi_config.kff_offset = value;
+        controller_config.kff_offset = value;
         Serial.print("# kff_offset = ");
-        Serial.println(pi_config.kff_offset, 4);
+        Serial.println(controller_config.kff_offset, 4);
     } else if (key == "kp") {
-        pi_config.kp = value;
+        controller_config.kp = value;
         Serial.print("# kp = ");
-        Serial.println(pi_config.kp, 4);
+        Serial.println(controller_config.kp, 4);
     } else if (key == "ki") {
-        pi_config.ki = value;
+        controller_config.ki = value;
         Serial.print("# ki = ");
-        Serial.println(pi_config.ki, 4);
+        Serial.println(controller_config.ki, 4);
     } else if (key == "target") {
         step_target_mps = value;
         Serial.print("# target_mps = ");
@@ -282,7 +287,7 @@ void loop() {
         if (invert_measurement) measured_mps = -measured_mps;
 
         float duty = 0.0f;
-        wheel_velocity_pi_update(&pi_states[i], &pi_config, target_mps, measured_mps, dt_s, &duty);
+        wheel_velocity_controller_update(&controller_states[i], &controller_config, target_mps, measured_mps, dt_s, &duty);
         motor_driver_set_duty(&motors[i], duty);
 
         if (should_print) {

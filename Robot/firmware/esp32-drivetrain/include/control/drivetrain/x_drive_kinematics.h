@@ -20,7 +20,7 @@ typedef struct {
     float fr;
     float bl;
     float br;
-} DrivetrainWheelVelocity;
+} XDriveWheelVelocity;
 
 // Defines the physical geometry used by the X-drive velocity Jacobian.
 typedef struct {
@@ -28,19 +28,19 @@ typedef struct {
     float chassis_half_length_m;
     float chassis_half_width_m;
     float wheel_angle_rad;
-} DrivetrainVelocityKinematicsConfig;
+} XDriveKinematicsConfig;
 
 // Converts a body-frame velocity into FL/FR/BL/BR wheel angular velocities.
-esp_err_t drivetrain_kinematics_body_to_wheel_velocities(
-    const DrivetrainVelocityKinematicsConfig *config,
+esp_err_t x_drive_kinematics_body_to_wheel_velocities(
+    const XDriveKinematicsConfig *config,
     const DrivetrainBodyVelocity *body,
-    DrivetrainWheelVelocity *wheels_out
+    XDriveWheelVelocity *wheels_out
 );
 
 // Converts FL/FR/BL/BR wheel angular velocities back to body-frame velocity.
-esp_err_t drivetrain_kinematics_wheel_to_body_velocities(
-    const DrivetrainVelocityKinematicsConfig *config,
-    const DrivetrainWheelVelocity *wheels,
+esp_err_t x_drive_kinematics_wheel_to_body_velocities(
+    const XDriveKinematicsConfig *config,
+    const XDriveWheelVelocity *wheels,
     DrivetrainBodyVelocity *body_out
 );
 

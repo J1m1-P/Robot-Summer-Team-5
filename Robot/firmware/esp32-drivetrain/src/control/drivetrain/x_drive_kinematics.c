@@ -1,25 +1,31 @@
 /* Implements the pure X-drive body-to-wheel velocity Jacobian. */
-#include "control/drivetrain/velocity_kinematics.h"
+#include "control/drivetrain/x_drive_kinematics.h"
 
 #include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 
+static bool config_is_valid(const XDriveKinematicsConfig *config)
+{
+    return config != NULL &&
+           isfinite(config->wheel_radius_m) && config->wheel_radius_m > 0.0f &&
+           isfinite(config->chassis_half_length_m) &&
+           config->chassis_half_length_m >= 0.0f &&
+           isfinite(config->chassis_half_width_m) &&
+           config->chassis_half_width_m >= 0.0f &&
+           isfinite(config->wheel_angle_rad);
+}
+
 // Converts a body-frame velocity into logical-order wheel angular velocities.
-esp_err_t drivetrain_kinematics_body_to_wheel_velocities(
-    const DrivetrainVelocityKinematicsConfig *config,
+esp_err_t x_drive_kinematics_body_to_wheel_velocities(
+    const XDriveKinematicsConfig *config,
     const DrivetrainBodyVelocity *body,
-    DrivetrainWheelVelocity *wheels_out
+    XDriveWheelVelocity *wheels_out
 ) {
-    if (config == NULL || body == NULL || wheels_out == NULL) {
+    if (!config_is_valid(config) || body == NULL || wheels_out == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!isfinite(body->vx) || !isfinite(body->vy) || !isfinite(body->omega)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (!isfinite(config->wheel_radius_m) || config->wheel_radius_m <= 0.0f ||
-        !isfinite(config->chassis_half_length_m) || config->chassis_half_length_m < 0.0f ||
-        !isfinite(config->chassis_half_width_m) || config->chassis_half_width_m < 0.0f ||
-        !isfinite(config->wheel_angle_rad)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -42,20 +48,16 @@ esp_err_t drivetrain_kinematics_body_to_wheel_velocities(
 }
 
 // Applies the inverse X-drive Jacobian to measured wheel angular velocities.
-esp_err_t drivetrain_kinematics_wheel_to_body_velocities(
-    const DrivetrainVelocityKinematicsConfig *config,
-    const DrivetrainWheelVelocity *wheels,
+esp_err_t x_drive_kinematics_wheel_to_body_velocities(
+    const XDriveKinematicsConfig *config,
+    const XDriveWheelVelocity *wheels,
     DrivetrainBodyVelocity *body_out
 ) {
-    if (config == NULL || wheels == NULL || body_out == NULL) {
+    if (!config_is_valid(config) || wheels == NULL || body_out == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!isfinite(wheels->fl) || !isfinite(wheels->fr) ||
-        !isfinite(wheels->bl) || !isfinite(wheels->br) ||
-        !isfinite(config->wheel_radius_m) || config->wheel_radius_m <= 0.0f ||
-        !isfinite(config->chassis_half_length_m) || config->chassis_half_length_m < 0.0f ||
-        !isfinite(config->chassis_half_width_m) || config->chassis_half_width_m < 0.0f ||
-        !isfinite(config->wheel_angle_rad)) {
+        !isfinite(wheels->bl) || !isfinite(wheels->br)) {
         return ESP_ERR_INVALID_ARG;
     }
 

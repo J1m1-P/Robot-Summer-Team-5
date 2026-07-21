@@ -14,6 +14,7 @@
 #define MOTOR_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define MOTOR_LEDC_TIMER LEDC_TIMER_0
 
+static bool s_ledc_timer_initialized = false;
 
 // Validates GPIOs, PWM settings, duty limits, and channel range.
 bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
@@ -32,10 +33,7 @@ bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
 
 // Converts a non-negative, clamped duty fraction into an LEDC counter value.
 static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
-
-    // duty = (1.0f - duty);       // Account for the unknown PWM fliped behaviour
-
-    uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
+    const uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
     return (uint32_t)(duty * (float)max_count);
 }
 
@@ -58,15 +56,7 @@ static esp_err_t motor_driver_set_pwm(MotorDriver *motor, float duty) {
 
 // Applies a logical direction while honoring the motor's inversion setting.
 static esp_err_t motor_driver_set_dir(MotorDriver *motor, bool dir) {
-    bool pin_level;
-
-    if (motor->config->direction_inverted) {
-        pin_level = !dir;
-    }
-    else {
-        pin_level = dir;
-    }
-
+    const bool pin_level = motor->config->direction_inverted ? !dir : dir;
     return gpio_set_level((gpio_num_t)motor->config->dir_pin, pin_level);
 }
 
@@ -98,18 +88,22 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
         return err;
     }
 
-    // Configure PWM timer
-    ledc_timer_config_t pwm_timer_config = {
-        .speed_mode = MOTOR_LEDC_MODE, 
-        .timer_num = MOTOR_LEDC_TIMER, 
-        .duty_resolution = (ledc_timer_bit_t)config->pwm_resolution, 
-        .freq_hz = config->pwm_frequency, 
-        .clk_cfg = LEDC_AUTO_CLK
-    };
+    // Configure the shared PWM timer once for all motor channels.
+    if (!s_ledc_timer_initialized) {
+        ledc_timer_config_t pwm_timer_config = {
+            .speed_mode = MOTOR_LEDC_MODE, 
+            .timer_num = MOTOR_LEDC_TIMER, 
+            .duty_resolution = (ledc_timer_bit_t)config->pwm_resolution, 
+            .freq_hz = config->pwm_frequency, 
+            .clk_cfg = LEDC_AUTO_CLK
+        };
 
-    err = ledc_timer_config(&pwm_timer_config);
-    if (err != ESP_OK) {
-        return err;
+        err = ledc_timer_config(&pwm_timer_config);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        s_ledc_timer_initialized = true;
     }
 
     // Configure PWM channel

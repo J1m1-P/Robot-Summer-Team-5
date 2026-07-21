@@ -15,19 +15,22 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
         &BL_MOTOR_CONFIG,
         &BR_MOTOR_CONFIG,
     },
+
     .encoder_configs = {
         &FL_ENCODER_CONFIG,
         &FR_ENCODER_CONFIG,
         &BL_ENCODER_CONFIG,
         &BR_ENCODER_CONFIG,
     },
-    .kinematics = {
+
+    .x_drive_kinematics = {
         .wheel_radius_m = 0.035f,
         .chassis_half_length_m = 0.100f,
         .chassis_half_width_m = 0.1365f,
         .wheel_angle_rad = DEG_TO_RAD(30.0f),
     },
-    .wheel_pi = {
+
+    .wheel_controller = {
         .kff = 1.14f,
         .kff_offset = 0.069f,
         .kp = 0.4f,
@@ -41,7 +44,7 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
     .max_duty = 0.8f,
     .max_vx_mps = 1.0f,
     .max_vy_mps = 1.0f,
-    .max_omega_rad_s = 1.0f,
+    .max_omega_rad_s = 2.0f,
     .max_control_dt_s = 0.05f,
     .command_timeout_us = 250000LL,
     .brake_pin = PIN_M_BRK,
