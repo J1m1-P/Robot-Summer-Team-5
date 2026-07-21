@@ -10,10 +10,11 @@ namespace {
 constexpr float kTolerance = 1.0e-4f;
 constexpr float kPi = 3.14159265358979323846f;
 
-MoveSConfig make_config(float distance_tolerance_m = 0.01f) {
+MoveSConfig make_config(float distance_tolerance_m = 0.01f, float max_accel_mps2 = 0.5f) {
     MoveSConfig config = {};
     config.speed_profile.max_jerk_mps3 = 10.0f;
     config.distance_tolerance_m = distance_tolerance_m;
+    config.max_accel_mps2 = max_accel_mps2;
     return config;
 }
 
@@ -32,11 +33,9 @@ esp_err_t move_s_start(
     const DrivetrainPose &start_pose,
     float distance_m,
     float heading_rad,
-    float max_speed_mps,
-    float max_accel_mps2
+    float max_speed_mps
 ) {
-    return ::move_s_start(&move, &config, &start_pose, distance_m, heading_rad,
-                          max_speed_mps, max_accel_mps2);
+    return ::move_s_start(&move, &config, &start_pose, distance_m, heading_rad, max_speed_mps);
 }
 
 esp_err_t move_s_update(
@@ -53,25 +52,30 @@ esp_err_t move_s_update(
 void setUp() {}
 void tearDown() {}
 
-// Confirms a bad config is rejected.
+// Confirms a bad config (either distance tolerance or the acceleration
+// ceiling) is rejected.
 void test_rejects_invalid_config() {
-    MoveSConfig config = make_config();
-    config.distance_tolerance_m = -1.0f;
     MoveS move = {};
+
+    MoveSConfig bad_tolerance = make_config();
+    bad_tolerance.distance_tolerance_m = -1.0f;
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f, 1.0f));
+        move, bad_tolerance, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f));
+
+    MoveSConfig bad_accel = make_config();
+    bad_accel.max_accel_mps2 = 0.0f;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, move_s_start(
+        move, bad_accel, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f));
 }
 
-// Confirms start rejects non-positive distance/speed/accel.
+// Confirms start rejects non-positive distance/speed.
 void test_start_rejects_invalid_parameters() {
     const MoveSConfig config = make_config();
     MoveS move = {};
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, move_s_start(
-        move, config, make_pose(0, 0, 0), 0.0f, 0.0f, 0.3f, 1.0f));
+        move, config, make_pose(0, 0, 0), 0.0f, 0.0f, 0.3f));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.0f, 1.0f));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f, 0.0f));
+        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.0f));
 }
 
 // Confirms update before start reports invalid state.
@@ -87,7 +91,7 @@ void test_zero_heading_drives_along_vx() {
     const MoveSConfig config = make_config();
     MoveS move = {};
     TEST_ASSERT_EQUAL(ESP_OK, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f, 1.0f));
+        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f));
 
     MoveSOutput output = {};
     TEST_ASSERT_EQUAL(ESP_OK, move_s_update(move, make_pose(0, 0, 0), 0.02f, output));
@@ -103,7 +107,7 @@ void test_strafe_heading_drives_along_vy() {
     const MoveSConfig config = make_config();
     MoveS move = {};
     TEST_ASSERT_EQUAL(ESP_OK, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, kPi / 2.0f, 0.3f, 1.0f));
+        move, config, make_pose(0, 0, 0), 1.0f, kPi / 2.0f, 0.3f));
 
     MoveSOutput output = {};
     TEST_ASSERT_EQUAL(ESP_OK, move_s_update(move, make_pose(0, 0, 0), 0.02f, output));
@@ -121,7 +125,7 @@ void test_progress_ignores_current_heading_drift() {
     const MoveSConfig config = make_config();
     MoveS move = {};
     TEST_ASSERT_EQUAL(ESP_OK, move_s_start(
-        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f, 1.0f));
+        move, config, make_pose(0, 0, 0), 1.0f, 0.0f, 0.3f));
 
     MoveSOutput output_no_drift = {};
     MoveSOutput output_with_drift = {};
@@ -142,12 +146,12 @@ void test_progress_ignores_current_heading_drift() {
 // distance of its own -- an accepted trade-off of the simplified ramp, see
 // move_s.h) is already covered by test_speed_profile.
 void test_simulated_run_reaches_target_distance() {
-    MoveSConfig config = make_config(0.005f);
+    MoveSConfig config = make_config(0.005f, 1.0f);
     config.speed_profile.max_jerk_mps3 = 1000.0f;
     MoveS move = {};
     const float distance_m = 1.0f;
     TEST_ASSERT_EQUAL(ESP_OK, move_s_start(
-        move, config, make_pose(0, 0, 0), distance_m, 0.0f, 0.5f, 1.0f));
+        move, config, make_pose(0, 0, 0), distance_m, 0.0f, 0.5f));
 
     DrivetrainPose pose = make_pose(0, 0, 0);
     constexpr float kDt = 0.01f;

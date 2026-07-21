@@ -20,7 +20,8 @@ bool move_s_config_is_valid(const MoveSConfig *config)
     return config != NULL &&
            speed_profile_config_is_valid(&config->speed_profile) &&
            isfinite(config->distance_tolerance_m) &&
-           config->distance_tolerance_m >= 0.0f;
+           config->distance_tolerance_m >= 0.0f &&
+           isfinite(config->max_accel_mps2) && config->max_accel_mps2 > 0.0f;
 }
 
 esp_err_t move_s_start(
@@ -29,15 +30,13 @@ esp_err_t move_s_start(
     const DrivetrainPose *start_pose,
     float distance_m,
     float heading_rad,
-    float max_speed_mps,
-    float max_accel_mps2)
+    float max_speed_mps)
 {
     if (move == NULL || !move_s_config_is_valid(config) ||
         !pose_is_finite(start_pose) ||
         !isfinite(distance_m) || distance_m <= 0.0f ||
         !isfinite(heading_rad) ||
-        !isfinite(max_speed_mps) || max_speed_mps <= 0.0f ||
-        !isfinite(max_accel_mps2) || max_accel_mps2 <= 0.0f) {
+        !isfinite(max_speed_mps) || max_speed_mps <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -51,7 +50,6 @@ esp_err_t move_s_start(
     move->world_direction_x = cosf(world_heading_rad);
     move->world_direction_y = sinf(world_heading_rad);
     move->max_speed_mps = max_speed_mps;
-    move->max_accel_mps2 = max_accel_mps2;
     speed_profile_reset(&move->profile, 0.0f);
     move->status = MOVE_S_RUNNING;
     return ESP_OK;
@@ -87,13 +85,13 @@ esp_err_t move_s_update(
     const bool within_tolerance = remaining_m <= move->config->distance_tolerance_m;
     const float target_speed_mps = within_tolerance
         ? 0.0f
-        : fminf(move->max_speed_mps, sqrtf(fmaxf(0.0f, 2.0f * move->max_accel_mps2 *
+        : fminf(move->max_speed_mps, sqrtf(fmaxf(0.0f, 2.0f * move->config->max_accel_mps2 *
                  (remaining_m - move->config->distance_tolerance_m))));
 
     float commanded_speed_mps = 0.0f;
     const esp_err_t error = speed_profile_update(
         &move->profile, &move->config->speed_profile, target_speed_mps,
-        move->max_accel_mps2, dt_s, &commanded_speed_mps);
+        move->config->max_accel_mps2, dt_s, &commanded_speed_mps);
     if (error != ESP_OK) {
         return error;
     }

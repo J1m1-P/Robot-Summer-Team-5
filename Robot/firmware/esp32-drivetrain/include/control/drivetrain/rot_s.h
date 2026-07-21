@@ -33,6 +33,14 @@ typedef struct {
      * complete and commands zero angular velocity instead of continuing to
      * creep. */
     float angle_tolerance_rad;
+
+    /* Angular acceleration ceiling, shared by every RotS call -- a
+     * traction/hardware limit like MoveS's max_accel_mps2, not something
+     * that varies rotation to rotation, so it lives in config rather than
+     * being passed to rot_s_start() each time. Placeholder default until
+     * §3's dynamic calibration derives a real slip-avoidance ceiling; not
+     * yet calibrated. */
+    float max_alpha_rad_s2;
 } RotSConfig;
 
 // Rejects configurations that could produce undefined or unsafe behavior.
@@ -51,7 +59,6 @@ typedef struct {
     float start_heading_rad;
     float angle_rad;  // signed target rotation; positive = counterclockwise
     float max_omega_rad_s;
-    float max_alpha_rad_s2;
     RotSStatus status;
 } RotS;
 
@@ -69,15 +76,16 @@ typedef struct {
  * rotation. `angle_rad` is the signed rotation to command (positive =
  * counterclockwise, matching DrivetrainBodyVelocity.omega's convention);
  * its sign is the only source of direction, there is no separate heading
- * parameter. Zero-initialize the runtime object before its first call:
+ * parameter. The angular acceleration ceiling comes from
+ * `config->max_alpha_rad_s2`, not a parameter here -- see RotSConfig.
+ * Zero-initialize the runtime object before its first call:
  * RotS rot = {0}; */
 esp_err_t rot_s_start(
     RotS *rot,
     const RotSConfig *config,
     float start_heading_rad,
     float angle_rad,
-    float max_omega_rad_s,
-    float max_alpha_rad_s2);
+    float max_omega_rad_s);
 
 /* Calculates one motion request from the caller-supplied current heading
  * (read from odometry each cycle -- DrivetrainPose.heading_rad accumulates

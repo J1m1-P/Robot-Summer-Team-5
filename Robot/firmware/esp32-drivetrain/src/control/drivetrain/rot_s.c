@@ -14,7 +14,8 @@ bool rot_s_config_is_valid(const RotSConfig *config)
     return config != NULL &&
            speed_profile_config_is_valid(&config->speed_profile) &&
            isfinite(config->angle_tolerance_rad) &&
-           config->angle_tolerance_rad >= 0.0f;
+           config->angle_tolerance_rad >= 0.0f &&
+           isfinite(config->max_alpha_rad_s2) && config->max_alpha_rad_s2 > 0.0f;
 }
 
 esp_err_t rot_s_start(
@@ -22,14 +23,12 @@ esp_err_t rot_s_start(
     const RotSConfig *config,
     float start_heading_rad,
     float angle_rad,
-    float max_omega_rad_s,
-    float max_alpha_rad_s2)
+    float max_omega_rad_s)
 {
     if (rot == NULL || !rot_s_config_is_valid(config) ||
         !isfinite(start_heading_rad) ||
         !isfinite(angle_rad) || angle_rad == 0.0f ||
-        !isfinite(max_omega_rad_s) || max_omega_rad_s <= 0.0f ||
-        !isfinite(max_alpha_rad_s2) || max_alpha_rad_s2 <= 0.0f) {
+        !isfinite(max_omega_rad_s) || max_omega_rad_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -38,7 +37,6 @@ esp_err_t rot_s_start(
     rot->start_heading_rad = start_heading_rad;
     rot->angle_rad = angle_rad;
     rot->max_omega_rad_s = max_omega_rad_s;
-    rot->max_alpha_rad_s2 = max_alpha_rad_s2;
     speed_profile_reset(&rot->profile, 0.0f);
     rot->status = ROT_S_RUNNING;
     return ESP_OK;
@@ -73,13 +71,13 @@ esp_err_t rot_s_update(
     const bool within_tolerance = fabsf(remaining_rad) <= rot->config->angle_tolerance_rad;
     const float target_omega_rad_s = within_tolerance
         ? 0.0f
-        : direction * fminf(rot->max_omega_rad_s, sqrtf(fmaxf(0.0f, 2.0f * rot->max_alpha_rad_s2 *
+        : direction * fminf(rot->max_omega_rad_s, sqrtf(fmaxf(0.0f, 2.0f * rot->config->max_alpha_rad_s2 *
                  (fabsf(remaining_rad) - rot->config->angle_tolerance_rad))));
 
     float commanded_omega_rad_s = 0.0f;
     const esp_err_t error = speed_profile_update(
         &rot->profile, &rot->config->speed_profile, target_omega_rad_s,
-        rot->max_alpha_rad_s2, dt_s, &commanded_omega_rad_s);
+        rot->config->max_alpha_rad_s2, dt_s, &commanded_omega_rad_s);
     if (error != ESP_OK) {
         return error;
     }

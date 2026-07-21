@@ -10,10 +10,11 @@ namespace {
 constexpr float kTolerance = 1.0e-4f;
 constexpr float kPi = 3.14159265358979323846f;
 
-RotSConfig make_config(float angle_tolerance_rad = 0.02f) {
+RotSConfig make_config(float angle_tolerance_rad = 0.02f, float max_alpha_rad_s2 = 1.5f) {
     RotSConfig config = {};
     config.speed_profile.max_jerk_mps3 = 10.0f;
     config.angle_tolerance_rad = angle_tolerance_rad;
+    config.max_alpha_rad_s2 = max_alpha_rad_s2;
     return config;
 }
 
@@ -23,11 +24,9 @@ esp_err_t rot_s_start(
     const RotSConfig &config,
     float start_heading_rad,
     float angle_rad,
-    float max_omega_rad_s,
-    float max_alpha_rad_s2
+    float max_omega_rad_s
 ) {
-    return ::rot_s_start(&rot, &config, start_heading_rad, angle_rad,
-                         max_omega_rad_s, max_alpha_rad_s2);
+    return ::rot_s_start(&rot, &config, start_heading_rad, angle_rad, max_omega_rad_s);
 }
 
 esp_err_t rot_s_update(
@@ -44,25 +43,30 @@ esp_err_t rot_s_update(
 void setUp() {}
 void tearDown() {}
 
-// Confirms a bad config is rejected.
+// Confirms a bad config (either angle tolerance or the angular acceleration
+// ceiling) is rejected.
 void test_rejects_invalid_config() {
-    RotSConfig config = make_config();
-    config.angle_tolerance_rad = -1.0f;
     RotS rot = {};
+
+    RotSConfig bad_tolerance = make_config();
+    bad_tolerance.angle_tolerance_rad = -1.0f;
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rot_s_start(
-        rot, config, 0.0f, kPi / 2.0f, 1.0f, 2.0f));
+        rot, bad_tolerance, 0.0f, kPi / 2.0f, 1.0f));
+
+    RotSConfig bad_alpha = make_config();
+    bad_alpha.max_alpha_rad_s2 = 0.0f;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rot_s_start(
+        rot, bad_alpha, 0.0f, kPi / 2.0f, 1.0f));
 }
 
-// Confirms start rejects a zero angle and non-positive omega/alpha.
+// Confirms start rejects a zero angle and non-positive omega.
 void test_start_rejects_invalid_parameters() {
     const RotSConfig config = make_config();
     RotS rot = {};
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rot_s_start(
-        rot, config, 0.0f, 0.0f, 1.0f, 2.0f));
+        rot, config, 0.0f, 0.0f, 1.0f));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rot_s_start(
-        rot, config, 0.0f, kPi / 2.0f, 0.0f, 2.0f));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rot_s_start(
-        rot, config, 0.0f, kPi / 2.0f, 1.0f, 0.0f));
+        rot, config, 0.0f, kPi / 2.0f, 0.0f));
 }
 
 // Confirms update before start reports invalid state.
@@ -76,7 +80,7 @@ void test_update_before_start_is_invalid_state() {
 void test_positive_angle_commands_positive_omega() {
     const RotSConfig config = make_config();
     RotS rot = {};
-    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, kPi / 2.0f, 1.0f, 2.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, kPi / 2.0f, 1.0f));
 
     RotSOutput output = {};
     TEST_ASSERT_EQUAL(ESP_OK, rot_s_update(rot, 0.0f, 0.02f, output));
@@ -91,7 +95,7 @@ void test_positive_angle_commands_positive_omega() {
 void test_negative_angle_commands_negative_omega() {
     const RotSConfig config = make_config();
     RotS rot = {};
-    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, -kPi / 2.0f, 1.0f, 2.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, -kPi / 2.0f, 1.0f));
 
     RotSOutput output = {};
     TEST_ASSERT_EQUAL(ESP_OK, rot_s_update(rot, 0.0f, 0.02f, output));
@@ -108,7 +112,7 @@ void test_progress_handles_unwrapped_heading_past_pi() {
     // Start near pi and command a further rotation past it -- the
     // continuously-accumulating heading convention means this is just
     // "3.0 -> 3.3", not a wrap to -pi.
-    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 3.0f, 0.3f, 1.0f, 2.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 3.0f, 0.3f, 1.0f));
 
     RotSOutput output = {};
     TEST_ASSERT_EQUAL(ESP_OK, rot_s_update(rot, 3.1f, 0.02f, output));
@@ -123,11 +127,11 @@ void test_progress_handles_unwrapped_heading_past_pi() {
 // progress-tracking/stopping-distance/completion logic, mirroring
 // test_move_s's equivalent simulated-run test.
 void test_simulated_run_reaches_target_angle() {
-    RotSConfig config = make_config(0.01f);
+    RotSConfig config = make_config(0.01f, 2.0f);
     config.speed_profile.max_jerk_mps3 = 1000.0f;
     RotS rot = {};
     const float angle_rad = kPi / 2.0f;
-    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, angle_rad, 1.0f, 2.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, angle_rad, 1.0f));
 
     float heading_rad = 0.0f;
     constexpr float kDt = 0.01f;
@@ -148,11 +152,11 @@ void test_simulated_run_reaches_target_angle() {
 
 // Confirms a full simulated run also converges for a negative (CW) target.
 void test_simulated_run_reaches_negative_target_angle() {
-    RotSConfig config = make_config(0.01f);
+    RotSConfig config = make_config(0.01f, 2.0f);
     config.speed_profile.max_jerk_mps3 = 1000.0f;
     RotS rot = {};
     const float angle_rad = -kPi / 3.0f;
-    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, angle_rad, 1.0f, 2.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, 0.0f, angle_rad, 1.0f));
 
     float heading_rad = 0.0f;
     constexpr float kDt = 0.01f;

@@ -146,40 +146,50 @@ in style if this roadmap's modules get similar documentation later.
 
 ## 2. Motion API layer
 
-Five motion primitives, all taking `speed`/`omega` and `max_accel`/`max_alpha` parameters:
+Five motion primitives, all taking `speed`/`omega` parameters; `max_accel`/
+`max_alpha` are **config-level defaults, not per-call parameters** (see the
+`MoveS`/`RotS` bullets below) — a traction/hardware ceiling that doesn't vary
+call to call, same reasoning §4 already applied to `max_jerk`.
 
 | API | Behavior | Feedback | Params |
 |---|---|---|---|
-| **MoveS** ("simple") | Open-loop-ish move relying solely on the existing wheel-velocity PI (no outer position/heading correction) | Wheel velocity PI only | distance, heading, speed, max accel |
-| **RotS** ("rotate simple") | `MoveS`'s in-place-rotation counterpart, added to give §3's `F_ang` calibration trials a real primitive instead of the ad hoc harness `turn-angle` command. Open-loop, relies solely on the wheel-velocity PI | Wheel velocity PI only | angle (signed), max omega, max angular accel |
-| **MoveL** ("linear") | Straight-line move with outer PID correction to stay on the commanded vector | Off-tape PID (§1) | distance, heading, speed, max accel |
-| **MoveP** ("point") | Move to a point and finish at a specific ending heading; may need a path-planning helper to blend translation and final rotation | Off-tape PID (§1) + path planning | distance, heading, end heading, speed, max accel |
-| **MoveC** ("circular") | Move along a circular arc (turns, smooth curves) — coordinated `vx` + `omega` tracking a defined radius, not a straight segment or a single end-orientation target | Off-tape PID (§1) | radius, arc angle (or start/end heading), speed, max accel |
+| **MoveS** ("simple") | Open-loop-ish move relying solely on the existing wheel-velocity PI (no outer position/heading correction) | Wheel velocity PI only | distance, heading, speed |
+| **RotS** ("rotate simple") | `MoveS`'s in-place-rotation counterpart, added to give §3's `F_ang` calibration trials a real primitive instead of the ad hoc harness `turn-angle` command. Open-loop, relies solely on the wheel-velocity PI | Wheel velocity PI only | angle (signed), max omega |
+| **MoveL** ("linear") | Straight-line move with outer PID correction to stay on the commanded vector | Off-tape PID (§1) | distance, heading, speed |
+| **MoveP** ("point") | Move to a point and finish at a specific ending heading; may need a path-planning helper to blend translation and final rotation | Off-tape PID (§1) + path planning | distance, heading, end heading, speed |
+| **MoveC** ("circular") | Move along a circular arc (turns, smooth curves) — coordinated `vx` + `omega` tracking a defined radius, not a straight segment or a single end-orientation target | Off-tape PID (§1) | radius, arc angle (or start/end heading), speed |
 
-- [x] Implement `MoveS`. `move_s.c`/`.h` — takes `{distance, heading, speed,
-      max_accel}`, drives purely open-loop (no outer PID; `off_tape_motion` is
-      never called), using `speed_profile.c` for jerk-bounded accel/decel and a
+- [x] Implement `MoveS`. `move_s.c`/`.h` — takes `{distance, heading, speed}`,
+      drives purely open-loop (no outer PID; `off_tape_motion` is never
+      called), using `speed_profile.c` for jerk-bounded accel/decel and a
       stopping-distance target (`sqrt(2*max_accel*remaining)`) to come to a
-      smooth stop at `distance`. The drivetrain facade's own `drivetrain_update()`
-      still does body→wheel kinematics and the wheel-velocity PI — `MoveS` only
-      produces a `DrivetrainBodyVelocity` for the caller to apply via
-      `drivetrain_set_body_velocity()`, same output contract as `tape_follower`.
-      Progress is tracked against a world-frame direction captured once at
-      `move_s_start()`, from a caller-supplied `DrivetrainPose` (i.e.
-      `drivetrain_odometry_source`, §1) each cycle — deliberately not
-      re-derived from the live heading each cycle, so heading drift isn't
-      silently absorbed instead of measured. `F_lon`/`F_lat`/`F_ang` are not
-      threaded in yet (see §3 — `move_calibration.c` doesn't exist, and `F_lat`
-      needs a per-wheel hook the drivetrain facade doesn't currently expose).
-      Unit-tested in `test/test_move_s/`, including a full simulated run to
-      completion. **Not yet exercised on hardware or from any harness.**
-- [x] Implement `RotS`. `rot_s.c`/`.h` — takes `{angle_rad (signed), max_omega,
-      max_alpha}`; mirrors `MoveS` exactly (progress tracked against a heading
-      captured once at `rot_s_start()`, jerk-bounded stopping-distance target,
-      no outer PID) but for rotation instead of translation. Directly reuses
-      `speed_profile.c` for the angular ramp — that module's math is
-      unit-agnostic, so no new ramp code was needed. `angle_rad`'s sign is the
-      only direction input (positive = counterclockwise, matching
+      smooth stop at `distance`. `max_accel_mps2` lives in `MoveSConfig`
+      (currently `0.5f`, matching the value `drivetrain_test_main.cpp`'s own
+      ramping already uses — a placeholder, not yet calibrated) rather than
+      being a `move_s_start()` parameter: it's a traction ceiling shared by
+      every call, not something that varies move to move. The drivetrain
+      facade's own `drivetrain_update()` still does body→wheel kinematics and
+      the wheel-velocity PI — `MoveS` only produces a `DrivetrainBodyVelocity`
+      for the caller to apply via `drivetrain_set_body_velocity()`, same
+      output contract as `tape_follower`. Progress is tracked against a
+      world-frame direction captured once at `move_s_start()`, from a
+      caller-supplied `DrivetrainPose` (i.e. `drivetrain_odometry_source`,
+      §1) each cycle — deliberately not re-derived from the live heading each
+      cycle, so heading drift isn't silently absorbed instead of measured.
+      `F_lon`/`F_lat`/`F_ang` are not threaded in yet (see §3 —
+      `move_calibration.c` doesn't exist, and `F_lat` needs a per-wheel hook
+      the drivetrain facade doesn't currently expose). Unit-tested in
+      `test/test_move_s/`, including a full simulated run to completion.
+      **Not yet exercised on hardware or from any harness.**
+- [x] Implement `RotS`. `rot_s.c`/`.h` — takes `{angle_rad (signed),
+      max_omega}`; mirrors `MoveS` exactly (progress tracked against a
+      heading captured once at `rot_s_start()`, jerk-bounded stopping-distance
+      target, no outer PID, `max_alpha_rad_s2` in `RotSConfig` rather than a
+      parameter — currently `1.5f`, matching `TAPE_FOLLOWER_CONFIG`'s heading
+      config, also a placeholder) but for rotation instead of translation.
+      Directly reuses `speed_profile.c` for the angular ramp — that module's
+      math is unit-agnostic, so no new ramp code was needed. `angle_rad`'s
+      sign is the only direction input (positive = counterclockwise, matching
       `DrivetrainBodyVelocity.omega`'s convention) — there's no separate
       heading parameter the way `MoveS` has one, since a signed scalar is a
       complete description of "how far to turn." Progress uses a plain
@@ -250,12 +260,15 @@ recipe rather than just ad-hoc gain tweaking.
       value lives (per-call parameter vs. fixed config). Decided: config default
       (`SpeedProfileConfig.max_jerk_mps3`); no per-call override yet since no
       caller (§2) exists to need one — add one when a motion primitive does.
-- [ ] This is a dependency of §2 — the motion APIs should call into the S-curve
-      profile generator rather than commanding raw step targets. Not yet true:
-      `speed_profile.c` is built and tested but unused, since `MoveS`/`MoveL`/
-      `MoveP`/`MoveC` don't exist yet.
+- [x] This is a dependency of §2 — the motion APIs should call into the S-curve
+      profile generator rather than commanding raw step targets. `MoveS` and
+      `RotS` (§2) now both call `speed_profile_update()` directly.
+      `MoveL`/`MoveP`/`MoveC` still don't exist.
 - [ ] `max_accel` defaults should respect the slip-avoidance ceiling derived in §3's
-      dynamic calibration.
+      dynamic calibration. `MoveSConfig.max_accel_mps2` / `RotSConfig.max_alpha_rad_s2`
+      exist now (as config defaults, not per-call params — see §2), currently set to
+      placeholder values (`0.5f` / `1.5f`, borrowed from existing harness/tape-following
+      defaults), not yet the real calibrated ceiling this bullet is about.
 
 ## 5. Pre-lock-in tuning harness + webpage
 

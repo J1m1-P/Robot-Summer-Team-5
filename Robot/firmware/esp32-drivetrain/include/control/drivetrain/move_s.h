@@ -32,6 +32,14 @@ typedef struct {
     /* Once the remaining distance is within this, the move reports complete
      * and commands zero velocity instead of continuing to creep forward. */
     float distance_tolerance_m;
+
+    /* Acceleration ceiling, shared by every MoveS call -- this is a
+     * traction/hardware limit (how hard the wheels can accelerate before
+     * slipping), not something that varies move to move the way max_speed
+     * does, so it lives in config rather than being passed to move_s_start()
+     * each time. Placeholder default until §3's dynamic calibration derives
+     * a real slip-avoidance ceiling; not yet calibrated. */
+    float max_accel_mps2;
 } MoveSConfig;
 
 // Rejects configurations that could produce undefined or unsafe behavior.
@@ -54,7 +62,6 @@ typedef struct {
     float body_direction_x;   // unit vector, body frame (constant: no rotation)
     float body_direction_y;
     float max_speed_mps;
-    float max_accel_mps2;
     MoveSStatus status;
 } MoveS;
 
@@ -71,16 +78,17 @@ typedef struct {
  * point progress is measured from, and prepares a running move. `heading_rad`
  * is the direction of travel in the robot's body frame (0 = forward,
  * positive = toward +vy/strafe-right), not a target orientation -- MoveS
- * never commands rotation. Zero-initialize the runtime object before its
- * first call: MoveS move = {0}; */
+ * never commands rotation. The acceleration ceiling comes from
+ * `config->max_accel_mps2`, not a parameter here -- see MoveSConfig.
+ * Zero-initialize the runtime object before its first call:
+ * MoveS move = {0}; */
 esp_err_t move_s_start(
     MoveS *move,
     const MoveSConfig *config,
     const DrivetrainPose *start_pose,
     float distance_m,
     float heading_rad,
-    float max_speed_mps,
-    float max_accel_mps2);
+    float max_speed_mps);
 
 /* Calculates one motion request from the caller-supplied current pose
  * (read from odometry each cycle). This function never commands the
