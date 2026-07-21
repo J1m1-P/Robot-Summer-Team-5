@@ -36,5 +36,5 @@
 #define PIN_TOP_ESP32_UART_TX   48  // Pin for UART transmit to top ESP32
 
 // Time of Flight (ToF) Sensor Pins
-#define PIN_TOF1_XSHUT          21  // Pin for left ToF XSHUT (address changed to 0x30)
-#define PIN_TOF2_XSHUT          40  // Pin for middle ToF XSHUT (address changed to 0x31)
+#define PIN_TOF_LEFT_XSHUT      21  // Left VL53L0X XSHUT.
+#define PIN_TOF_CENTER_LPN      40  // Center VL53L5CX LPn.
