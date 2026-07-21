@@ -242,7 +242,7 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
       <label>Max strafe (m/s)<input id="tapeMaxSpeed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
       <label>Travel speed (m/s)<input id="tapeTravelSpeed" type="number" min="0.01" max="1" step="0.01" value="0.15"></label>
       <label>Polarity<select id="tapePolarity"><option value="1">Normal (+1)</option><option value="-1">Reversed (−1)</option></select></label>
-      <label>Duration (ms)<input id="tapeDuration" type="number" min="1" max="10000" step="100" value="3000"></label>
+      <label>Duration (ms)<input id="tapeDuration" type="number" min="1" max="60000" step="100" value="3000"></label>
     </div>
     <div class="row" style="margin-top:10px">
       <button id="tapeCenter" class="primary">⊕ Center to 0110</button>
@@ -267,8 +267,8 @@ body[data-page="control"] [data-page="tuning"],body[data-page="tuning"] [data-pa
       <label>Heading gain (/s)<span class="piw"><input id="tape-heading" type="number" min="0" step="0.1" value="2.0"><button data-tape-pi="heading">Set</button></span></label>
       <label>Max turn (rad/s)<span class="piw"><input id="tape-max-omega" type="number" min="0" max="1" step="0.05" value="0.80"><button data-tape-pi="max-omega">Set</button></span></label>
       <label>Turn accel (rad/s²)<span class="piw"><input id="tape-angular-accel" type="number" min="0.01" step="0.1" value="1.50"><button data-tape-pi="angular-accel">Set</button></span></label>
-      <label>Search speed (m/s)<span class="piw"><input id="tape-search-speed" type="number" min="0" max="1" step="0.01" value="0.15"><button data-tape-pi="search-speed">Set</button></span></label>
-      <label>Lost timeout (s)<span class="piw"><input id="tape-lost-timeout" type="number" min="0" step="0.05" value="0.50"><button data-tape-pi="lost-timeout">Set</button></span></label>
+      <label>Search turn (rad/s)<span class="piw"><input id="tape-search-omega" type="number" min="0" max="1" step="0.05" value="0.40"><button data-tape-pi="search-omega">Set</button></span></label>
+      <label>Lost timeout (s)<span class="piw"><input id="tape-lost-timeout" type="number" min="0" step="0.05" value="4.00"><button data-tape-pi="lost-timeout">Set</button></span></label>
     </div>
     <p class="note">Tune lateral correction first at low speed, then heading gain, max turn rate, and turn acceleration. Copy confirmed values into tape_following_config.c to persist.</p>
   </section>
@@ -354,8 +354,8 @@ $("#turnAngle").onclick=()=>safe(s=>`turn-angle ${$("#angleDirection").value} ${
 $("#applyRamp").onclick=()=>checked(()=>`ramp ${number("accel",.01,10)} ${number("decel",.01,10)}`);
 $("#applyAccuracy").onclick=()=>checked(()=>{const d=number("distanceTolerance",.001,.5),a=number("angleTolerance",.1,45);send(`distance-tolerance ${d}`);return`angle-tolerance ${a}`});
 $("#applyTiming").onclick=()=>checked(()=>{const t=Math.round(number("timeout",100,60000)),p=Math.round(number("telemetry",20,5000));send(`timeout ${t}`);return`telemetry ${p}`});
-$("#tapeCenter").onclick=()=>checked(()=>{const sensor=$("#tapeSensor").value,speed=number("tapeMaxSpeed",.01,1),duration=Math.round(number("tapeDuration",1,10000)),polarity=$("#tapePolarity").value;return`tape-center ${sensor} ${speed} ${duration} ${polarity}`});
-function followTape(direction){checked(()=>{const sensor=direction==="forward"?"front":"back",travel=number("tapeTravelSpeed",.01,1),strafe=number("tapeMaxSpeed",.01,1),duration=Math.round(number("tapeDuration",1,10000)),polarity=$("#tapePolarity").value;$("#tapeSensor").value=sensor;drawTape();return`tape-follow ${sensor} ${travel} ${strafe} ${duration} ${polarity}`})}
+$("#tapeCenter").onclick=()=>checked(()=>{const sensor=$("#tapeSensor").value,speed=number("tapeMaxSpeed",.01,1),duration=Math.round(number("tapeDuration",1,60000)),polarity=$("#tapePolarity").value;return`tape-center ${sensor} ${speed} ${duration} ${polarity}`});
+function followTape(direction){checked(()=>{const sensor=direction==="forward"?"front":"back",travel=number("tapeTravelSpeed",.01,1),strafe=number("tapeMaxSpeed",.01,1),duration=Math.round(number("tapeDuration",1,60000)),polarity=$("#tapePolarity").value;$("#tapeSensor").value=sensor;drawTape();return`tape-follow ${sensor} ${travel} ${strafe} ${duration} ${polarity}`})}
 $("#tapeFollowForward").onclick=()=>followTape("forward");
 $("#tapeFollowBackward").onclick=()=>followTape("backward");
 $("#tapeSensor").onchange=drawTape;

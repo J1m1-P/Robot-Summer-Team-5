@@ -44,7 +44,7 @@ static TapeFollowerConfig make_follower_config(
     config.heading.gain_s_inv = 2.0f;
     config.heading.max_omega_rad_s = 0.8f;
     config.heading.max_acceleration_rad_s2 = 1.5f;
-    config.search.velocity_mps = 0.15f;
+    config.search.angular_velocity_rad_s = 0.4f;
     config.search.timeout_s = 0.5f;
     config.controller_dt_max_s = 0.05f;
     return config;
@@ -206,13 +206,72 @@ static void test_follower_searches_then_reports_lost()
         &follower, &input, 0.1f, &output));
     TEST_ASSERT_EQUAL(TAPE_FOLLOWER_SEARCHING, output.status);
     TEST_ASSERT_TRUE(output.motion_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vx);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vy);
     TEST_ASSERT_FLOAT_WITHIN(
-        0.0001f, 0.15f, output.requested_velocity.vy);
+        0.0001f, -0.4f, output.requested_velocity.omega);
 
     TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
         &follower, &input, 0.4f, &output));
     TEST_ASSERT_EQUAL(TAPE_FOLLOWER_LOST, output.status);
     TEST_ASSERT_FALSE(output.motion_valid);
+}
+
+static void test_follower_search_preserves_reversed_front_last_side()
+{
+    TapeLineEstimatorConfig front_config = {{3.0f, 1.0f, -1.0f, -3.0f}};
+    TapeLineEstimatorConfig back_config = make_estimator_config();
+    TapeFollowerConfig config = make_follower_config(
+        &front_config, &back_config);
+    TapeFollower follower = {};
+    /* On the reversed front module, channel 3 is the physical left edge. */
+    TapeSensor front = make_sensor(false, false, false, true);
+    TapeSensor back = {};
+    TapeFollowerInput input = {{&front, &back}, 0.4f};
+    TapeFollowerOutput output = {};
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.01f, &output));
+    TEST_ASSERT_EQUAL(TAPE_FOLLOWER_TRACKING, output.status);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -3.0f, output.line_error);
+
+    front = {};
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.1f, &output));
+    TEST_ASSERT_EQUAL(TAPE_FOLLOWER_SEARCHING, output.status);
+    TEST_ASSERT_TRUE(output.motion_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vx);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vy);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, 0.4f, output.requested_velocity.omega);
+}
+
+static void test_follower_search_mirrors_turn_for_reverse_travel()
+{
+    TapeLineEstimatorConfig front_config = make_estimator_config();
+    TapeLineEstimatorConfig back_config = make_estimator_config();
+    TapeFollowerConfig config = make_follower_config(
+        &front_config, &back_config);
+    TapeFollower follower = {};
+    TapeSensor front = {};
+    TapeSensor back = make_sensor(false, false, true, false);
+    TapeFollowerInput input = {{&front, &back}, -0.4f};
+    TapeFollowerOutput output = {};
+
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_init(&follower, &config));
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.01f, &output));
+
+    back = {};
+    TEST_ASSERT_EQUAL(ESP_OK, tape_follower_update(
+        &follower, &input, 0.1f, &output));
+    TEST_ASSERT_EQUAL(TAPE_FOLLOWER_SEARCHING, output.status);
+    TEST_ASSERT_TRUE(output.motion_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vx);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, output.requested_velocity.vy);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, 0.4f, output.requested_velocity.omega);
 }
 
 static void test_task_detector_debounces_start_and_end()
@@ -254,6 +313,8 @@ int main(int, char **)
     RUN_TEST(test_follower_outputs_drivetrain_body_velocity);
     RUN_TEST(test_follower_turns_back_sensor_toward_travel);
     RUN_TEST(test_follower_searches_then_reports_lost);
+    RUN_TEST(test_follower_search_preserves_reversed_front_last_side);
+    RUN_TEST(test_follower_search_mirrors_turn_for_reverse_travel);
     RUN_TEST(test_task_detector_debounces_start_and_end);
     return UNITY_END();
 }
