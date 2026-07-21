@@ -38,7 +38,15 @@ typedef struct {
 
     uint32_t timing_budget_us;
     uint32_t timeout_ms;
+    uint32_t stale_after_ms;
 } VL53L0XConfig;
+
+typedef struct {
+    uint16_t distance_mm;
+    uint8_t range_status;
+    int64_t timestamp_us;
+    bool valid;
+} VL53L0XSample;
 
 typedef struct {
     const VL53L0XConfig *config;
@@ -61,7 +69,9 @@ esp_err_t vl53l0x_deinit(VL53L0X *sensor);
 esp_err_t vl53l0x_start_continuous(VL53L0X *sensor);
 esp_err_t vl53l0x_stop(VL53L0X *sensor);
 esp_err_t vl53l0x_read_distance(VL53L0X *sensor, uint16_t *distance_mm);
+esp_err_t vl53l0x_read_sample(VL53L0X *sensor, VL53L0XSample *sample);
 bool vl53l0x_is_measurement_valid(const VL53L0X *sensor);
+bool vl53l0x_is_measurement_fresh(const VL53L0X *sensor);
 uint16_t vl53l0x_get_last_distance_mm(const VL53L0X *sensor);
 
 #ifdef __cplusplus
