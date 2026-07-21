@@ -1,9 +1,10 @@
+/* Single-zone VL53L0X configuration, state, and driver API. */
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "driver/gpio.h"
+#include "drivers/time_of_flight/tof_device.h"
 #include "esp_err.h"
 #include <robot_common/i2c_bus.h>
 #include <vl53l0x_api.h>
@@ -13,13 +14,6 @@ extern "C" {
 #endif
 
 typedef enum {
-    VL53L0X_SENSOR_LEFT = 0,
-    VL53L0X_SENSOR_MID,
-    VL53L0X_SENSOR_RIGHT,
-    VL53L0X_SENSOR_COUNT
-} VL53L0XSensorId;
-
-typedef enum {
     VL53L0X_PROFILE_DEFAULT = 0,
     VL53L0X_PROFILE_HIGH_SPEED,
     VL53L0X_PROFILE_HIGH_ACCURACY,
@@ -27,17 +21,10 @@ typedef enum {
 } VL53L0XProfile;
 
 typedef struct {
-    VL53L0XSensorId id;
+    TofDeviceConfig device;
     VL53L0XProfile profile;
-
-    uint8_t default_i2c_address;
-    uint8_t target_i2c_address;
-
-    gpio_num_t xshut_pin;
-    gpio_num_t intr_pin;
-
-    uint32_t timing_budget_us;
-    uint32_t timeout_ms;
+    uint32_t timing_budget_us;  // Zero selects the profile default.
+    uint32_t stop_timeout_ms;
     uint32_t stale_after_ms;
 } VL53L0XConfig;
 
@@ -50,29 +37,26 @@ typedef struct {
 
 typedef struct {
     const VL53L0XConfig *config;
-    I2cBus *bus;
-    I2cDevice device;
+    I2cDevice i2c_device;
     VL53L0X_Dev_t vendor_device;
-
-    uint16_t last_distance_mm;
-    uint8_t last_range_status;
-    int64_t last_update_us;
-
+    VL53L0XSample sample;
     bool initialized;
     bool ranging;
-    bool measurement_valid;
+    bool has_data;
 } VL53L0X;
 
-esp_err_t vl53l0x_init(VL53L0X *sensor, I2cBus *bus,
-                       const VL53L0XConfig *config);
-esp_err_t vl53l0x_deinit(VL53L0X *sensor);
-esp_err_t vl53l0x_start_continuous(VL53L0X *sensor);
-esp_err_t vl53l0x_stop(VL53L0X *sensor);
-esp_err_t vl53l0x_read_distance(VL53L0X *sensor, uint16_t *distance_mm);
-esp_err_t vl53l0x_read_sample(VL53L0X *sensor, VL53L0XSample *sample);
-bool vl53l0x_is_measurement_valid(const VL53L0X *sensor);
-bool vl53l0x_is_measurement_fresh(const VL53L0X *sensor);
-uint16_t vl53l0x_get_last_distance_mm(const VL53L0X *sensor);
+/* Initializes, calibrates, and assigns the configured runtime address. */
+esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
+                              const VL53L0XConfig *config);
+/* Stops, restores the boot state where possible, and clears runtime state. */
+esp_err_t vl53l0x_driver_deinit(VL53L0X *sensor);
+esp_err_t vl53l0x_driver_start(VL53L0X *sensor);
+esp_err_t vl53l0x_driver_stop(VL53L0X *sensor);
+/* Caches one ready sample, or returns ESP_ERR_NOT_FINISHED. */
+esp_err_t vl53l0x_driver_read(VL53L0X *sensor);
+/* Returns the cached sample while fresh; inspect sample.valid for range status. */
+esp_err_t vl53l0x_driver_get_sample(const VL53L0X *sensor,
+                                    VL53L0XSample *sample);
 
 #ifdef __cplusplus
 }
