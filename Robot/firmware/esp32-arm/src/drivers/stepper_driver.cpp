@@ -26,11 +26,7 @@ static void stepper_stop_internal(StepperDriver *driver) {
     digitalWrite(driver->config.stepPin, LOW);
 }
 
-bool stepper_init(StepperDriver *driver, StepperConfig config) {
-    if (driver == nullptr) {
-        return false;
-    }
-
+static bool stepper_is_valid_config(StepperConfig config) {
     if (config.stepPin <= 0 || config.dirPin <= 0 || config.stepPin == config.dirPin) {
         return false;
     }
@@ -41,6 +37,14 @@ bool stepper_init(StepperDriver *driver, StepperConfig config) {
 
     if (config.axis != X && config.axis != Z) {
         return false;
+    }
+
+    return true;
+}
+
+esp_err_t stepper_init(StepperDriver *driver, StepperConfig config) {
+    if (!stepper_is_valid_config(config)) {
+        return ESP_ERR_INVALID_ARG;
     }
 
     driver->config = config;
@@ -57,7 +61,7 @@ bool stepper_init(StepperDriver *driver, StepperConfig config) {
     digitalWrite(driver->config.stepPin, LOW);
     digitalWrite(driver->config.dirPin, LOW);
 
-    return true;
+    return ESP_OK;
 }
 
 void stepper_move_steps(StepperDriver *driver, long steps) {

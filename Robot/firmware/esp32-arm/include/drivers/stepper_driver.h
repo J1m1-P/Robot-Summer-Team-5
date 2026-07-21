@@ -18,8 +18,8 @@ typedef struct {
 } StepperDriver;
 
 // Initialize the stepper driver with the given configuration.
-// Returns true on success and false when the driver or configuration is invalid.
-bool stepper_init(StepperDriver *driver, StepperConfig config);
+// Returns ESP_OK on success and ESP_ERR_INVALID_ARG when the driver or configuration is invalid.
+esp_err_t stepper_init(StepperDriver *driver, StepperConfig config);
 
 // Starts a signed step movement asynchronously.
 // Use stepper_update() from loop() to advance motion.
