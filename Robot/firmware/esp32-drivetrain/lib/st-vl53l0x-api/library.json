@@ -1,0 +1,21 @@
+{
+  "name": "st-vl53l0x-api",
+  "version": "1.0.1-adafruit.1.2.5",
+  "description": "ST VL53L0X API core with a robot-common I2C platform port",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adafruit/Adafruit_VL53L0X.git",
+    "commit": "99a130ca7c7ee930fa428244dbe16d84703e4756"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": "vl53l0x_api.h",
+  "build": {
+    "srcDir": "src",
+    "srcFilter": [
+      "+<core/src/*.cpp>",
+      "+<vl53l0x_platform.cpp>"
+    ]
+  }
+}

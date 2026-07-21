@@ -1,5 +1,3 @@
-#pragma once 
-
 #include "config/pin_map.h"
 #include "config/time_of_flight/vl53l0x_config.h"
 
