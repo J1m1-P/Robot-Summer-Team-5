@@ -1,0 +1,207 @@
+"""
+uart_link.py — Python (detector) end of the ESP32 packet link
+================================================================================
+Mirrors the wire format in your teammate's robot_common/uart_link.c so the ESP32
+accepts packets we send, and so we can decode packets it sends back. The detector
+sends COMMANDs; the ESP sends telemetry (ODOMETRY / STATUS).
+
+TWO LAYERS:
+  1. OUTER FRAME — fully defined by the C files, so this code is exact:
+        [0xAA][0x55][VERSION=0x01][TYPE][LEN][PAYLOAD...][CHECKSUM]
+        CHECKSUM = XOR(version, type, len, every payload byte)   (magic excluded)
+  2. COMMAND / STATUS PAYLOAD — defined by robot_common/command_packet.h and
+     robot_common/status_packet.h. The CMD_*/STATUS_* values and the ×100 value
+     scaling below are a Python mirror of those headers, not an independent
+     spec — if you change one side, change both.
+"""
+
+import struct
+
+
+# ─────────────────────────────────────────────
+# OUTER FRAME — verified against uart_link.c / packet_protocol.h. Safe to trust.
+# ─────────────────────────────────────────────
+MAGIC   = bytes([0xAA, 0x55])
+VERSION = 0x01
+
+# PacketMessageType, from packet_protocol.h
+PACKET_TYPE_INVALID  = 0
+PACKET_TYPE_ODOMETRY = 1
+PACKET_TYPE_COMMAND  = 2
+PACKET_TYPE_STATUS   = 3
+PACKET_TYPE_MAX      = 4
+
+PACKET_MAX_PAYLOAD_SIZE = 64
+
+
+def encode_frame(msg_type, payload=b""):
+    """
+    Wrap a payload in the outer frame the ESP parser expects. The checksum XORs
+    version, type, len, and the payload bytes — exactly calculate_checksum() in
+    uart_link.c (the two magic bytes are excluded).
+    """
+    if len(payload) > PACKET_MAX_PAYLOAD_SIZE:
+        raise ValueError("payload too big for one packet")
+    body = bytes([VERSION, msg_type, len(payload)]) + payload
+    checksum = 0
+    for b in body:
+        checksum ^= b
+    return MAGIC + body + bytes([checksum])
+
+
+# ─────────────────────────────────────────────
+# COMMAND PAYLOAD — mirrors robot_common/command_packet.h's CommandOpcode.
+# ─────────────────────────────────────────────
+CMD_STOP   = 0
+CMD_TURN   = 1   # value = steering error (-1..+1), used only during ALIGN
+CMD_SCAN   = 2   # start the initial scan sweep (angle TBD; value unused)
+CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
+CMD_FLASH  = 4
+CMD_DONE   = 5
+CMD_RESUME = 6   # continue an interrupted sweep/drive routine (reactive detector)
+
+# ─────────────────────────────────────────────
+# STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
+# ─────────────────────────────────────────────
+STATUS_SCAN_DONE    = 0   # legacy: ESP finished its scan sweep (SCAN/FOLLOW detectors)
+STATUS_LOOK_START   = 1   # the ESP opened its look-window (reactive detector: begin looking)
+STATUS_LOOK_END     = 2   # the ESP closed its look-window (sweep done, nothing found)
+STATUS_ROUTINE_DONE = 3   # the ESP ran out of sweeps/routine with targets still unfound
+STATUS_FAULT        = 4   # something went wrong; detail byte holds a fault code
+
+
+def encode_command(opcode, value=0.0):
+    """
+    Build a COMMAND packet: payload = [opcode, signed value byte]. `value` is a
+    float ~-1..+1; we send round(value*100) as a signed int8 (-100..100). The
+    ESP recovers it as (int8_t)payload[1] / 100.0f. Commands without a value
+    (STOP/SCAN/FOLLOW/FLASH/DONE/RESUME) just send 0.
+    """
+    scaled = max(-127, min(127, int(round(value * 100))))
+    payload = struct.pack("<Bb", opcode, scaled)   # B = opcode (uint8), b = value (int8)
+    return encode_frame(PACKET_TYPE_COMMAND, payload)
+
+
+# ─────────────────────────────────────────────
+# RECEIVE — reassemble packets the ESP sends back
+# ─────────────────────────────────────────────
+class PacketParser:
+    """
+    Rebuilds framed packets from a byte stream — the Python mirror of the state
+    machine in uart_link.c. Feed it bytes one at a time; feed() returns a
+    completed (msg_type, payload) when a full, checksum-valid packet arrives,
+    and None otherwise. Bad version/type/length/checksum just resets the parser.
+    """
+    _MAGIC0, _MAGIC1, _VERSION, _TYPE, _LEN, _PAYLOAD, _CHECKSUM = range(7)
+
+    def __init__(self):
+        self._reset()
+
+    def _reset(self):
+        self.state = self._MAGIC0
+        self.msg_type = 0
+        self.payload_len = 0
+        self.checksum = 0
+        self.payload = bytearray()
+
+    def feed(self, byte):
+        s = self.state
+        if s == self._MAGIC0:
+            if byte == 0xAA:
+                self.state = self._MAGIC1
+        elif s == self._MAGIC1:
+            if byte == 0x55:
+                self.state = self._VERSION
+            elif byte != 0xAA:
+                self._reset()
+        elif s == self._VERSION:
+            if byte != VERSION:
+                self._reset()
+            else:
+                self.checksum = byte           # checksum starts from the version byte
+                self.state = self._TYPE
+        elif s == self._TYPE:
+            if byte <= PACKET_TYPE_INVALID or byte >= PACKET_TYPE_MAX:
+                self._reset()
+            else:
+                self.msg_type = byte
+                self.checksum ^= byte
+                self.state = self._LEN
+        elif s == self._LEN:
+            if byte > PACKET_MAX_PAYLOAD_SIZE:
+                self._reset()
+            else:
+                self.payload_len = byte
+                self.payload = bytearray()
+                self.checksum ^= byte
+                self.state = self._CHECKSUM if byte == 0 else self._PAYLOAD
+        elif s == self._PAYLOAD:
+            self.payload.append(byte)
+            self.checksum ^= byte
+            if len(self.payload) >= self.payload_len:
+                self.state = self._CHECKSUM
+        elif s == self._CHECKSUM:
+            complete = (self.msg_type, bytes(self.payload)) if byte == self.checksum else None
+            self._reset()
+            return complete
+        return None
+
+
+# ─────────────────────────────────────────────
+# The link object your detector talks to
+# ─────────────────────────────────────────────
+class RobotLink:
+    """Opens the serial port, sends COMMAND packets, and decodes packets from the ESP."""
+
+    def __init__(self, port, baud=115200, rx_chunk=256):
+        import serial   # imported lazily so the encoders work without pyserial installed
+        # `port`: "COM5" on Windows, "/dev/ttyUSB0" or "/dev/serial0" on the Pi.
+        # `baud`: MUST equal UartLinkConfig.baud_rate on the ESP side.
+        # timeout=0 -> non-blocking reads/writes, so the vision loop never stalls.
+        self.ser = serial.Serial(port, baud, timeout=0)
+        self.parser = PacketParser()
+        self.rx_chunk = rx_chunk
+
+    # --- sending ---
+    def send_command(self, opcode, value=0.0):
+        self.ser.write(encode_command(opcode, value))
+
+    def stop(self):          self.send_command(CMD_STOP)
+    def turn(self, error):   self.send_command(CMD_TURN, error)
+    def scan(self):          self.send_command(CMD_SCAN)
+    def follow(self):        self.send_command(CMD_FOLLOW)
+    def flash(self):         self.send_command(CMD_FLASH)
+    def done(self):          self.send_command(CMD_DONE)
+    def resume(self):        self.send_command(CMD_RESUME)
+
+    # --- receiving ---
+    def poll(self):
+        """
+        Read whatever bytes have arrived and return a list of completed
+        (msg_type, payload) packets. Non-blocking — call it once per loop.
+        """
+        packets = []
+        for b in self.ser.read(self.rx_chunk):
+            pkt = self.parser.feed(b)
+            if pkt is not None:
+                packets.append(pkt)
+        return packets
+
+    def close(self):
+        self.ser.close()
+
+
+# Self-test of the ENCODER + PARSER only (no hardware needed):  python uart_link.py
+if __name__ == "__main__":
+    for name, pkt in [("STOP", encode_command(CMD_STOP)),
+                      ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
+                      ("SCAN", encode_command(CMD_SCAN)),
+                      ("FOLLOW", encode_command(CMD_FOLLOW)),
+                      ("RESUME", encode_command(CMD_RESUME))]:
+        print(f"{name:10s}:", pkt.hex(" "))
+
+    # Round-trip: encode a packet, feed its bytes to the parser, confirm it decodes.
+    parser = PacketParser()
+    for b in encode_command(CMD_TURN, -0.5):
+        out = parser.feed(b)
+    print("round-trip decode (type, payload):", out)
