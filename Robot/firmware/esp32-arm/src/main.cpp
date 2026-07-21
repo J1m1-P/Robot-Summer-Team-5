@@ -1,21 +1,22 @@
-/* Provides the current placeholder production entry point for the arm firmware. */
+/* Runs the arm board's production sensor loop. */
 #include <Arduino.h>
 
-// Declares the placeholder arithmetic helper used during setup.
-int myFunction(int, int);
+#include "config/tof_config.h"
+#include "control/time_of_flight/tof_manager.h"
 
-// Runs the current placeholder calculation once at startup.
+static TofManager tof_manager = {};
+
+// Initializes all three claw sensors and begins continuous ranging.
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    ESP_ERROR_CHECK(tof_manager_init(&tof_manager, &ARM_TOF_CONFIG));
+    ESP_ERROR_CHECK(tof_manager_start(&tof_manager));
 }
 
-// Leaves the placeholder production firmware idle.
+// Refreshes each sensor's cached sample without blocking for measurements.
 void loop() {
-  // put your main code here, to run repeatedly:
-}
-
-// Adds two integers for the placeholder startup example.
-int myFunction(int x, int y) {
-  return x + y;
+    const esp_err_t error = tof_manager_poll(&tof_manager);
+    if (error != ESP_OK && error != ESP_ERR_NOT_FINISHED) {
+        ESP_ERROR_CHECK(error);
+    }
+    delay(1);
 }
