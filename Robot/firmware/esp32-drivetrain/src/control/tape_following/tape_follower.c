@@ -20,8 +20,8 @@ static bool tape_follower_config_is_valid(const TapeFollowerConfig *config)
 
     return tape_following_controller_config_is_valid(&config->controller) &&
            tape_following_kinematics_config_is_valid(&config->heading) &&
-           isfinite(config->search.velocity_mps) &&
-           config->search.velocity_mps >= 0.0f &&
+           isfinite(config->search.angular_velocity_rad_s) &&
+           config->search.angular_velocity_rad_s >= 0.0f &&
            isfinite(config->search.timeout_s) &&
            config->search.timeout_s >= 0.0f &&
            isfinite(config->controller_dt_max_s) &&
@@ -101,10 +101,14 @@ static void update_missing_line(TapeFollower *follower,
         search_direction = -1.0f;
     }
 
-    output->requested_velocity.vy =
-        search_direction * follower->config->search.velocity_mps;
+    /* Turn the leading end toward the last-known tape side. Forward travel
+     * uses the front sensor and reverse travel mirrors the turn for the back. */
+    output->requested_velocity.omega =
+        -(float)follower->active_direction * search_direction *
+        follower->config->search.angular_velocity_rad_s;
     output->status = TAPE_FOLLOWER_SEARCHING;
-    output->motion_valid = search_direction != 0.0f;
+    output->motion_valid = search_direction != 0.0f &&
+                           follower->config->search.angular_velocity_rad_s > 0.0f;
 }
 
 esp_err_t tape_follower_init(TapeFollower *follower,

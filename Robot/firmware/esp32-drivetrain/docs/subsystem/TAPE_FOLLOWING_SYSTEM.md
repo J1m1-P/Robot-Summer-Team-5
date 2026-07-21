@@ -59,7 +59,7 @@ The mux and per-module sensor are separate concepts but are implemented in the s
 
 ### Application and drivetrain integration
 
-The diagnostic harness owns scheduling, commands, mode transitions, live tuning copies, failure response, and the decision to apply or suppress follower output. The drivetrain facade validates the resulting body command, refreshes its watchdog, converts body velocity to wheel targets, updates encoders and wheel PI controllers, and applies motor duties. These application and drivetrain responsibilities do not belong in the tape hardware driver or pure follower.
+The diagnostic harness owns scheduling, commands, mode transitions, live tuning copies, failure response, and the decision to apply or suppress follower output. Tape center/follow tests accept durations up to 60 seconds; other timed diagnostic motions retain their 10-second limit. The drivetrain facade validates the resulting body command, refreshes its watchdog, converts body velocity to wheel targets, updates encoders and wheel PI controllers, and applies motor duties. These application and drivetrain responsibilities do not belong in the tape hardware driver or pure follower.
 
 ## 4. Relevant File Map
 
@@ -98,7 +98,7 @@ The diagnostic harness owns scheduling, commands, mode transitions, live tuning 
 
 The board pin map should change for wiring or board revisions. Tape configuration should change for module assignments, channel geometry, gains, limits, search settings, or debounce thresholds. Mutable readings, counters, controller history, and application modes should remain outside both.
 
-The current front and back channel weights are `{-3, -1, 1, 3}` in left-to-right order. The controller starts as proportional-only (`Kp = 0.10`) with lateral correction bounded to ±0.30 m/s. Comments explicitly call these values conservative and require polarity verification and low-speed tuning on the assembled robot.
+The front module is mounted with mux channels reversed across the robot, so its channel-index weights are `{3, 1, -1, -3}`; the back module uses `{-3, -1, 1, 3}`. In both cases, a physical observation from left to right produces errors from -3 through +3. The controller starts as proportional-only (`Kp = 0.10`) with lateral correction bounded to ±0.30 m/s. Comments explicitly call these values conservative and require polarity verification and low-speed tuning on the assembled robot.
 
 ### Hardware driver files
 
@@ -152,7 +152,7 @@ This makes the application/state-machine layer the safety and arbitration owner.
 
 **Documented intent:** Positive travel selects the front sensor; negative travel selects the back. Controller history is reset across direction changes, and acquired/search history is separate per sensor so front history cannot drive reverse recovery.
 
-This supports bidirectional motion without mixing physically different sensor histories. When tape disappears after acquisition, the follower requests lateral-only search toward `last_known_error` for up to the configured timeout. It does not retain longitudinal travel or generate heading during search because the zeroed output is populated only with `vy`. That behavior is implemented, although the broader product-level intention for lateral-only searching is not documented.
+This supports bidirectional motion without mixing physically different sensor histories. When tape disappears after acquisition, the follower turns in place toward `last_known_error` for up to the configured timeout. Turn polarity is mirrored for reverse travel so the back of the robot turns toward the side observed by the back sensor.
 
 ### Scheduling and blocking
 
@@ -199,7 +199,7 @@ The mux stores its configuration before GPIO setup but does not mark itself init
 4. For channel 0, the private selector drives A low/B low, then blocks for 5 us.
 5. While that channel is selected, the driver reads the front, back, and left output GPIOs. A high level means tape. It stores each result in that module's `channel_0`.
 6. The driver repeats for channel 1 (A high/B low), channel 2 (A low/B high), and channel 3 (A high/B high), with the same settle-and-read sequence.
-7. The raw wrapper packs each module's `channel_0` through `channel_3` into bits 0 through 3 of `tape_bits[module]`.
+7. The raw wrapper packs each module's `channel_0` through `channel_3` into bits 0 through 3 of `tape_bits[module]`. The diagnostic telemetry reverses the front module's display string so every module is shown in physical left-to-right order.
 8. The mux remains set to channel 3 after the scan. No timestamp or scan-valid generation is stored with the samples.
 9. If the scan succeeds, later control code reads the updated `TapeSensor` booleans. If it fails, the harness permanently clears `tape_sensors_ready`; during active tape mode it begins a controlled drivetrain stop.
 
@@ -213,7 +213,7 @@ The harness copies that request into command fields, applies its translation ram
 
 ### Searching, lost, idle, and alternative centering
 
-If a previously acquired line vanishes, the follower resets steering history and emits lateral search only toward the last known side. `motion_valid` is true only when that side is nonzero. Once elapsed loss reaches `search.timeout_s`, status becomes `LOST` and motion is invalid. Missing tape before first acquisition goes directly to `LOST`.
+If a previously acquired line vanishes, the follower resets steering history and commands an in-place turn toward the last known side at 0.40 rad/s. `motion_valid` is true only when that side and the configured turn rate are nonzero. Once elapsed loss reaches `search.timeout_s` (currently 4.0 s), status becomes `LOST` and motion is invalid. Missing tape before first acquisition goes directly to `LOST`.
 
 The harness handles all invalid follower output by immediately zeroing command and applied velocities. It does not change out of `TestMode::TAPE_CENTER`; the timed test remains active until its duration expires or another failure/command changes mode. A zero travel request makes the reusable follower `IDLE`, but the harness does not use the follower for stationary centering.
 
@@ -332,7 +332,7 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 8. **Sample freshness is not represented.** `TapeSensor` stores booleans only; there is no timestamp, generation, validity, or error field. The harness has a single external readiness flag.
 ### Potential Concerns
 
-1. **Unclear search-motion intention.** On line loss, `TapeFollower` emits only lateral `vy`; requested longitudinal travel and angular motion are zero. This is observable, but comments do not explain whether lateral-only recovery is the final desired robot behavior.
+1. **Search-turn tuning requires hardware validation.** On line loss, `TapeFollower` turns in place toward the last-known side at the configured angular rate. The current 0.40 rad/s rate and 4.0 s timeout should be validated on the assembled robot.
 2. **Unclear mux abstraction granularity.** The separate mux object clearly models shared ownership, but it remains inside the tape-specific driver and exposes no public channel-selection API. It is unclear whether future non-tape reuse is expected; no evidence supports extracting a generic mux driver today.
 3. **Potential stale/mixed scan.** A full scan is sequential and stores fields as it progresses. If a future concurrent reader observes `TapeSensor` mid-scan, it could see mixed generations. The current single-threaded harness prevents this, so it is not a present failure.
 4. **Potential silent sensor faults.** A low GPIO is indistinguishable from “not on tape,” and guidance has no filtering. Whether the electronics provide fault indication or sufficient signal conditioning is not described.

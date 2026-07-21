@@ -21,11 +21,13 @@ const TapeSensorDriverConfig LEFT_TAPE_SENSOR_CONFIG = {
     .module_output_pin = PIN_TF_LEFT_INPUT,
 };
 
-/* Guidance-channel weights ordered from the robot's left to right. */
+/* The front module is mounted with its mux-channel order reversed: channel 3
+ * is at the robot's left and channel 0 is at its right. */
 const TapeLineEstimatorConfig FRONT_TAPE_LINE_ESTIMATOR_CONFIG = {
-    .channel_weights = {-3.0f, -1.0f, 1.0f, 3.0f},
+    .channel_weights = {3.0f, 1.0f, -1.0f, -3.0f},
 };
 
+/* The back module's mux channels run from the robot's left to right. */
 const TapeLineEstimatorConfig BACK_TAPE_LINE_ESTIMATOR_CONFIG = {
     .channel_weights = {-3.0f, -1.0f, 1.0f, 3.0f},
 };
@@ -38,7 +40,7 @@ const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
         [TAPE_FOLLOWER_FRONT] = &FRONT_TAPE_LINE_ESTIMATOR_CONFIG,
     },
     .controller = {
-        .proportional_gain = 0.10f,
+        .proportional_gain = 20.0f,
         .integral_gain = 0.0f,
         .derivative_gain = 0.0f,
         .integral_limit = 1.0f,
@@ -47,12 +49,12 @@ const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
     },
     .heading = {
         .gain_s_inv = 2.0f,
-        .max_omega_rad_s = 0.80f,
+        .max_omega_rad_s = 2.0f,
         .max_acceleration_rad_s2 = 1.50f,
     },
     .search = {
-        .velocity_mps = 0.15f,
-        .timeout_s = 0.50f,
+        .angular_velocity_rad_s = 1.0f,
+        .timeout_s = 4.00f,
     },
     .controller_dt_max_s = 0.05f,
 };

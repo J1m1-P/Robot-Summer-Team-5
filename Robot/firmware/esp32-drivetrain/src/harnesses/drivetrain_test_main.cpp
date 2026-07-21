@@ -16,16 +16,17 @@ namespace {
 constexpr float kDefaultPairDuty = 0.25f;
 constexpr float kMaxPairDuty = 0.80f;
 constexpr float kDefaultMoveSpeedMps = 0.20f;
-constexpr float kDefaultTurnSpeedRadS = 0.60f;
-constexpr uint32_t kDefaultDurationMs = 1500;
+constexpr float kDefaultTurnSpeedRadS = 1.0f;
+constexpr uint32_t kDefaultDurationMs = 10000;
 constexpr uint32_t kMaxDurationMs = 10000;
+constexpr uint32_t kMaxTapeDurationMs = 60000;
 constexpr uint32_t kDefaultMotionTimeoutMs = 10000;
 constexpr uint32_t kMaxMotionTimeoutMs = 60000;
 constexpr uint32_t kControlPeriodUs = 5000;
 constexpr uint32_t kTelemetryPeriodMs = 100;
 constexpr uint32_t kTapeSamplePeriodMs = 5;
 constexpr float kDefaultTapeCenterMaxMps = 0.20f;
-constexpr float kDefaultTapeFollowSpeedMps = 0.15f;
+constexpr float kDefaultTapeFollowSpeedMps = 0.30f;
 constexpr uint32_t kSequencePauseMs = 750;
 constexpr float kDefaultAcceleration = 0.50f;
 constexpr float kDefaultDeceleration = 0.80f;
@@ -202,10 +203,12 @@ int split_tokens(String line, String tokens[], int capacity) {
     return count;
 }
 
-bool parse_duration(const String &token, uint32_t &duration_out) {
+bool parse_duration(const String &token, uint32_t &duration_out,
+                    uint32_t maximum_ms = kMaxDurationMs) {
     const long value = token.toInt();
-    if (value <= 0 || value > static_cast<long>(kMaxDurationMs)) {
-        Serial.printf("# duration must be 1..%lu ms\n", static_cast<unsigned long>(kMaxDurationMs));
+    if (value <= 0 || value > static_cast<long>(maximum_ms)) {
+        Serial.printf("# duration must be 1..%lu ms\n",
+                      static_cast<unsigned long>(maximum_ms));
         return false;
     }
     duration_out = static_cast<uint32_t>(value);
@@ -413,9 +416,12 @@ void reset_all_encoders() {
     Serial.println("# all encoder counts reset to zero");
 }
 
-void format_tape_bits(uint8_t bits, char output[5]) {
+void format_tape_bits(uint8_t bits, bool reverse_channels, char output[5]) {
     for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; ++channel) {
-        output[channel] = (bits & (1U << channel)) ? '1' : '0';
+        const int source_channel = reverse_channels
+            ? TAPE_SENSOR_CHANNEL_COUNT - 1 - channel
+            : channel;
+        output[channel] = (bits & (1U << source_channel)) ? '1' : '0';
     }
     output[TAPE_SENSOR_CHANNEL_COUNT] = '\0';
 }
@@ -440,9 +446,11 @@ void print_tape_telemetry(uint32_t now_ms) {
     char front[5];
     char back[5];
     char left[5];
-    format_tape_bits(tape_bits[0], front);
-    format_tape_bits(tape_bits[1], back);
-    format_tape_bits(tape_bits[2], left);
+    /* The front module is mounted opposite the mux channel order. Keep all
+     * operator-facing telemetry in physical left-to-right order. */
+    format_tape_bits(tape_bits[0], true, front);
+    format_tape_bits(tape_bits[1], false, back);
+    format_tape_bits(tape_bits[2], false, left);
     const bool target_match = tape_sensors_ready &&
         mode == TestMode::TAPE_CENTER &&
         tape_bits[tape_center_sensor_index] == 0x06;
@@ -879,7 +887,8 @@ void process_command(String line) {
         const float maximum_strafe = count >= 3
             ? tokens[2].toFloat() : kDefaultTapeCenterMaxMps;
         uint32_t duration = kDefaultDurationMs;
-        if (count >= 4 && !parse_duration(tokens[3], duration)) return;
+        if (count >= 4 && !parse_duration(
+                tokens[3], duration, kMaxTapeDurationMs)) return;
         const float polarity = count >= 5 ? tokens[4].toFloat() : 1.0f;
         if (!isfinite(maximum_strafe) || maximum_strafe <= 0.0f ||
             maximum_strafe > test_config.max_vy_mps) {
@@ -907,7 +916,8 @@ void process_command(String line) {
         const float maximum_strafe = count >= 4
             ? tokens[3].toFloat() : kDefaultTapeCenterMaxMps;
         uint32_t duration = kDefaultDurationMs;
-        if (count >= 5 && !parse_duration(tokens[4], duration)) return;
+        if (count >= 5 && !parse_duration(
+                tokens[4], duration, kMaxTapeDurationMs)) return;
         const float polarity = count >= 6 ? tokens[5].toFloat() : 1.0f;
         if (!isfinite(travel_speed) || travel_speed <= 0.0f ||
             travel_speed > test_config.max_vx_mps) {
@@ -1304,7 +1314,7 @@ void print_controller_config() {
 void print_tape_tuning() {
     Serial.printf("# TAPE kp=%.4f ki=%.4f kd=%.4f integral_limit=%.3f "
                   "heading=%.3f max_omega=%.3f angular_accel=%.3f "
-                  "search_speed=%.3f lost_timeout=%.3f dt_max=%.3f\n",
+                  "search_omega=%.3f lost_timeout=%.3f dt_max=%.3f\n",
                   live_tape_config.controller.proportional_gain,
                   live_tape_config.controller.integral_gain,
                   live_tape_config.controller.derivative_gain,
@@ -1312,7 +1322,7 @@ void print_tape_tuning() {
                   live_tape_config.heading.gain_s_inv,
                   live_tape_config.heading.max_omega_rad_s,
                   live_tape_config.heading.max_acceleration_rad_s2,
-                  live_tape_config.search.velocity_mps,
+                  live_tape_config.search.angular_velocity_rad_s,
                   live_tape_config.search.timeout_s,
                   live_tape_config.controller_dt_max_s);
 }
@@ -1402,7 +1412,9 @@ void update_tape_parameter(const String &field, float value) {
     else if (field == "heading") candidate.heading.gain_s_inv = value;
     else if (field == "max-omega") candidate.heading.max_omega_rad_s = value;
     else if (field == "angular-accel") candidate.heading.max_acceleration_rad_s2 = value;
-    else if (field == "search-speed") candidate.search.velocity_mps = value;
+    else if (field == "search-omega" || field == "search-speed") {
+        candidate.search.angular_velocity_rad_s = value;
+    }
     else if (field == "lost-timeout") candidate.search.timeout_s = value;
     else if (field == "dt-max") candidate.controller_dt_max_s = value;
     else {

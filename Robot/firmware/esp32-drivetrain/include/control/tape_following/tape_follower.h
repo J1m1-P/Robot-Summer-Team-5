@@ -34,7 +34,7 @@ typedef enum {
 
 /* Behavior used after a previously acquired line disappears. */
 typedef struct {
-    float velocity_mps;
+    float angular_velocity_rad_s;
     float timeout_s;
 } TapeFollowerSearchConfig;
 
