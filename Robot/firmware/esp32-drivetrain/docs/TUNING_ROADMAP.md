@@ -59,6 +59,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 | **Off-tape motion PID** | `include/control/drivetrain/off_tape_motion.h` / `src/control/drivetrain/off_tape_motion.c` | **Implemented and unit-tested (`test/test_off_tape_motion/`); §1's shared PID.** | Reuses `tape_following_controller`'s generic bounded PID directly (nested `TapeFollowingControllerConfig`) rather than re-deriving one. Takes a caller-computed scalar `error` + `travel_velocity_mps`, outputs a `DrivetrainBodyVelocity` with the correction applied laterally (`vy`) and `omega` left at `0.0f` for a later per-primitive heading layer (e.g. `MoveP`'s terminal phase). **Not yet consumed by any motion primitive** — §2 doesn't exist yet. |
 | **Jerk-bounded speed ramp** | `include/control/drivetrain/speed_profile.h` / `src/control/drivetrain/speed_profile.c` | **Implemented and unit-tested (`test/test_speed_profile/`); §4's S-curve deliverable.** | Simplified jerk-bounded ramp (not a full 7-segment S-curve — a deliberate scope choice). Rate-limits acceleration each cycle toward whatever bang-bang acceleration would reach the target speed, bounded by `max_accel_mps2` and `SpeedProfileConfig.max_jerk_mps3`. **Not yet called by anything** — no motion primitive exists yet to drive it. |
 | **`MoveS`** | `include/control/drivetrain/move_s.h` / `src/control/drivetrain/move_s.c` | **Implemented and unit-tested (`test/test_move_s/`); §2's first motion primitive.** | Open-loop dead-reckoned straight move: `speed_profile.c` for jerk-bounded ramping, a stopping-distance target for the final approach, progress tracked against a `DrivetrainPose` the caller supplies each cycle. No outer PID (relies solely on the drivetrain facade's own wheel-velocity PI). **Not yet called from any harness or main loop**, and `F_lon`/`F_lat`/`F_ang` aren't threaded in yet (§3). |
+| **`RotS`** | `include/control/drivetrain/rot_s.h` / `src/control/drivetrain/rot_s.c` | **Implemented and unit-tested (`test/test_rot_s/`); §2's rotation primitive, not in the original roadmap table — added to give §3's `F_ang` trials a real primitive.** | `MoveS`'s in-place-rotation counterpart, same shape (jerk-bounded stopping-distance target, no outer PID), reusing `speed_profile.c` directly for the angular ramp since its math is unit-agnostic. `angle_rad`'s sign is the only direction input. **Not yet called from any harness or main loop.** |
 | **Encoder velocity + position** | `src/drivers/encoder/encoder_driver.c` | Implemented (includes the SM/T quadrature-grouping + low-speed-timeout work already merged to `tuning`) | `drivetrain_get_encoder_accumulated_count()` gives exact raw ticks (unaffected by the SM/T velocity smoothing); `encoder_driver_get_velocity_mps()` gives smoothed velocity. Use accumulated count for odometry, not velocity. |
 | **Wheel-velocity inner loop** | `include/control/drivetrain/wheel_velocity_controller.h` | Implemented | The existing FF+PI loop `MoveS` relies on solely, and that `MoveL`/`MoveP`/`MoveC` sit on top of via the drivetrain facade. |
 | **Drivetrain facade** | `include/control/drivetrain/drivetrain.h` | Implemented | `drivetrain_set_body_velocity()` / `drivetrain_update()` is the single entry point every motion source (tape following, and eventually the new Move APIs) should command through. Handles watchdog/timeout/coast/brake safety already — don't reimplement this. |
@@ -70,7 +71,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 - `[env:native]` — host-compiled, no hardware. Pure modules only (currently
   `x_drive_kinematics.c`, `wheel_velocity_controller.c`, `odometry.c`,
   `drivetrain_odometry_source.c`, `off_tape_motion.c`, `speed_profile.c`,
-  `move_s.c`, `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
+  `move_s.c`, `rot_s.c`, `tape_following_controller.c`, `tape_follower.c`, `tape_following_kinematics.c`,
   `tape_line_estimator.c`, `tape_task_detection.c`). **Add any new pure
   PID/kinematics/planning module here** so it gets unit tested without hardware.
 - `[env:drivetrain-test]` — the harness referenced throughout this doc
@@ -145,11 +146,12 @@ in style if this roadmap's modules get similar documentation later.
 
 ## 2. Motion API layer
 
-Four motion primitives, all taking `speed` and `max_accel` parameters:
+Five motion primitives, all taking `speed`/`omega` and `max_accel`/`max_alpha` parameters:
 
 | API | Behavior | Feedback | Params |
 |---|---|---|---|
 | **MoveS** ("simple") | Open-loop-ish move relying solely on the existing wheel-velocity PI (no outer position/heading correction) | Wheel velocity PI only | distance, heading, speed, max accel |
+| **RotS** ("rotate simple") | `MoveS`'s in-place-rotation counterpart, added to give §3's `F_ang` calibration trials a real primitive instead of the ad hoc harness `turn-angle` command. Open-loop, relies solely on the wheel-velocity PI | Wheel velocity PI only | angle (signed), max omega, max angular accel |
 | **MoveL** ("linear") | Straight-line move with outer PID correction to stay on the commanded vector | Off-tape PID (§1) | distance, heading, speed, max accel |
 | **MoveP** ("point") | Move to a point and finish at a specific ending heading; may need a path-planning helper to blend translation and final rotation | Off-tape PID (§1) + path planning | distance, heading, end heading, speed, max accel |
 | **MoveC** ("circular") | Move along a circular arc (turns, smooth curves) — coordinated `vx` + `omega` tracking a defined radius, not a straight segment or a single end-orientation target | Off-tape PID (§1) | radius, arc angle (or start/end heading), speed, max accel |
@@ -171,6 +173,22 @@ Four motion primitives, all taking `speed` and `max_accel` parameters:
       needs a per-wheel hook the drivetrain facade doesn't currently expose).
       Unit-tested in `test/test_move_s/`, including a full simulated run to
       completion. **Not yet exercised on hardware or from any harness.**
+- [x] Implement `RotS`. `rot_s.c`/`.h` — takes `{angle_rad (signed), max_omega,
+      max_alpha}`; mirrors `MoveS` exactly (progress tracked against a heading
+      captured once at `rot_s_start()`, jerk-bounded stopping-distance target,
+      no outer PID) but for rotation instead of translation. Directly reuses
+      `speed_profile.c` for the angular ramp — that module's math is
+      unit-agnostic, so no new ramp code was needed. `angle_rad`'s sign is the
+      only direction input (positive = counterclockwise, matching
+      `DrivetrainBodyVelocity.omega`'s convention) — there's no separate
+      heading parameter the way `MoveS` has one, since a signed scalar is a
+      complete description of "how far to turn." Progress uses a plain
+      subtraction against the caller-supplied current heading each cycle
+      (`DrivetrainPose.heading_rad` accumulates continuously rather than
+      wrapping, so no unwrap logic is needed). `F_ang` is not threaded in yet,
+      same reasoning as `MoveS`'s `F_lon`/`F_lat`. Unit-tested in
+      `test/test_rot_s/`, including full simulated runs for both rotation
+      directions. **Not yet exercised on hardware or from any harness.**
 - [ ] Implement `MoveL`
 - [ ] Implement `MoveP`
 - [ ] Implement `MoveC`
@@ -200,10 +218,12 @@ recipe rather than just ad-hoc gain tweaking.
         inverse Jacobian. This is the answer to "do we need separate per-motor
         curves" from §4 below — a cheap per-wheel scale factor instead of fully
         separate PID tuning.
-  - [ ] `F_ang` (angular, one scalar): repeated in-place rotation `MoveS` runs of a
-        known angle → measure actual rotation (protractor, or a gyro if available)
-        → `F_ang = commanded / actual`. Needed as a second pass because `F_lat`
-        alone doesn't fully correct heading error.
+  - [ ] `F_ang` (angular, one scalar): repeated in-place rotation `RotS` runs (§2 —
+        `RotS` was added specifically so this trial has a real dead-reckoned
+        primitive instead of the diagnostic harness's ad hoc `turn-angle`
+        command) of a known angle → measure actual rotation (protractor, or a
+        gyro if available) → `F_ang = commanded / actual`. Needed as a second
+        pass because `F_lat` alone doesn't fully correct heading error.
 - [ ] **Dynamic calibration** — bench-measure per-wheel current/voltage/speed,
       least-squares fit viscous + Coulomb friction and effective mass/inertia, and
       derive a maximum commanded acceleration that keeps required wheel traction
