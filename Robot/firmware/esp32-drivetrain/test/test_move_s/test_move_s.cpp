@@ -157,6 +157,64 @@ void test_simulated_run_reaches_target_distance() {
     TEST_ASSERT_TRUE(iterations < kMaxIterations);
     TEST_ASSERT_EQUAL(static_cast<int>(MOVE_S_COMPLETE), static_cast<int>(output.status));
     TEST_ASSERT_TRUE(fabsf(output.remaining_distance_m) <= config.distance_tolerance_m + kTolerance);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.vx);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.vy);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.omega);
+}
+
+// Regression test mirroring test_rot_s's equivalent: with irregular
+// (real-world) dt_s, commanded speed was observed drifting past its
+// configured ceiling on hardware in RotS (same underlying mechanism --
+// speed_profile_update()'s overshoot-clamp only bounds output relative to
+// the CURRENT cycle's target, not as an absolute ceiling, and target
+// changes cycle to cycle right where deceleration begins). MoveS's target
+// never goes negative, but the same relative-vs-absolute clamp gap applies,
+// so this asserts the same property here: commanded speed stays within
+// [0, max_speed_mps] at every single call under irregular dt, not just
+// eventually.
+void test_commanded_speed_never_exceeds_max_even_with_irregular_dt() {
+    MoveSConfig config = make_config(0.005f, 1.5f);
+    config.speed_profile.max_jerk_mps3 = 1.0f; // the low default that exposed this on hardware
+    MoveS move = {};
+    const float maxSpeed = 1.0f;
+    TEST_ASSERT_EQUAL(ESP_OK, move_s_start(move, config, 5.0f, 0.0f, maxSpeed));
+
+    const float dtPattern[] = {0.001f, 0.05f, 0.001f, 0.001f, 0.08f, 0.001f, 0.001f, 0.001f, 0.03f, 0.001f};
+    MoveSOutput output = {};
+    for (int i = 0; i < 2000; ++i) {
+        const float dt = dtPattern[i % (sizeof(dtPattern) / sizeof(dtPattern[0]))];
+        TEST_ASSERT_EQUAL(ESP_OK, move_s_update(move, dt, output));
+        const float commandedSpeed = hypotf(output.requested_velocity.vx, output.requested_velocity.vy);
+        TEST_ASSERT_TRUE(commandedSpeed <= maxSpeed + kTolerance);
+        if (output.status == MOVE_S_COMPLETE) break;
+    }
+}
+
+// A calibration move must be a single, one-way maneuver.  Low jerk may
+// lengthen its planned braking phase, but it may never create a reverse
+// command or an endless correction cycle.
+void test_low_jerk_move_brakes_once_without_reversing() {
+    MoveSConfig config = make_config(0.01f, 1.5f);
+    config.speed_profile.max_jerk_mps3 = 1.0f;
+    MoveS move = {};
+    TEST_ASSERT_EQUAL(ESP_OK, move_s_start(move, config, 1.0f, 0.0f, 0.5f));
+
+    MoveSOutput output = {};
+    bool saw_braking = false;
+    int iterations = 0;
+    constexpr int kMaxIterations = 5000;
+    while (output.status != MOVE_S_COMPLETE && iterations < kMaxIterations) {
+        TEST_ASSERT_EQUAL(ESP_OK, move_s_update(move, 0.01f, output));
+        saw_braking = saw_braking || move.braking;
+        const float commanded_speed = hypotf(
+            output.requested_velocity.vx, output.requested_velocity.vy);
+        TEST_ASSERT_TRUE(commanded_speed >= -kTolerance);
+        ++iterations;
+    }
+
+    TEST_ASSERT_TRUE(saw_braking);
+    TEST_ASSERT_TRUE(iterations < kMaxIterations);
+    TEST_ASSERT_EQUAL(static_cast<int>(MOVE_S_COMPLETE), static_cast<int>(output.status));
 }
 
 int main(int, char **) {
@@ -168,5 +226,7 @@ int main(int, char **) {
     RUN_TEST(test_strafe_heading_drives_along_vy);
     RUN_TEST(test_remaining_distance_tracks_self_integrated_progress);
     RUN_TEST(test_simulated_run_reaches_target_distance);
+    RUN_TEST(test_commanded_speed_never_exceeds_max_even_with_irregular_dt);
+    RUN_TEST(test_low_jerk_move_brakes_once_without_reversing);
     return UNITY_END();
 }

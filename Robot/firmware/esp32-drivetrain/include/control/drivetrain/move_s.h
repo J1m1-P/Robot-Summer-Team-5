@@ -29,12 +29,13 @@ extern "C" {
  * separately, to compare against what was commanded once the move reports
  * MOVE_S_COMPLETE -- that comparison is the calibration signal.
  *
- * F_lon/F_lat/F_ang are not threaded in yet -- until move_calibration.c
- * (§3.2) exists, there is nothing to apply them to. F_lon can be threaded in
- * later as a uniform scalar on the commanded body-speed magnitude (linear
- * with the Jacobian, so this is exact, not an approximation); F_lat needs a
- * per-wheel post-Jacobian correction the drivetrain facade doesn't currently
- * expose a hook for, and will need that resolved in §3.
+ * `heading_rad` is a body-frame direction: zero is body +x/front and positive
+ * angles point toward body +y/left. In a CCW-positive world frame, that is an
+ * addition to the current world heading.
+ *
+ * MoveS deliberately bypasses the advanced-motion calibration path. It is a
+ * measurement primitive; applying its own trial factors would invalidate the
+ * baseline experiment.
  */
 typedef struct {
     SpeedProfileConfig speed_profile;
@@ -72,6 +73,7 @@ typedef struct {
     float body_direction_y;
     float max_speed_mps;
     float planned_progress_m; // self-integrated: sum of commanded_speed_mps * dt_s
+    bool braking;             // once set, target speed remains zero; never reverse
     MoveSStatus status;
 } MoveS;
 
@@ -86,7 +88,7 @@ typedef struct {
 
 /* Validates config and parameters and prepares a running move. `heading_rad`
  * is the direction of travel in the robot's body frame (0 = forward,
- * positive = toward +vy/strafe-right), not a target orientation -- MoveS
+ * positive = toward +vy/strafe-left), not a target orientation -- MoveS
  * never commands rotation. The acceleration ceiling comes from
  * `config->max_accel_mps2`, not a parameter here -- see MoveSConfig.
  * Zero-initialize the runtime object before its first call:

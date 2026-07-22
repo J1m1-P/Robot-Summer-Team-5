@@ -98,7 +98,7 @@ void test_integrates_known_displacement() {
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_source_update(
         source, config, end_counts, odometry));
 
-    assert_pose(displacement_m_rad.vx * 1000.0f, -displacement_m_rad.vy * 1000.0f,
+    assert_pose(displacement_m_rad.vx * 1000.0f, displacement_m_rad.vy * 1000.0f,
                 displacement_m_rad.omega, odometry.pose);
 }
 

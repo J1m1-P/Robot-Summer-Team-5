@@ -36,15 +36,15 @@ void setUp() {}
 void tearDown() {}
 
 // Confirms a body-frame delta is accumulated at zero heading. lateral=25 is
-// a rightward strafe (DrivetrainBodyVelocity.vy's convention), which at
-// heading=0 (facing world +X) moves toward world -Y -- see
+// a leftward strafe (DrivetrainBodyVelocity.vy's convention), which at
+// heading=0 (facing world +X) moves toward world +Y -- see
 // test_rotates_lateral_delta_into_world_frame for the full derivation.
 void test_integrates_delta_at_origin() {
     DrivetrainOdometry odometry = {};
     const DrivetrainOdometryDelta delta{100.0f, 25.0f, 0.2f};
 
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
-    assert_pose(100.0f, -25.0f, 0.2f, odometry.pose);
+    assert_pose(100.0f, 25.0f, 0.2f, odometry.pose);
 }
 
 // Confirms translation is rotated by the pose heading before accumulation.
@@ -60,16 +60,14 @@ void test_rotates_body_delta_into_world_frame() {
     assert_pose(0.0f, 100.0f, 3.14159265358979323846f / 2.0f, odometry.pose);
 }
 
-// Confirms lateral (right-strafe) motion is projected consistently with
-// DrivetrainBodyVelocity.vy's "positive = right" convention: at heading=0
-// (facing world +X), strafing right moves the robot toward world -Y (since
-// +Y is 90 degrees CCW/left of +X in this CCW-positive heading frame).
+// Confirms lateral (left-strafe) motion is projected consistently with
+// DrivetrainBodyVelocity.vy's positive-left convention at heading=0.
 void test_rotates_lateral_delta_into_world_frame() {
     DrivetrainOdometry odometry = {};
     const DrivetrainOdometryDelta delta{0.0f, 100.0f, 0.0f};
 
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
-    assert_pose(0.0f, -100.0f, 0.0f, odometry.pose);
+    assert_pose(0.0f, 100.0f, 0.0f, odometry.pose);
 }
 
 // Confirms invalid sensor cycles hold pose and record a recoverable fault.

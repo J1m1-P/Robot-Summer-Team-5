@@ -32,18 +32,9 @@ extern "C" {
  * separately, once ROT_S_COMPLETE is reported, to compare against what was
  * commanded -- that comparison is the calibration signal (F_ang).
  *
- * F_ang is not threaded in yet -- until move_calibration.c (§3.2) exists,
- * there is nothing to apply it to. Unlike F_lon/F_lat (baked into the
- * Jacobian: F_lon/F_lat scale the wheel-speed *output* of
- * x_drive_kinematics_body_to_wheel_velocities(), per the paper's eq. 22-23
- * J_c^-1 = F_lon*F_lat*J^-1), F_ang is explicitly NOT part of that matrix --
- * the paper adds it as a separate command-level correction because F_lat
- * alone didn't fully correct heading error (a second pass, not a Jacobian
- * term). From the paper's eq. 21 (theta1 = F_ang * theta2, commanded over
- * actual), it threads in as a scalar on the *commanded target angle*: to
- * achieve a desired rotation theta_want, call
- * rot_s_start(..., angle_rad = theta_want * F_ang, ...), not as a multiplier
- * on omega/angular speed.
+ * RotS deliberately bypasses the advanced-motion calibration path. It is a
+ * measurement primitive; applying its own trial factors would invalidate the
+ * baseline experiment.
  */
 typedef struct {
     SpeedProfileConfig speed_profile;
@@ -79,6 +70,7 @@ typedef struct {
     float angle_rad;  // signed target rotation; positive = counterclockwise
     float max_omega_rad_s;
     float planned_progress_rad; // self-integrated: sum of commanded_omega_rad_s * dt_s
+    bool braking;               // once set, target omega remains zero; never reverse
     RotSStatus status;
 } RotS;
 

@@ -150,6 +150,9 @@ void test_simulated_run_reaches_target_angle() {
     TEST_ASSERT_TRUE(iterations < kMaxIterations);
     TEST_ASSERT_EQUAL(static_cast<int>(ROT_S_COMPLETE), static_cast<int>(output.status));
     TEST_ASSERT_TRUE(fabsf(output.remaining_angle_rad) <= config.angle_tolerance_rad + kTolerance);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.vx);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.vy);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, output.requested_velocity.omega);
 }
 
 // Confirms a full simulated run also converges for a negative (CW) target.
@@ -187,6 +190,59 @@ void test_simulated_run_reaches_negative_target_angle() {
 // just patched, so there is nothing left to regression-test here. The
 // copysignf direction fix remains in rot_s.c as correct, cheap insurance.
 
+// Regression test for a real hardware bug: with irregular (real-world) dt_s
+// -- unlike the fixed-dt=0.01 tests above -- commanded omega was observed
+// climbing to nearly 3x max_omega_rad_s and never recovering.
+// speed_profile_update()'s overshoot-clamp only guarantees its output won't
+// cross THIS cycle's target, which is not the same as an absolute ceiling
+// when the target itself is changing cycle to cycle (as it does right where
+// deceleration begins). Runs with a deliberately irregular mix of tiny and
+// large dt_s values (a stand-in for real loop jitter/blocking I/O) and
+// asserts the commanded magnitude never exceeds max_omega_rad_s at any
+// single call, not just eventually.
+void test_commanded_omega_never_exceeds_max_even_with_irregular_dt() {
+    RotSConfig config = make_config(0.02f, 1.5f);
+    config.speed_profile.max_jerk_mps3 = 1.0f; // the low default that exposed this on hardware
+    RotS rot = {};
+    const float maxOmega = 1.0f;
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, kPi / 2.0f, maxOmega));
+
+    const float dtPattern[] = {0.001f, 0.05f, 0.001f, 0.001f, 0.08f, 0.001f, 0.001f, 0.001f, 0.03f, 0.001f};
+    RotSOutput output = {};
+    for (int i = 0; i < 2000; ++i) {
+        const float dt = dtPattern[i % (sizeof(dtPattern) / sizeof(dtPattern[0]))];
+        TEST_ASSERT_EQUAL(ESP_OK, rot_s_update(rot, dt, output));
+        TEST_ASSERT_TRUE(fabsf(output.requested_velocity.omega) <= maxOmega + kTolerance);
+        if (output.status == ROT_S_COMPLETE) break;
+    }
+}
+
+// The calibration primitive must be a single, one-way maneuver even when a
+// low jerk makes its brake ramp long.  This reproduces the configuration that
+// previously oscillated on hardware and proves that braking never commands a
+// corrective turn in the opposite direction.
+void test_low_jerk_rotation_brakes_once_without_reversing() {
+    RotSConfig config = make_config(0.02f, 1.5f);
+    config.speed_profile.max_jerk_mps3 = 1.0f;
+    RotS rot = {};
+    TEST_ASSERT_EQUAL(ESP_OK, rot_s_start(rot, config, kPi / 2.0f, kPi / 6.0f));
+
+    RotSOutput output = {};
+    bool saw_braking = false;
+    int iterations = 0;
+    constexpr int kMaxIterations = 5000;
+    while (output.status != ROT_S_COMPLETE && iterations < kMaxIterations) {
+        TEST_ASSERT_EQUAL(ESP_OK, rot_s_update(rot, 0.01f, output));
+        saw_braking = saw_braking || rot.braking;
+        TEST_ASSERT_TRUE(output.requested_velocity.omega >= -kTolerance);
+        ++iterations;
+    }
+
+    TEST_ASSERT_TRUE(saw_braking);
+    TEST_ASSERT_TRUE(iterations < kMaxIterations);
+    TEST_ASSERT_EQUAL(static_cast<int>(ROT_S_COMPLETE), static_cast<int>(output.status));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_rejects_invalid_config);
@@ -197,5 +253,7 @@ int main(int, char **) {
     RUN_TEST(test_remaining_angle_tracks_self_integrated_progress);
     RUN_TEST(test_simulated_run_reaches_target_angle);
     RUN_TEST(test_simulated_run_reaches_negative_target_angle);
+    RUN_TEST(test_commanded_omega_never_exceeds_max_even_with_irregular_dt);
+    RUN_TEST(test_low_jerk_rotation_brakes_once_without_reversing);
     return UNITY_END();
 }

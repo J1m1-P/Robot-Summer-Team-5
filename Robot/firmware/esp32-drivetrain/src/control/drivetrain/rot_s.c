@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <robot_common/math_utils.h>
+
 /* Below this commanded angular speed, the jerk-bounded ramp is considered
  * to have actually reached zero rather than just asymptotically approaching it. */
 static const float kStoppedOmegaRadS = 0.005f;
@@ -68,13 +70,25 @@ esp_err_t rot_s_update(
     const float remaining_rad = rot->angle_rad - rot->planned_progress_rad;
     output->remaining_angle_rad = remaining_rad;
 
-    const bool within_tolerance = fabsf(remaining_rad) <= rot->config->angle_tolerance_rad;
-    const float target_omega_rad_s = within_tolerance
+    /* A calibration rotation is a finite, one-way experiment.  In
+     * particular, do not let a self-integrated overshoot change the target
+     * sign: that would turn this open-loop maneuver into an oscillator.
+     * Simulating the existing jerk-limited profile to zero gives a braking
+     * distance consistent with its current acceleration state. */
+    if (!rot->braking) {
+        float stopping_distance_rad = 0.0f;
+        const esp_err_t error = speed_profile_predict_stopping_distance(
+            &rot->profile, &rot->config->speed_profile,
+            rot->config->max_alpha_rad_s2, dt_s, kStoppedOmegaRadS,
+            &stopping_distance_rad);
+        if (error != ESP_OK) return error;
+        if (fabsf(remaining_rad) <= stopping_distance_rad + rot->config->angle_tolerance_rad) {
+            rot->braking = true;
+        }
+    }
+    const float target_omega_rad_s = rot->braking
         ? 0.0f
-        : copysignf(
-              fminf(rot->max_omega_rad_s, sqrtf(fmaxf(0.0f, 2.0f * rot->config->max_alpha_rad_s2 *
-                  (fabsf(remaining_rad) - rot->config->angle_tolerance_rad)))),
-              remaining_rad);
+        : copysignf(rot->max_omega_rad_s, rot->angle_rad);
 
     float commanded_omega_rad_s = 0.0f;
     const esp_err_t error = speed_profile_update(
@@ -84,14 +98,32 @@ esp_err_t rot_s_update(
         return error;
     }
 
+    /* Defense in depth: speed_profile_update()'s overshoot-clamp only
+     * guarantees its output won't cross THIS cycle's target -- it is not an
+     * absolute ceiling. If target_omega_rad_s itself is changing cycle to
+     * cycle (as it does right where deceleration begins) faster than that
+     * relative check can track, nothing else stops commanded_omega_rad_s
+     * from drifting past max_omega_rad_s -- observed on hardware as it
+     * climbing to nearly 3x the configured ceiling and never recovering.
+     * Clamp explicitly, and write the clamped value back into the profile's
+     * own state so a bad step can't leave phantom "excess" speed baked into
+     * next cycle's calculation. */
+    commanded_omega_rad_s = clamp(commanded_omega_rad_s, -rot->max_omega_rad_s, rot->max_omega_rad_s);
+    rot->profile.commanded_speed_mps = commanded_omega_rad_s;
+
     rot->planned_progress_rad += commanded_omega_rad_s * dt_s;
 
     output->requested_velocity.vx = 0.0f;
     output->requested_velocity.vy = 0.0f;
     output->requested_velocity.omega = commanded_omega_rad_s;
 
-    if (within_tolerance && fabsf(commanded_omega_rad_s) <= kStoppedOmegaRadS) {
+    if (rot->braking && fabsf(commanded_omega_rad_s) <= kStoppedOmegaRadS) {
         rot->status = ROT_S_COMPLETE;
+        /* As with MoveS, a complete status must never be paired with the
+         * profile's final sub-threshold angular-velocity sample. */
+        output->requested_velocity.vx = 0.0f;
+        output->requested_velocity.vy = 0.0f;
+        output->requested_velocity.omega = 0.0f;
     }
     output->status = rot->status;
     output->motion_valid = true;

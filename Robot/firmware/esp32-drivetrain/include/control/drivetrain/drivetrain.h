@@ -8,6 +8,7 @@
 
 #include "control/drivetrain/x_drive_kinematics.h"
 #include "control/drivetrain/wheel_velocity_controller.h"
+#include "control/drivetrain/move_calibration.h"
 #include "drivers/encoder/encoder_driver.h"
 #include "drivers/motor/motor_driver.h"
 
@@ -34,9 +35,11 @@ typedef struct {
     float max_vx_mps;
     float max_vy_mps;
     float max_omega_rad_s;
+    float max_wheel_speed_mps;
     float max_control_dt_s;
     int64_t command_timeout_us;
     uint8_t brake_pin;
+    const MoveCalibrationConfig *move_calibration;
 } DrivetrainConfig;
 
 // Reports caller-relevant lifecycle, watchdog, and current body target state.
@@ -62,6 +65,7 @@ typedef struct {
     float last_duty[DRIVETRAIN_MOTOR_MAX];
     int64_t last_command_us;
     int64_t last_update_us;
+    bool apply_motion_calibration;
 } DrivetrainControlState;
 
 // Holds statically allocated drivetrain state; callers should use the API below.
@@ -89,7 +93,20 @@ esp_err_t drivetrain_set_body_velocity(
     float omega_rad_s
 );
 
-// Sets a controlled zero-velocity target without disabling the drivetrain.
+/* Advanced-movement-only command path.  It uses the same safety feasibility
+ * governor as the normal path, and conditionally applies the measured motion
+ * calibration factors when the configured calibration is enabled.  Tape
+ * following and direct jog control remain on drivetrain_set_body_velocity(). */
+esp_err_t drivetrain_set_advanced_body_velocity(
+    Drivetrain *drivetrain,
+    float vx_mps,
+    float vy_mps,
+    float omega_rad_s
+);
+
+// Immediately coasts every motor at zero PWM and retains a zero-velocity
+// target, without disabling the drivetrain.  Use for every motion completion
+// or abort; it is not an active reverse-polarity brake.
 esp_err_t drivetrain_stop(Drivetrain *drivetrain);
 
 // Runs one bounded-time encoder, kinematics, PI, and motor-output cycle.

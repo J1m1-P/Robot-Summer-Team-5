@@ -22,21 +22,11 @@ esp_err_t drivetrain_odometry_update(
         return ESP_OK;
     }
 
-    /* Body "right" (positive lateral, matching DrivetrainBodyVelocity.vy's
-     * convention) is 90 degrees CLOCKWISE from "forward" in a CCW-positive
-     * heading frame (matching DrivetrainBodyVelocity.omega's convention) --
-     * i.e. world-frame right = (sin(heading), -cos(heading)). Previously
-     * this used +cosine on the lateral term for y_mm, which is the sign a
-     * CW-positive heading (or a left-positive lateral) would require --
-     * inconsistent with the CCW/right convention documented everywhere else
-     * and used by callers like move_s.c's progress projection. Concretely
-     * wrong for any move starting from a nonzero heading (e.g. after a
-     * RotS turn): a robot that had turned 90 degrees CCW and then moved
-     * forward ended up reported at negative y instead of positive. */
+    /* Right-handed frame: +x forward, +y left, +heading CCW. */
     const float cosine = cosf(odometry->pose.heading_rad);
     const float sine = sinf(odometry->pose.heading_rad);
-    odometry->pose.x_mm += cosine * delta->forward_mm + sine * delta->lateral_mm;
-    odometry->pose.y_mm += sine * delta->forward_mm - cosine * delta->lateral_mm;
+    odometry->pose.x_mm += cosine * delta->forward_mm - sine * delta->lateral_mm;
+    odometry->pose.y_mm += sine * delta->forward_mm + cosine * delta->lateral_mm;
     odometry->pose.heading_rad += delta->heading_delta_rad;
     return ESP_OK;
 }

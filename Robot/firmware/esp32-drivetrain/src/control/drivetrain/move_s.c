@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <robot_common/math_utils.h>
+
 /* Below this commanded speed, the jerk-bounded ramp is considered to have
  * actually reached zero rather than just asymptotically approaching it. */
 static const float kStoppedSpeedMps = 0.005f;
@@ -66,11 +68,22 @@ esp_err_t move_s_update(
     const float remaining_m = move->distance_m - move->planned_progress_m;
     output->remaining_distance_m = remaining_m;
 
-    const bool within_tolerance = remaining_m <= move->config->distance_tolerance_m;
-    const float target_speed_mps = within_tolerance
-        ? 0.0f
-        : fminf(move->max_speed_mps, sqrtf(fmaxf(0.0f, 2.0f * move->config->max_accel_mps2 *
-                 (remaining_m - move->config->distance_tolerance_m))));
+    /* Calibration moves are strictly one-way: once braking starts, zero is
+     * the only subsequent target.  Predict the stop from the *current*
+     * jerk/acceleration state instead of using v^2/(2a), which assumes an
+     * instantaneous acceleration reversal and can start braking too late. */
+    if (!move->braking) {
+        float stopping_distance_m = 0.0f;
+        const esp_err_t error = speed_profile_predict_stopping_distance(
+            &move->profile, &move->config->speed_profile,
+            move->config->max_accel_mps2, dt_s, kStoppedSpeedMps,
+            &stopping_distance_m);
+        if (error != ESP_OK) return error;
+        if (remaining_m <= stopping_distance_m + move->config->distance_tolerance_m) {
+            move->braking = true;
+        }
+    }
+    const float target_speed_mps = move->braking ? 0.0f : move->max_speed_mps;
 
     float commanded_speed_mps = 0.0f;
     const esp_err_t error = speed_profile_update(
@@ -80,14 +93,34 @@ esp_err_t move_s_update(
         return error;
     }
 
+    /* Defense in depth: speed_profile_update()'s overshoot-clamp only
+     * guarantees its output won't cross THIS cycle's target -- it is not an
+     * absolute ceiling. If target_speed_mps itself is changing cycle to
+     * cycle (as it does right where deceleration begins) faster than that
+     * relative check can track, nothing else stops commanded_speed_mps from
+     * drifting past max_speed_mps (see the equivalent, confirmed-on-hardware
+     * issue in rot_s.c). Clamp explicitly (never negative -- MoveS's target
+     * is always >= 0, see the sqrt() above), and write the clamped value
+     * back into the profile's own state so a bad step can't leave phantom
+     * "excess" speed baked into next cycle's calculation. */
+    commanded_speed_mps = clamp(commanded_speed_mps, 0.0f, move->max_speed_mps);
+    move->profile.commanded_speed_mps = commanded_speed_mps;
+
     move->planned_progress_m += commanded_speed_mps * dt_s;
 
     output->requested_velocity.vx = commanded_speed_mps * move->body_direction_x;
     output->requested_velocity.vy = commanded_speed_mps * move->body_direction_y;
     output->requested_velocity.omega = 0.0f;
 
-    if (within_tolerance && fabsf(commanded_speed_mps) <= kStoppedSpeedMps) {
+    if (move->braking && fabsf(commanded_speed_mps) <= kStoppedSpeedMps) {
         move->status = MOVE_S_COMPLETE;
+        /* Completion is a zero-command contract, not merely an advisory
+         * status.  The final profile sample can be small-but-nonzero; do not
+         * pass that residual through to a caller that has already been told
+         * the movement is over. */
+        output->requested_velocity.vx = 0.0f;
+        output->requested_velocity.vy = 0.0f;
+        output->requested_velocity.omega = 0.0f;
     }
     output->status = move->status;
     output->motion_valid = true;

@@ -1,4 +1,4 @@
-/* MoveS/RotS calibration harness -- see platformio.ini's [env:calibration]. */
+/* MoveS/RotS/MoveC calibration harness -- see platformio.ini's [env:calibration]. */
 #include <Arduino.h>
 
 #include <math.h>
@@ -7,6 +7,11 @@
 #include "config/drivetrain/drivetrain_config.h"
 #include "control/drivetrain/drivetrain.h"
 #include "control/drivetrain/drivetrain_odometry_source.h"
+#include "control/drivetrain/motion_estimate_adapter.h"
+#include "control/drivetrain/move_c.h"
+#include "control/drivetrain/move_l.h"
+#include "control/drivetrain/move_p.h"
+#include "control/drivetrain/move_r.h"
 #include "control/drivetrain/move_s.h"
 #include "control/drivetrain/rot_s.h"
 
@@ -75,7 +80,7 @@
 //   move <distance_m> <heading_deg> <speed_mps>
 //                                -- starts a MoveS run. heading_deg is in
 //                                the body frame (0 = forward, positive =
-//                                toward +vy/strafe-right), not a world
+//                                toward +vy/strafe-left), not a world
 //                                heading -- matches move_s_start()'s
 //                                heading_rad convention.
 //   rotate <angle_deg> <max_omega_deg_s>
@@ -108,9 +113,12 @@ constexpr float kRadToDeg = 180.0f / kPi;
 
 constexpr float kDefaultDistanceToleranceM = 0.01f;
 constexpr float kDefaultAngleToleranceDeg = 2.0f;
-// Locked in from tuning_main.cpp's jerk/accel fields this session -- see
-// docs/TUNING_ROADMAP.md §5c-note.
-constexpr float kDefaultMaxJerkMps3 = 1.0f;
+// Shared calibration-profile default.  The previous 1.0 value took a full
+// 1.5 s to reverse RotS's configured 1.5 rad/s² acceleration, making a
+// short rotation unable to brake cleanly.  MoveS and RotS both use the
+// one-way, jerk-aware braking scheme, so their calibration trials should
+// use the same practical profile default.
+constexpr float kDefaultMaxJerkMps3 = 10.0f;
 constexpr float kDefaultMaxAccelMps2 = 2.5f;
 // Not yet calibrated -- matches TAPE_FOLLOWER_CONFIG's heading config,
 // same placeholder RotSConfig's own header comment documents.
@@ -118,7 +126,7 @@ constexpr float kDefaultMaxAlphaDegS2 = 1.5f * kRadToDeg;
 
 constexpr unsigned long kTelemetryPeriodMs = 50; // 20 Hz
 
-enum class CalMode { kIdle, kMove, kRotate };
+enum class CalMode { kIdle, kMove, kRotate, kArc, kMoveL, kMoveP, kMoveR };
 
 Drivetrain drivetrain = {};
 bool drivetrain_ready = false;
@@ -138,8 +146,67 @@ RotSConfig rot_s_config = {
     .max_alpha_rad_s2 = kDefaultMaxAlphaDegS2 * kDegToRad,
 };
 
+MoveCConfig move_c_config = {
+    .off_tape_motion = {
+        .controller = {.proportional_gain = 1.0f, .integral_gain = 0.0f,
+                       .derivative_gain = 0.0f, .integral_limit = 0.2f,
+                       .correction_min = -0.25f, .correction_max = 0.25f},
+        .controller_dt_max_s = 0.05f},
+    .speed_profile = {.max_jerk_mps3 = kDefaultMaxJerkMps3},
+    .heading_controller = {.proportional_gain = 1.0f, .integral_gain = 0.0f,
+                            .derivative_gain = 0.0f, .integral_limit = 0.5f,
+                            .correction_min = -1.0f, .correction_max = 1.0f},
+    .arc_length_tolerance_m = 0.01f,
+    .radial_tolerance_m = 0.01f,
+    .heading_tolerance_rad = 2.0f * kDegToRad,
+    .max_accel_mps2 = kDefaultMaxAccelMps2,
+    .max_alpha_rad_s2 = kDefaultMaxAlphaDegS2 * kDegToRad,
+    .max_omega_rad_s = 1.0f,
+};
+
+MoveLConfig move_l_config = {
+    .off_tape_motion = {
+        .controller = {.proportional_gain = 1.0f, .integral_gain = 0.0f,
+                       .derivative_gain = 0.0f, .integral_limit = 0.2f,
+                       .correction_min = -0.25f, .correction_max = 0.25f},
+        .controller_dt_max_s = 0.05f},
+    .speed_profile = {.max_jerk_mps3 = kDefaultMaxJerkMps3},
+    .distance_tolerance_m = 0.01f,
+    .max_accel_mps2 = kDefaultMaxAccelMps2,
+};
+
+MovePConfig move_p_config = {
+    .off_tape_motion = move_l_config.off_tape_motion,
+    .speed_profile = {.max_jerk_mps3 = kDefaultMaxJerkMps3},
+    .heading_controller = {.proportional_gain = 1.0f, .integral_gain = 0.0f,
+                            .derivative_gain = 0.0f, .integral_limit = 0.5f,
+                            .correction_min = -1.0f, .correction_max = 1.0f},
+    .distance_tolerance_m = 0.01f,
+    .heading_tolerance_rad = 2.0f * kDegToRad,
+    .max_accel_mps2 = kDefaultMaxAccelMps2,
+    .max_alpha_rad_s2 = kDefaultMaxAlphaDegS2 * kDegToRad,
+    .max_omega_rad_s = 1.0f,
+};
+
+MoveRConfig move_r_config = {
+    .heading_controller = {.proportional_gain = 2.0f, .integral_gain = 0.0f,
+                            .derivative_gain = 0.05f, .integral_limit = 0.5f,
+                            .correction_min = -1.0f, .correction_max = 1.0f},
+    .speed_profile = {.max_jerk_mps3 = kDefaultMaxJerkMps3},
+    .heading_tolerance_rad = 2.0f * kDegToRad,
+    .max_alpha_rad_s2 = kDefaultMaxAlphaDegS2 * kDegToRad,
+    .max_omega_rad_s = 1.0f,
+};
+
 MoveS move_s_state = {};
 RotS rot_s_state = {};
+MoveC move_c_state = {};
+MoveL move_l_state = {};
+MoveP move_p_state = {};
+MoveR move_r_state = {};
+MotionEstimate move_l_start_estimate = {};
+float move_l_direction_x = 0.0f;
+float move_l_direction_y = 0.0f;
 CalMode cal_mode = CalMode::kIdle;
 
 // MoveS/RotS no longer track a start pose/heading themselves (open-loop by
@@ -154,7 +221,7 @@ int64_t last_update_us = 0;
 unsigned long last_print_ms = 0;
 
 void print_usage() {
-    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | stop | brake | enable");
+    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | rotl <target_heading_deg> | arc <radius_m> <angle_deg> <speed_mps> | movel <distance_m> <heading_deg> <speed_mps> | movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps> | stop | brake | enable");
 }
 
 void print_config() {
@@ -180,8 +247,28 @@ void print_config() {
 // both "stop" and internally once a move/rotation completes.
 void stop_motion() {
     cal_mode = CalMode::kIdle;
-    if (drivetrain_ready) drivetrain_stop(&drivetrain);
+    if (drivetrain_ready) {
+        const esp_err_t error = drivetrain_stop(&drivetrain);
+        if (error != ESP_OK) {
+            Serial.print("# stop failed; braking: ");
+            Serial.println(esp_err_to_name(error));
+            drivetrain_brake(&drivetrain);
+            drivetrain_ready = false;
+        }
+    }
     Serial.println("# stopped");
+}
+
+bool set_velocity_or_brake(const DrivetrainBodyVelocity &velocity) {
+    const esp_err_t error = drivetrain_set_body_velocity(
+        &drivetrain, velocity.vx, velocity.vy, velocity.omega);
+    if (error == ESP_OK) return true;
+    Serial.print("# drivetrain command rejected; braking: ");
+    Serial.println(esp_err_to_name(error));
+    drivetrain_brake(&drivetrain);
+    drivetrain_ready = false;
+    cal_mode = CalMode::kIdle;
+    return false;
 }
 
 void brake_drivetrain() {
@@ -211,9 +298,17 @@ void enable_drivetrain() {
     Serial.println("# drivetrain enabled");
 }
 
+bool motion_active() {
+    return cal_mode != CalMode::kIdle;
+}
+
 void start_move(float distance_m, float heading_deg, float speed_mps) {
     if (!drivetrain_ready) {
         Serial.println("# move: drivetrain is not enabled");
+        return;
+    }
+    if (motion_active()) {
+        Serial.println("# move rejected: another motion is active; use 'stop' first");
         return;
     }
     const esp_err_t error = move_s_start(
@@ -227,6 +322,10 @@ void start_move(float distance_m, float heading_deg, float speed_mps) {
     // by design -- see move_s.h). Captured here instead, purely for the
     // odometry-only sanity check print_move_complete() prints afterward.
     move_start_pose = odometry.pose;
+    // MoveS heading is expressed in the body frame: positive points toward
+    // body +y (left), which is a CCW turn in the world
+    // heading.  Convert it with addition when projecting telemetry into
+    // the world frame.
     const float world_heading_rad = odometry.pose.heading_rad + heading_deg * kDegToRad;
     move_world_direction_x = cosf(world_heading_rad);
     move_world_direction_y = sinf(world_heading_rad);
@@ -244,6 +343,10 @@ void start_rotate(float angle_deg, float max_omega_deg_s) {
         Serial.println("# rotate: drivetrain is not enabled");
         return;
     }
+    if (motion_active()) {
+        Serial.println("# rotate rejected: another motion is active; use 'stop' first");
+        return;
+    }
     const esp_err_t error = rot_s_start(
         &rot_s_state, &rot_s_config, angle_deg * kDegToRad, max_omega_deg_s * kDegToRad);
     if (error != ESP_OK) {
@@ -259,6 +362,110 @@ void start_rotate(float angle_deg, float max_omega_deg_s) {
     Serial.print(angle_deg, 2);
     Serial.print(" max_omega_deg_s=");
     Serial.println(max_omega_deg_s, 2);
+}
+
+void start_arc(float radius_m, float angle_deg, float speed_mps) {
+    if (!drivetrain_ready) {
+        Serial.println("# arc: drivetrain is not enabled");
+        return;
+    }
+    if (motion_active()) {
+        Serial.println("# arc rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    MotionEstimate start = {};
+    if (motion_estimate_from_drivetrain_pose(&odometry.pose, true, &start) != ESP_OK) {
+        Serial.println("# arc start failed: invalid odometry estimate");
+        return;
+    }
+    const esp_err_t error = move_c_start(&move_c_state, &move_c_config, &start,
+                                         radius_m, angle_deg * kDegToRad, speed_mps);
+    if (error != ESP_OK) {
+        Serial.print("# arc start failed: ");
+        Serial.println(esp_err_to_name(error));
+        return;
+    }
+    cal_mode = CalMode::kArc;
+    Serial.print("# ARC START radius_m=");
+    Serial.print(radius_m, 4);
+    Serial.print(" angle_deg=");
+    Serial.print(angle_deg, 2);
+    Serial.print(" speed_mps=");
+    Serial.println(speed_mps, 4);
+}
+
+bool current_motion_estimate(MotionEstimate *estimate) {
+    return motion_estimate_from_drivetrain_pose(&odometry.pose, true, estimate) == ESP_OK;
+}
+
+void start_movel(float distance_m, float heading_deg, float speed_mps) {
+    if (!drivetrain_ready) { Serial.println("# movel: drivetrain is not enabled"); return; }
+    if (motion_active()) {
+        Serial.println("# movel rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    const esp_err_t error = move_l_start(&move_l_state, &move_l_config,
+                                         distance_m, heading_deg * kDegToRad, speed_mps);
+    if (error != ESP_OK) { Serial.print("# movel start failed: "); Serial.println(esp_err_to_name(error)); return; }
+    MotionEstimate start = {};
+    if (!current_motion_estimate(&start)) { Serial.println("# movel start failed: invalid estimate"); return; }
+    // MoveL uses the same body-frame heading convention as MoveS: positive
+    // angles point toward body +y/left, so they add to CCW world yaw.
+    const float world_heading = start.heading_rad + heading_deg * kDegToRad;
+    move_l_start_estimate = start;
+    move_l_direction_x = cosf(world_heading);
+    move_l_direction_y = sinf(world_heading);
+    cal_mode = CalMode::kMoveL;
+    Serial.print("# MOVEL START distance_m="); Serial.print(distance_m, 4);
+    Serial.print(" heading_deg="); Serial.print(heading_deg, 2);
+    Serial.print(" speed_mps="); Serial.println(speed_mps, 4);
+}
+
+void start_movep(float target_x_m, float target_y_m, float final_heading_deg, float speed_mps) {
+    if (!drivetrain_ready) { Serial.println("# movep: drivetrain is not enabled"); return; }
+    if (cal_mode != CalMode::kIdle) {
+        Serial.println("# movep rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    MotionEstimate start = {};
+    if (!current_motion_estimate(&start)) { Serial.println("# movep start failed: invalid estimate"); return; }
+    if (hypotf(target_x_m - start.x_m, target_y_m - start.y_m) <=
+        move_p_config.distance_tolerance_m) {
+        Serial.println("# movep start failed: target is already within tolerance");
+        return;
+    }
+    const esp_err_t error = move_p_start(&move_p_state, &move_p_config, &start,
+                                         target_x_m, target_y_m,
+                                         final_heading_deg * kDegToRad, speed_mps);
+    if (error != ESP_OK) { Serial.print("# movep start failed: "); Serial.println(esp_err_to_name(error)); return; }
+    cal_mode = CalMode::kMoveP;
+    Serial.print("# MOVEP START target_x_m="); Serial.print(target_x_m, 4);
+    Serial.print(" target_y_m="); Serial.print(target_y_m, 4);
+    Serial.print(" final_heading_deg="); Serial.print(final_heading_deg, 2);
+    Serial.print(" speed_mps="); Serial.println(speed_mps, 4);
+}
+
+void start_mover(float target_heading_deg) {
+    if (!drivetrain_ready) { Serial.println("# rotl: drivetrain is not enabled"); return; }
+    if (cal_mode != CalMode::kIdle) {
+        Serial.println("# rotl rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    MotionEstimate start = {};
+    if (!current_motion_estimate(&start)) {
+        Serial.println("# rotl start failed: invalid estimate");
+        return;
+    }
+    const esp_err_t error = move_r_start(
+        &move_r_state, &move_r_config, &start, target_heading_deg * kDegToRad);
+    if (error != ESP_OK) {
+        Serial.print("# rotl start failed: ");
+        Serial.println(esp_err_to_name(error));
+        return;
+    }
+    cal_mode = CalMode::kMoveR;
+    Serial.print("# ROTL START target_heading_deg=");
+    Serial.println(target_heading_deg, 2);
 }
 
 // Prints the odometry-only sanity check described in the file header --
@@ -358,6 +565,54 @@ void handle_serial_command() {
         return;
     }
 
+    if (key == "rotl") {
+        start_mover(rest.toFloat());
+        return;
+    }
+
+    if (key == "arc") {
+        String tokens[3];
+        int count = 0;
+        String remaining = rest;
+        while (count < 3 && remaining.length() > 0) {
+            const int space = remaining.indexOf(' ');
+            if (space < 0) {
+                tokens[count++] = remaining;
+                remaining = "";
+            } else {
+                tokens[count++] = remaining.substring(0, space);
+                remaining = remaining.substring(space + 1);
+                remaining.trim();
+            }
+        }
+        if (count < 3) {
+            Serial.println("# usage: arc <radius_m> <angle_deg> <speed_mps>");
+            return;
+        }
+        start_arc(tokens[0].toFloat(), tokens[1].toFloat(), tokens[2].toFloat());
+        return;
+    }
+
+    if (key == "movel" || key == "movep") {
+        String tokens[4];
+        int count = 0;
+        String remaining = rest;
+        while (count < 4 && remaining.length() > 0) {
+            const int space = remaining.indexOf(' ');
+            if (space < 0) { tokens[count++] = remaining; remaining = ""; }
+            else { tokens[count++] = remaining.substring(0, space); remaining = remaining.substring(space + 1); remaining.trim(); }
+        }
+        if ((key == "movel" && count < 3) || (key == "movep" && count < 4)) {
+            Serial.println(key == "movel"
+                ? "# usage: movel <distance_m> <heading_deg> <speed_mps>"
+                : "# usage: movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps>");
+            return;
+        }
+        if (key == "movel") start_movel(tokens[0].toFloat(), tokens[1].toFloat(), tokens[2].toFloat());
+        else start_movep(tokens[0].toFloat(), tokens[1].toFloat(), tokens[2].toFloat(), tokens[3].toFloat());
+        return;
+    }
+
     const float value = rest.toFloat();
 
     if (key == "tol") {
@@ -389,7 +644,12 @@ void handle_serial_command() {
 void print_telemetry(unsigned long now_ms, float remaining, DrivetrainBodyVelocity velocity) {
     Serial.print(now_ms);
     Serial.print(',');
-    Serial.print(cal_mode == CalMode::kMove ? "move" : "rotate");
+    const char *mode_name = cal_mode == CalMode::kMove ? "move" :
+        cal_mode == CalMode::kRotate ? "rotate" :
+        cal_mode == CalMode::kArc ? "arc" :
+        cal_mode == CalMode::kMoveL ? "movel" :
+        cal_mode == CalMode::kMoveP ? "movep" : "rotl";
+    Serial.print(mode_name);
     Serial.print(',');
     Serial.print(odometry.pose.x_mm, 2);
     Serial.print(',');
@@ -415,9 +675,7 @@ void service_move(unsigned long now_ms, float dt_s, bool should_print) {
         return;
     }
 
-    drivetrain_set_body_velocity(&drivetrain,
-        output.requested_velocity.vx, output.requested_velocity.vy,
-        output.requested_velocity.omega);
+    if (!set_velocity_or_brake(output.requested_velocity)) return;
 
     if (should_print) print_telemetry(now_ms, output.remaining_distance_m, output.requested_velocity);
 
@@ -436,9 +694,7 @@ void service_rotate(unsigned long now_ms, float dt_s, bool should_print) {
         return;
     }
 
-    drivetrain_set_body_velocity(&drivetrain,
-        output.requested_velocity.vx, output.requested_velocity.vy,
-        output.requested_velocity.omega);
+    if (!set_velocity_or_brake(output.requested_velocity)) return;
 
     if (should_print) {
         print_telemetry(now_ms, output.remaining_angle_rad * kRadToDeg, output.requested_velocity);
@@ -446,6 +702,110 @@ void service_rotate(unsigned long now_ms, float dt_s, bool should_print) {
 
     if (output.status == ROT_S_COMPLETE) {
         print_rotate_complete();
+        stop_motion();
+    }
+}
+
+void service_arc(unsigned long now_ms, float dt_s, bool should_print) {
+    MotionEstimate estimate = {};
+    if (motion_estimate_from_drivetrain_pose(&odometry.pose, true, &estimate) != ESP_OK) {
+        Serial.println("# arc estimate invalid; stopping");
+        stop_motion();
+        return;
+    }
+    MoveCOutput output = {};
+    const esp_err_t error = move_c_update(&move_c_state, &estimate, dt_s, &output);
+    if (error != ESP_OK || !output.motion_valid) {
+        Serial.println("# arc update failed; stopping");
+        stop_motion();
+        return;
+    }
+    const esp_err_t command_error = drivetrain_set_advanced_body_velocity(
+        &drivetrain, output.requested_velocity.vx, output.requested_velocity.vy,
+        output.requested_velocity.omega);
+    if (command_error != ESP_OK) {
+        Serial.print("# advanced arc command rejected; braking: ");
+        Serial.println(esp_err_to_name(command_error));
+        drivetrain_brake(&drivetrain);
+        drivetrain_ready = false;
+        cal_mode = CalMode::kIdle;
+        return;
+    }
+    if (should_print) print_telemetry(now_ms, output.remaining_arc_m, output.requested_velocity);
+    if (output.status == MOVE_C_COMPLETE) {
+        Serial.println("# ARC COMPLETE");
+        stop_motion();
+    }
+}
+
+bool apply_advanced_output(const DrivetrainBodyVelocity &velocity) {
+    const esp_err_t error = drivetrain_set_advanced_body_velocity(
+        &drivetrain, velocity.vx, velocity.vy, velocity.omega);
+    if (error == ESP_OK) return true;
+    Serial.print("# advanced command rejected; braking: ");
+    Serial.println(esp_err_to_name(error));
+    drivetrain_brake(&drivetrain);
+    drivetrain_ready = false;
+    cal_mode = CalMode::kIdle;
+    return false;
+}
+
+void service_movel(unsigned long now_ms, float dt_s, bool should_print) {
+    MotionEstimate estimate = {};
+    if (!current_motion_estimate(&estimate)) { Serial.println("# movel estimate invalid; stopping"); stop_motion(); return; }
+    const float dx = estimate.x_m - move_l_start_estimate.x_m;
+    const float dy = estimate.y_m - move_l_start_estimate.y_m;
+    MoveLInput input = {
+        .along_track_progress_m = dx * move_l_direction_x + dy * move_l_direction_y,
+        // Match path_planner_line_feedback(): world path-left is
+        // (direction_y, -direction_x), and the controller receives the
+        // negated right displacement so its signed lateral command points
+        // back toward the path under the drivetrain's +body-y/left
+        // convention.
+        .cross_track_error_m = dx * move_l_direction_y -
+                               dy * move_l_direction_x,
+        .valid = true,
+    };
+    MoveLOutput output = {};
+    const esp_err_t error = move_l_update(&move_l_state, &input, dt_s, &output);
+    if (error != ESP_OK || !output.motion_valid) { Serial.println("# movel update failed; stopping"); stop_motion(); return; }
+    if (!apply_advanced_output(output.requested_velocity)) return;
+    if (should_print) print_telemetry(now_ms, output.remaining_distance_m, output.requested_velocity);
+    if (output.status == MOVE_L_COMPLETE) { Serial.println("# MOVEL COMPLETE"); stop_motion(); }
+}
+
+void service_movep(unsigned long now_ms, float dt_s, bool should_print) {
+    MotionEstimate estimate = {};
+    if (!current_motion_estimate(&estimate)) { Serial.println("# movep estimate invalid; stopping"); stop_motion(); return; }
+    MovePOutput output = {};
+    const esp_err_t error = move_p_update(&move_p_state, &estimate, dt_s, &output);
+    if (error != ESP_OK || !output.motion_valid) { Serial.println("# movep update failed; stopping"); stop_motion(); return; }
+    if (!apply_advanced_output(output.requested_velocity)) return;
+    if (should_print) print_telemetry(now_ms, output.distance_to_goal_m, output.requested_velocity);
+    if (output.status == MOVE_P_COMPLETE) { Serial.println("# MOVEP COMPLETE"); stop_motion(); }
+}
+
+void service_mover(unsigned long now_ms, float dt_s, bool should_print) {
+    MotionEstimate estimate = {};
+    if (!current_motion_estimate(&estimate)) {
+        Serial.println("# rotl estimate invalid; stopping");
+        stop_motion();
+        return;
+    }
+    MoveROutput output = {};
+    const esp_err_t error = move_r_update(&move_r_state, &estimate, dt_s, &output);
+    if (error != ESP_OK || !output.motion_valid) {
+        Serial.println("# rotl update failed; stopping");
+        stop_motion();
+        return;
+    }
+    if (!apply_advanced_output(output.requested_velocity)) return;
+    if (should_print) {
+        print_telemetry(now_ms, output.heading_error_rad * kRadToDeg,
+                        output.requested_velocity);
+    }
+    if (output.status == MOVE_R_COMPLETE) {
+        Serial.println("# ROTL COMPLETE");
         stop_motion();
     }
 }
@@ -487,19 +847,50 @@ void setup() {
 void loop() {
     handle_serial_command();
 
-    const int64_t now_us = esp_timer_get_time();
-    const float dt_s = (float)(now_us - last_update_us) / 1.0e6f;
+    const int64_t loop_now_us = esp_timer_get_time();
+    float dt_s = (float)(loop_now_us - last_update_us) / 1.0e6f;
     if (dt_s <= 0.0f) return;
-    last_update_us = now_us;
+    last_update_us = loop_now_us;
+
+    // MoveS/RotS are self-integrated (planned_progress_m/rad += commanded *
+    // dt_s each cycle, see move_s.h/rot_s.h) with no external signal to
+    // correct a bad step -- unlike drivetrain_update()'s own internal dt,
+    // which already coasts rather than integrate an oversized one
+    // (DrivetrainConfig.max_control_dt_s), this loop's own dt_s had no such
+    // guard. A single anomalously large dt_s (e.g. a blocking Serial.print()
+    // of the telemetry line stalling a cycle) gets baked permanently into
+    // the plan, observed on hardware as commanded omega briefly exceeding
+    // its own configured max_omega_rad_s ceiling -- structurally impossible
+    // from rot_s.c's math alone, only reachable via a corrupted dt_s.
+    // Clamping (not skipping the cycle) keeps motion continuous while
+    // bounding the worst-case single-step integration error.
+    if (dt_s > DRIVETRAIN_CONFIG.max_control_dt_s) {
+        dt_s = DRIVETRAIN_CONFIG.max_control_dt_s;
+    }
 
     if (cal_mode == CalMode::kIdle && drivetrain_ready) {
         // Keep the watchdog serviced (and encoders updating) while idle too,
         // via the same controlled-stop path "stop" uses -- otherwise the
         // command timeout coasts the drivetrain and encoder_driver_update()
         // stops being called, leaving odometry stale between moves.
-        drivetrain_set_body_velocity(&drivetrain, 0.0f, 0.0f, 0.0f);
+        if (!set_velocity_or_brake({})) return;
     }
-    if (drivetrain_ready) drivetrain_update(&drivetrain, now_us);
+    if (drivetrain_ready) {
+        // set_velocity_or_brake() above refreshes the drivetrain command
+        // timestamp. Use a fresh timestamp here; passing the timestamp from
+        // before that command makes now_us < last_command_us and produces
+        // ESP_ERR_INVALID_ARG on the first idle cycle after boot/enable.
+        const int64_t update_now_us = esp_timer_get_time();
+        const esp_err_t error = drivetrain_update(&drivetrain, update_now_us);
+        if (error != ESP_OK) {
+            Serial.print("# drivetrain update failed; braking: ");
+            Serial.println(esp_err_to_name(error));
+            drivetrain_brake(&drivetrain);
+            drivetrain_ready = false;
+            cal_mode = CalMode::kIdle;
+            return;
+        }
+    }
 
     const DrivetrainWheelCounts counts = {
         .fl = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_FL),
@@ -517,5 +908,13 @@ void loop() {
         service_move(now_ms, dt_s, should_print);
     } else if (cal_mode == CalMode::kRotate) {
         service_rotate(now_ms, dt_s, should_print);
+    } else if (cal_mode == CalMode::kArc) {
+        service_arc(now_ms, dt_s, should_print);
+    } else if (cal_mode == CalMode::kMoveL) {
+        service_movel(now_ms, dt_s, should_print);
+    } else if (cal_mode == CalMode::kMoveP) {
+        service_movep(now_ms, dt_s, should_print);
+    } else if (cal_mode == CalMode::kMoveR) {
+        service_mover(now_ms, dt_s, should_print);
     }
 }

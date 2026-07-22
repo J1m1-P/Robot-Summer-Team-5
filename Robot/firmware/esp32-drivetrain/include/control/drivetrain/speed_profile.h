@@ -32,6 +32,22 @@ typedef struct {
 // Restores the ramp to a known starting speed with zero acceleration.
 void speed_profile_reset(SpeedProfile *profile, float initial_speed_mps);
 
+/* Predicts how far the current profile will travel if every subsequent
+ * update targets zero speed.  The simulation uses the same jerk-limited
+ * update rule as speed_profile_update(), so it includes the profile's
+ * current acceleration as well as max_accel_mps2 and max_jerk_mps3.
+ *
+ * The result is always a non-negative magnitude and is unit-agnostic: it is
+ * metres for a linear profile and radians for RotS's angular profile.
+ * `stopped_speed_mps` is the caller's zero-speed threshold. */
+esp_err_t speed_profile_predict_stopping_distance(
+    const SpeedProfile *profile,
+    const SpeedProfileConfig *config,
+    float max_accel_mps2,
+    float dt_s,
+    float stopped_speed_mps,
+    float *stopping_distance_m_out);
+
 /* Advances the ramp by one control cycle toward `target_speed_mps`, bounding
  * both acceleration (`max_accel_mps2`) and its rate of change
  * (`config->max_jerk_mps3`). Never overshoots `target_speed_mps` in a single

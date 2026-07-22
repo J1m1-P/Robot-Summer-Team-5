@@ -3,6 +3,7 @@
 
 #include "config/drivetrain/encoder_config.h"
 #include "config/drivetrain/motor_config.h"
+#include "config/drivetrain/move_calibration_config.h"
 #include "config/pin_map.h"
 
 #define DEG_TO_RAD(degrees) ((degrees) * 3.14159265358979323846f / 180.0f)
@@ -55,7 +56,9 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
     .max_vx_mps = 1.0f,
     .max_vy_mps = 1.0f,
     .max_omega_rad_s = 2.0f,
+    .max_wheel_speed_mps = 0.54f,
     .max_control_dt_s = 0.05f,
     .command_timeout_us = 250000LL,
     .brake_pin = PIN_M_BRK,
+    .move_calibration = &MOVE_CALIBRATION_CONFIG,
 };

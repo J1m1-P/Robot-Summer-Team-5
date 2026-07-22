@@ -19,6 +19,52 @@ void speed_profile_reset(SpeedProfile *profile, float initial_speed_mps)
     profile->commanded_accel_mps2 = 0.0f;
 }
 
+esp_err_t speed_profile_predict_stopping_distance(
+    const SpeedProfile *profile,
+    const SpeedProfileConfig *config,
+    float max_accel_mps2,
+    float dt_s,
+    float stopped_speed_mps,
+    float *stopping_distance_m_out)
+{
+    if (profile == NULL || stopping_distance_m_out == NULL ||
+        !speed_profile_config_is_valid(config) ||
+        !isfinite(max_accel_mps2) || max_accel_mps2 <= 0.0f ||
+        !isfinite(dt_s) || dt_s <= 0.0f ||
+        !isfinite(stopped_speed_mps) || stopped_speed_mps < 0.0f) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    SpeedProfile simulated = *profile;
+    float distance_m = 0.0f;
+
+    /* This is deliberately a bounded simulation rather than an
+     * instantaneous-acceleration formula: a primitive needs to know how far
+     * its actual current jerk/acceleration state will coast before zero.
+     * At the control periods used by the drivetrain, 10,000 iterations is
+     * vastly beyond any valid stop; the bound prevents a malformed state from
+     * making a control cycle unbounded. */
+    for (int i = 0; i < 10000; ++i) {
+        /* A profile at rest can still have stored acceleration from the
+         * preceding cycle.  Simulate that residual rather than claiming it
+         * has no stopping distance, otherwise a short move could decide to
+         * brake before it has ever launched. */
+        if (fabsf(simulated.commanded_speed_mps) <= stopped_speed_mps &&
+            fabsf(simulated.commanded_accel_mps2) <= 1.0e-6f) {
+            *stopping_distance_m_out = distance_m;
+            return ESP_OK;
+        }
+
+        float speed_mps = 0.0f;
+        const esp_err_t error = speed_profile_update(
+            &simulated, config, 0.0f, max_accel_mps2, dt_s, &speed_mps);
+        if (error != ESP_OK) return error;
+        distance_m += fabsf(speed_mps) * dt_s;
+    }
+
+    return ESP_ERR_INVALID_STATE;
+}
+
 esp_err_t speed_profile_update(
     SpeedProfile *profile,
     const SpeedProfileConfig *config,

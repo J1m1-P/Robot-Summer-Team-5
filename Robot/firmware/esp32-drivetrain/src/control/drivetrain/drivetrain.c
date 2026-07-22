@@ -24,6 +24,7 @@ static void record_first_error(esp_err_t *first_error, esp_err_t error) {
 // Clears velocity targets, PI history, and wheel-output telemetry.
 static void reset_control_state(Drivetrain *drivetrain) {
     memset(&drivetrain->status.target_body, 0, sizeof(drivetrain->status.target_body));
+    drivetrain->control.apply_motion_calibration = false;
     for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
         wheel_velocity_controller_reset(&drivetrain->devices.wheel_controller[index]);
         drivetrain->control.target_wheel_mps[index] = 0.0f;
@@ -46,6 +47,73 @@ static bool positive_finite(float value) {
     return isfinite(value) && value > 0.0f;
 }
 
+/* Uniformly scales a requested body velocity when its combined 30-degree
+ * omniwheel demand would exceed the measured wheel-speed ceiling. Scaling all
+ * components preserves the intended motion direction and prevents hidden
+ * wheel-controller saturation. */
+static esp_err_t limit_body_to_wheel_feasibility(
+    const DrivetrainConfig *config,
+    const DrivetrainBodyVelocity *requested,
+    DrivetrainBodyVelocity *limited_out
+) {
+    if (config == NULL || requested == NULL || limited_out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    XDriveWheelVelocity wheels = {0};
+    const esp_err_t error = x_drive_kinematics_body_to_wheel_velocities(
+        &config->x_drive_kinematics, requested, &wheels);
+    if (error != ESP_OK) return error;
+    const float radius = config->x_drive_kinematics.wheel_radius_m;
+    const float peak_mps = fmaxf(fmaxf(fabsf(wheels.fl), fabsf(wheels.fr)),
+                                 fmaxf(fabsf(wheels.bl), fabsf(wheels.br))) * radius;
+    const float scale = peak_mps > config->max_wheel_speed_mps
+        ? config->max_wheel_speed_mps / peak_mps
+        : 1.0f;
+    limited_out->vx = requested->vx * scale;
+    limited_out->vy = requested->vy * scale;
+    limited_out->omega = requested->omega * scale;
+    return ESP_OK;
+}
+
+static MoveCalibrationDirection calibration_direction(
+    float vx_mps, float vy_mps
+) {
+    if (fabsf(vx_mps) >= fabsf(vy_mps)) {
+        return vx_mps >= 0.0f
+            ? MOVE_CALIBRATION_POS_X
+            : MOVE_CALIBRATION_NEG_X;
+    }
+    return vy_mps >= 0.0f
+        ? MOVE_CALIBRATION_POS_Y
+        : MOVE_CALIBRATION_NEG_Y;
+}
+
+static void apply_advanced_calibration(
+    const Drivetrain *drivetrain, float wheel_mps[DRIVETRAIN_MOTOR_MAX]
+) {
+    const MoveCalibrationConfig *calibration = drivetrain->config->move_calibration;
+    if (!drivetrain->control.apply_motion_calibration || calibration == NULL ||
+        !calibration->enabled) return;
+
+    if (hypotf(drivetrain->status.target_body.vx,
+               drivetrain->status.target_body.vy) <= 1.0e-6f) return;
+    const MoveCalibrationDirection direction = calibration_direction(
+        drivetrain->status.target_body.vx, drivetrain->status.target_body.vy);
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+        wheel_mps[index] *= calibration->f_lat[direction][index];
+    }
+    float peak = 0.0f;
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+        peak = fmaxf(peak, fabsf(wheel_mps[index]));
+    }
+    if (peak > drivetrain->config->max_wheel_speed_mps) {
+        const float scale = drivetrain->config->max_wheel_speed_mps / peak;
+        for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; ++index) {
+            wheel_mps[index] *= scale;
+        }
+    }
+}
+
 // Validates hardware assignments, geometry, controller, and safety bounds.
 static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
     if (config == NULL || !GPIO_IS_VALID_OUTPUT_GPIO(config->brake_pin)) return false;
@@ -53,6 +121,7 @@ static bool drivetrain_config_is_valid(const DrivetrainConfig *config) {
         !positive_finite(config->max_vx_mps) ||
         !positive_finite(config->max_vy_mps) ||
         !positive_finite(config->max_omega_rad_s) ||
+        !positive_finite(config->max_wheel_speed_mps) ||
         !positive_finite(config->max_control_dt_s) ||
         config->command_timeout_us <= 0) {
         return false;
@@ -265,12 +334,12 @@ esp_err_t drivetrain_disable(Drivetrain *drivetrain) {
     return drivetrain_brake(drivetrain);
 }
 
-// Stores a bounded body target and refreshes the command watchdog.
-esp_err_t drivetrain_set_body_velocity(
+static esp_err_t set_body_velocity(
     Drivetrain *drivetrain,
     float vx_mps,
     float vy_mps,
-    float omega_rad_s
+    float omega_rad_s,
+    bool advanced_motion
 ) {
     if (drivetrain == NULL) return ESP_ERR_INVALID_ARG;
     if (!drivetrain->status.initialized || !drivetrain->status.enabled ||
@@ -284,17 +353,59 @@ esp_err_t drivetrain_set_body_velocity(
         return ESP_ERR_INVALID_ARG;
     }
 
-    drivetrain->status.target_body.vx = vx_mps;
-    drivetrain->status.target_body.vy = vy_mps;
-    drivetrain->status.target_body.omega = omega_rad_s;
+    DrivetrainBodyVelocity requested = {
+        .vx = vx_mps,
+        .vy = vy_mps,
+        .omega = omega_rad_s,
+    };
+    const MoveCalibrationConfig *calibration = drivetrain->config->move_calibration;
+    if (advanced_motion && calibration != NULL && calibration->enabled &&
+        hypotf(requested.vx, requested.vy) > 1.0e-6f) {
+        if (fabsf(requested.vx) > 1.0e-6f) {
+            const MoveCalibrationDirection x_direction = requested.vx >= 0.0f
+                ? MOVE_CALIBRATION_POS_X : MOVE_CALIBRATION_NEG_X;
+            requested.vx *= calibration->f_lon[x_direction];
+        }
+        if (fabsf(requested.vy) > 1.0e-6f) {
+            const MoveCalibrationDirection y_direction = requested.vy >= 0.0f
+                ? MOVE_CALIBRATION_POS_Y : MOVE_CALIBRATION_NEG_Y;
+            requested.vy *= calibration->f_lon[y_direction];
+        }
+    }
+    DrivetrainBodyVelocity limited = {0};
+    const esp_err_t limit_error = limit_body_to_wheel_feasibility(
+        drivetrain->config, &requested, &limited);
+    if (limit_error != ESP_OK) return limit_error;
+    drivetrain->status.target_body = limited;
+    drivetrain->control.apply_motion_calibration = advanced_motion;
     drivetrain->control.last_command_us = esp_timer_get_time();
     drivetrain->status.command_timeout_active = false;
     return ESP_OK;
 }
 
-// Requests a controlled stop through the closed-loop velocity path.
+// Stores a bounded body target and refreshes the command watchdog.
+esp_err_t drivetrain_set_body_velocity(
+    Drivetrain *drivetrain, float vx_mps, float vy_mps, float omega_rad_s
+) {
+    return set_body_velocity(drivetrain, vx_mps, vy_mps, omega_rad_s, false);
+}
+
+esp_err_t drivetrain_set_advanced_body_velocity(
+    Drivetrain *drivetrain, float vx_mps, float vy_mps, float omega_rad_s
+) {
+    return set_body_velocity(drivetrain, vx_mps, vy_mps, omega_rad_s, true);
+}
+
+// Immediately removes motor power while retaining a zero velocity target for
+// subsequent control cycles.  This is deliberately a coast, not a reverse-
+// polarity active brake: zero target is the motion API's completion contract,
+// and a caller must not have to wait for another drivetrain_update() cycle
+// before PWM is zero on every motor.
 esp_err_t drivetrain_stop(Drivetrain *drivetrain) {
-    return drivetrain_set_body_velocity(drivetrain, 0.0f, 0.0f, 0.0f);
+    const esp_err_t error = drivetrain_set_body_velocity(
+        drivetrain, 0.0f, 0.0f, 0.0f);
+    if (error != ESP_OK) return error;
+    return drivetrain_coast(drivetrain);
 }
 
 // Runs one complete bounded-time closed-loop velocity-control iteration.
@@ -343,15 +454,15 @@ esp_err_t drivetrain_update(Drivetrain *drivetrain, int64_t now_us) {
     }
 
     const float radius = drivetrain->config->x_drive_kinematics.wheel_radius_m;
-    const float wheel_velocities[] = {
-        wheel_rad_s.fl,
-        wheel_rad_s.fr,
-        wheel_rad_s.bl,
-        wheel_rad_s.br,
+    float wheel_velocities[] = {
+        wheel_rad_s.fl * radius,
+        wheel_rad_s.fr * radius,
+        wheel_rad_s.bl * radius,
+        wheel_rad_s.br * radius,
     };
+    apply_advanced_calibration(drivetrain, wheel_velocities);
     for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
-        drivetrain->control.target_wheel_mps[index] =
-            wheel_velocities[index] * radius;
+        drivetrain->control.target_wheel_mps[index] = wheel_velocities[index];
     }
 
     float duties[DRIVETRAIN_MOTOR_MAX] = {0};
