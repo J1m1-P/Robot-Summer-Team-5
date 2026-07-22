@@ -9,5 +9,5 @@ const I2cBusConfig SENSOR_I2C_BUS_CONFIG = {
     .scl_pin = PIN_I2C_SCL,
     .clock_speed_hz = 100000U,
     .timeout_ms = 50U,
-    .enable_internal_pullups = false,
+    .enable_internal_pullups = true,
 };

@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+/* Configuration ------------------------------------------------------------ */
+
 typedef enum {
     VL53L0X_PROFILE_DEFAULT = 0,
     VL53L0X_PROFILE_HIGH_SPEED,
@@ -27,6 +29,8 @@ typedef struct {
     uint32_t stop_timeout_ms;
     uint32_t stale_after_ms;
 } VL53L0XConfig;
+
+/* Runtime state ------------------------------------------------------------- */
 
 typedef struct {
     uint16_t distance_mm;
@@ -45,6 +49,8 @@ typedef struct {
     bool has_data;
 } VL53L0X;
 
+/* Lifecycle ----------------------------------------------------------------- */
+
 /* Initializes, calibrates, and assigns the configured runtime address. */
 esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
                               const VL53L0XConfig *config);
@@ -52,6 +58,9 @@ esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
 esp_err_t vl53l0x_driver_deinit(VL53L0X *sensor);
 esp_err_t vl53l0x_driver_start(VL53L0X *sensor);
 esp_err_t vl53l0x_driver_stop(VL53L0X *sensor);
+
+/* Data ---------------------------------------------------------------------- */
+
 /* Caches one ready sample, or returns ESP_ERR_NOT_FINISHED. */
 esp_err_t vl53l0x_driver_read(VL53L0X *sensor);
 /* Returns the cached sample while fresh; inspect sample.valid for range status. */

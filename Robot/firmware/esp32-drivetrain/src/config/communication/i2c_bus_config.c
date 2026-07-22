@@ -15,5 +15,5 @@ const I2cBusConfig SENSOR_I2C_BUS_CONFIG = {
     .timeout_ms = 50U, 
 
     // For testing set to true, set to false for actual operation
-    .enable_internal_pullups = false
+    .enable_internal_pullups = true
 };

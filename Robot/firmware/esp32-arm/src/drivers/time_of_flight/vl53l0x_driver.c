@@ -11,6 +11,28 @@
 #define VL53L0X_BOOT_DELAY_MS     5U
 #define VL53L0X_ADDRESS_DELAY_MS 10U
 
+/* -------------------------------------------------------------------------- */
+/* Test-only diagnostics                                                       */
+/* -------------------------------------------------------------------------- */
+
+#if defined(TOF_ENABLE_TEST_DIAGNOSTICS)
+extern void vl53l0x_test_diagnostic_event(const VL53L0XConfig *config,
+                                          const char *state, uint8_t address,
+                                          esp_err_t error);
+
+static void test_report_state(const VL53L0XConfig *config, const char *state,
+                              uint8_t address, esp_err_t error)
+{
+    vl53l0x_test_diagnostic_event(config, state, address, error);
+}
+#else
+#define test_report_state(config, state, address, error) ((void)0)
+#endif
+
+/* -------------------------------------------------------------------------- */
+/* Validation and vendor error conversion                                      */
+/* -------------------------------------------------------------------------- */
+
 static esp_err_t convert_error(VL53L0X_Error error)
 {
     switch (error) {
@@ -35,6 +57,30 @@ static bool config_is_valid(const VL53L0XConfig *config)
            (config->timing_budget_us == 0U ||
             config->timing_budget_us >= 20000U) &&
            config->stop_timeout_ms > 0U && config->stale_after_ms > 0U;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Power and address management                                                */
+/* -------------------------------------------------------------------------- */
+
+/* Finds an always-on device after an ESP reset, when it may retain its target address. */
+static esp_err_t find_initial_address(I2cBus *bus,
+                                     const TofDeviceConfig *config,
+                                     uint8_t *address)
+{
+    *address = config->default_i2c_address;
+    if (config->shutdown_pin != GPIO_NUM_NC ||
+        config->target_i2c_address == config->default_i2c_address) {
+        return ESP_OK;
+    }
+    esp_err_t default_error = i2c_bus_probe(bus, config->default_i2c_address);
+    if (default_error == ESP_OK) return ESP_OK;
+    esp_err_t target_error = i2c_bus_probe(bus, config->target_i2c_address);
+    if (target_error == ESP_OK) {
+        *address = config->target_i2c_address;
+        return ESP_OK;
+    }
+    return default_error;
 }
 
 /* Updates the hardware, project transport, and ST context together. */
@@ -73,6 +119,10 @@ static esp_err_t power_on(const TofDeviceConfig *config)
     }
     return error;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Sensor configuration                                                        */
+/* -------------------------------------------------------------------------- */
 
 /* Applies the selected profile and its explicit or default timing budget. */
 static VL53L0X_Error apply_profile(VL53L0X *sensor)
@@ -131,6 +181,10 @@ static VL53L0X_Error apply_profile(VL53L0X *sensor)
     return error;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Public lifecycle API                                                        */
+/* -------------------------------------------------------------------------- */
+
 esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
                               const VL53L0XConfig *config)
 {
@@ -143,15 +197,18 @@ esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
 
     memset(sensor, 0, sizeof(*sensor));
     sensor->config = config;
-    bool address_changed = false;
-
+    test_report_state(config, "powering_on",
+                      config->device.default_i2c_address, ESP_OK);
     esp_err_t error = power_on(&config->device);
     if (error != ESP_OK) goto fail;
-    error = i2c_device_init(&sensor->i2c_device, bus,
-                            config->device.default_i2c_address);
+    uint8_t initial_address = config->device.default_i2c_address;
+    error = find_initial_address(bus, &config->device, &initial_address);
+    if (error != ESP_OK) goto fail;
+    test_report_state(config, "boot_address", initial_address, ESP_OK);
+    error = i2c_device_init(&sensor->i2c_device, bus, initial_address);
     if (error != ESP_OK) goto fail;
 
-    sensor->vendor_device.I2cDevAddr = config->device.default_i2c_address;
+    sensor->vendor_device.I2cDevAddr = initial_address;
     sensor->vendor_device.comms_type = 1U;
     sensor->vendor_device.comms_speed_khz =
         (uint16_t)(bus->config->clock_speed_hz / 1000U);
@@ -159,12 +216,16 @@ esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
 
     VL53L0X_Error vendor_error = VL53L0X_DataInit(&sensor->vendor_device);
     if (vendor_error != VL53L0X_ERROR_NONE) goto vendor_fail;
-    if (config->device.target_i2c_address !=
-        config->device.default_i2c_address) {
+    test_report_state(config, "identity_verified", initial_address, ESP_OK);
+    if (config->device.target_i2c_address != initial_address) {
+        test_report_state(config, "changing_address", initial_address, ESP_OK);
         vendor_error = set_address(sensor, config->device.target_i2c_address);
         if (vendor_error != VL53L0X_ERROR_NONE) goto vendor_fail;
-        address_changed = true;
     }
+    test_report_state(config, "address_assigned",
+                      sensor->i2c_device.address, ESP_OK);
+    test_report_state(config, "calibrating",
+                      sensor->i2c_device.address, ESP_OK);
 
     VL53L0X_DeviceInfo_t device_info;
     vendor_error = VL53L0X_GetDeviceInfo(&sensor->vendor_device, &device_info);
@@ -194,14 +255,22 @@ esp_err_t vl53l0x_driver_init(VL53L0X *sensor, I2cBus *bus,
     if (vendor_error != VL53L0X_ERROR_NONE) goto vendor_fail;
 
     sensor->initialized = true;
+    test_report_state(config, "ready", sensor->i2c_device.address, ESP_OK);
     return ESP_OK;
 
 vendor_fail:
     error = convert_error(vendor_error);
 fail:
+    test_report_state(
+        config, "failed",
+        sensor->i2c_device.initialized
+            ? sensor->i2c_device.address
+            : config->device.default_i2c_address,
+        error);
     if (config->device.shutdown_pin != GPIO_NUM_NC) {
         gpio_set_level(config->device.shutdown_pin, 0U);
-    } else if (address_changed) {
+    } else if (sensor->i2c_device.initialized &&
+               sensor->i2c_device.address != config->device.default_i2c_address) {
         set_address(sensor, config->device.default_i2c_address);
     }
     memset(sensor, 0, sizeof(*sensor));
@@ -243,6 +312,8 @@ esp_err_t vl53l0x_driver_start(VL53L0X *sensor)
 
     sensor->has_data = false;
     sensor->ranging = true;
+    test_report_state(sensor->config, "ranging",
+                      sensor->i2c_device.address, ESP_OK);
     return ESP_OK;
 }
 
@@ -269,6 +340,10 @@ esp_err_t vl53l0x_driver_stop(VL53L0X *sensor)
     sensor->ranging = false;
     return ESP_OK;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Public data API                                                             */
+/* -------------------------------------------------------------------------- */
 
 esp_err_t vl53l0x_driver_read(VL53L0X *sensor)
 {

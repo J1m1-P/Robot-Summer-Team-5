@@ -8,9 +8,33 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define VL53L5CX_BOOT_DELAY_MS 10U
+#define VL53L5CX_BOOT_DELAY_MS         10U
+#define VL53L5CX_BOOT_READY_TIMEOUT_MS 1000U
+#define VL53L5CX_BOOT_RETRY_DELAY_MS   20U
 #define VL53L5CX_VALID_TARGET_STATUS            5U
 #define VL53L5CX_VALID_TARGET_STATUS_LARGE_PULSE 9U
+
+/* -------------------------------------------------------------------------- */
+/* Test-only diagnostics                                                       */
+/* -------------------------------------------------------------------------- */
+
+#if defined(TOF_ENABLE_TEST_DIAGNOSTICS)
+extern void vl53l5cx_test_diagnostic_event(const VL53L5CXConfig *config,
+                                           const char *state, uint8_t address,
+                                           esp_err_t error);
+
+static void test_report_state(const VL53L5CXConfig *config, const char *state,
+                              uint8_t address, esp_err_t error)
+{
+    vl53l5cx_test_diagnostic_event(config, state, address, error);
+}
+#else
+#define test_report_state(config, state, address, error) ((void)0)
+#endif
+
+/* -------------------------------------------------------------------------- */
+/* Validation and vendor status conversion                                     */
+/* -------------------------------------------------------------------------- */
 
 static esp_err_t convert_status(uint8_t status)
 {
@@ -50,6 +74,37 @@ static bool config_is_valid(const VL53L5CXConfig *config)
            config->stale_after_ms > 0U;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Power, boot, and address management                                         */
+/* -------------------------------------------------------------------------- */
+
+/* Find the address the hardware actually acknowledges. A sensor can retain its
+ * target address across an ESP reset when LPn is absent, miswired, or did not
+ * remain low long enough, so even nominally controlled devices must be probed. */
+static esp_err_t find_initial_address(I2cBus *bus,
+                                     const TofDeviceConfig *config,
+                                     uint8_t *address)
+{
+    *address = config->default_i2c_address;
+    const int64_t deadline_us = esp_timer_get_time() +
+        (int64_t)VL53L5CX_BOOT_READY_TIMEOUT_MS * 1000LL;
+    esp_err_t default_error = ESP_ERR_NOT_FOUND;
+
+    do {
+        default_error = i2c_bus_probe(bus, config->default_i2c_address);
+        if (default_error == ESP_OK) return ESP_OK;
+
+        if (config->target_i2c_address != config->default_i2c_address &&
+            i2c_bus_probe(bus, config->target_i2c_address) == ESP_OK) {
+            *address = config->target_i2c_address;
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(VL53L5CX_BOOT_RETRY_DELAY_MS));
+    } while (esp_timer_get_time() < deadline_us);
+
+    return default_error;
+}
+
 /* Drives LPn when controlled and waits for the power-state transition. */
 static esp_err_t power_on(const TofDeviceConfig *config)
 {
@@ -77,6 +132,29 @@ static uint8_t set_address(VL53L5CX *sensor, uint8_t address)
     if (status == VL53L5CX_STATUS_OK) sensor->i2c_device.address = address;
     return status;
 }
+
+/* LPn rising does not guarantee that the identification registers are ready.
+ * Keep retrying the harmless identity read instead of treating the first I2C
+ * timeout/NACK as a permanent sensor failure. */
+static uint8_t wait_until_alive(VL53L5CX *sensor, uint8_t *alive)
+{
+    const int64_t deadline_us = esp_timer_get_time() +
+        (int64_t)VL53L5CX_BOOT_READY_TIMEOUT_MS * 1000LL;
+    uint8_t status = VL53L5CX_STATUS_TIMEOUT_ERROR;
+
+    do {
+        *alive = 0U;
+        status = vl53l5cx_is_alive(&sensor->vendor_device, alive);
+        if (status == VL53L5CX_STATUS_OK && *alive != 0U) return status;
+        vTaskDelay(pdMS_TO_TICKS(VL53L5CX_BOOT_RETRY_DELAY_MS));
+    } while (esp_timer_get_time() < deadline_us);
+
+    return status;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sensor configuration                                                        */
+/* -------------------------------------------------------------------------- */
 
 static uint8_t apply_config(VL53L5CX *sensor)
 {
@@ -113,6 +191,10 @@ static uint8_t apply_config(VL53L5CX *sensor)
     return status;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Public lifecycle API                                                        */
+/* -------------------------------------------------------------------------- */
+
 esp_err_t vl53l5cx_driver_init(VL53L5CX *sensor, I2cBus *bus,
                                const VL53L5CXConfig *config)
 {
@@ -125,46 +207,65 @@ esp_err_t vl53l5cx_driver_init(VL53L5CX *sensor, I2cBus *bus,
 
     memset(sensor, 0, sizeof(*sensor));
     sensor->config = config;
-    bool address_changed = false;
-
+    test_report_state(config, "powering_on",
+                      config->device.default_i2c_address, ESP_OK);
     esp_err_t error = power_on(&config->device);
     if (error != ESP_OK) goto fail;
-    error = i2c_device_init(&sensor->i2c_device, bus,
-                            config->device.default_i2c_address);
+    uint8_t initial_address = config->device.default_i2c_address;
+    test_report_state(config, "probing_addresses", initial_address, ESP_OK);
+    error = find_initial_address(bus, &config->device, &initial_address);
+    if (error != ESP_OK) goto fail;
+    test_report_state(config, "boot_address", initial_address, ESP_OK);
+    error = i2c_device_init(&sensor->i2c_device, bus, initial_address);
     if (error != ESP_OK) goto fail;
 
     sensor->vendor_device.platform.address =
-        (uint16_t)(config->device.default_i2c_address << 1U);
+        (uint16_t)(initial_address << 1U);
     sensor->vendor_device.platform.i2c_device = &sensor->i2c_device;
 
     uint8_t alive = 0U;
-    uint8_t status = vl53l5cx_is_alive(&sensor->vendor_device, &alive);
+    test_report_state(config, "waiting_for_boot", initial_address, ESP_OK);
+    uint8_t status = wait_until_alive(sensor, &alive);
     if (status != VL53L5CX_STATUS_OK || alive == 0U) {
         error = status == VL53L5CX_STATUS_OK
             ? ESP_ERR_NOT_FOUND : convert_status(status);
         goto fail;
     }
 
-    status = vl53l5cx_init(&sensor->vendor_device);
-    if (status != VL53L5CX_STATUS_OK) goto vendor_fail;
-    if (config->device.target_i2c_address !=
-        config->device.default_i2c_address) {
+    test_report_state(config, "identity_verified", initial_address, ESP_OK);
+    if (config->device.target_i2c_address != initial_address) {
+        test_report_state(config, "changing_address", initial_address, ESP_OK);
         status = set_address(sensor, config->device.target_i2c_address);
         if (status != VL53L5CX_STATUS_OK) goto vendor_fail;
-        address_changed = true;
     }
+    test_report_state(config, "address_assigned",
+                      sensor->i2c_device.address, ESP_OK);
+    test_report_state(config, "loading_firmware",
+                      sensor->i2c_device.address, ESP_OK);
+    status = vl53l5cx_init(&sensor->vendor_device);
+    if (status != VL53L5CX_STATUS_OK) goto vendor_fail;
+    test_report_state(config, "configuring",
+                      sensor->i2c_device.address, ESP_OK);
     status = apply_config(sensor);
     if (status != VL53L5CX_STATUS_OK) goto vendor_fail;
 
     sensor->initialized = true;
+    test_report_state(config, "ready", sensor->i2c_device.address, ESP_OK);
     return ESP_OK;
 
 vendor_fail:
     error = convert_status(status);
 fail:
+    test_report_state(
+        config, "failed",
+        sensor->i2c_device.initialized
+            ? sensor->i2c_device.address
+            : config->device.default_i2c_address,
+        error);
     if (config->device.shutdown_pin != GPIO_NUM_NC) {
         gpio_set_level(config->device.shutdown_pin, 0U);
-    } else if (address_changed) {
+    } else if (sensor->i2c_device.initialized &&
+               sensor->i2c_device.address != config->device.default_i2c_address) {
         set_address(sensor, config->device.default_i2c_address);
     }
     memset(sensor, 0, sizeof(*sensor));
@@ -202,6 +303,8 @@ esp_err_t vl53l5cx_driver_start(VL53L5CX *sensor)
     sensor->valid_zone_mask = 0U;
     sensor->has_data = false;
     sensor->ranging = true;
+    test_report_state(sensor->config, "ranging",
+                      sensor->i2c_device.address, ESP_OK);
     return ESP_OK;
 }
 
@@ -217,6 +320,10 @@ esp_err_t vl53l5cx_driver_stop(VL53L5CX *sensor)
     sensor->ranging = false;
     return ESP_OK;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Public data API                                                             */
+/* -------------------------------------------------------------------------- */
 
 esp_err_t vl53l5cx_driver_read(VL53L5CX *sensor)
 {

@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+/* Configuration ------------------------------------------------------------ */
+
 typedef enum {
     VL53L5CX_CONFIG_RESOLUTION_4X4 = 16,
     VL53L5CX_CONFIG_RESOLUTION_8X8 = 64
@@ -39,6 +41,8 @@ typedef struct {
     uint32_t stale_after_ms;
 } VL53L5CXConfig;
 
+/* Runtime state ------------------------------------------------------------- */
+
 typedef struct {
     const VL53L5CXConfig *config;
     I2cDevice i2c_device;
@@ -51,6 +55,8 @@ typedef struct {
     bool has_data;
 } VL53L5CX;
 
+/* Lifecycle ----------------------------------------------------------------- */
+
 /* Initializes the ULD and assigns the configured runtime address. */
 esp_err_t vl53l5cx_driver_init(VL53L5CX *sensor, I2cBus *bus,
                                const VL53L5CXConfig *config);
@@ -58,6 +64,9 @@ esp_err_t vl53l5cx_driver_init(VL53L5CX *sensor, I2cBus *bus,
 esp_err_t vl53l5cx_driver_deinit(VL53L5CX *sensor);
 esp_err_t vl53l5cx_driver_start(VL53L5CX *sensor);
 esp_err_t vl53l5cx_driver_stop(VL53L5CX *sensor);
+
+/* Data ---------------------------------------------------------------------- */
+
 /* Caches one ready frame, or returns ESP_ERR_NOT_FINISHED. */
 esp_err_t vl53l5cx_driver_read(VL53L5CX *sensor);
 /* Returns one cached distance only while its zone is valid and fresh. */
