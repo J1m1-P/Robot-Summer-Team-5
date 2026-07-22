@@ -63,7 +63,11 @@ static void parser_reset(PacketParser *parser) {
 // Publishes a validated parser payload as the link's latest packet.
 static void parser_finish_packet(UartLink *link) {
     PacketParser *parser = &link->parser;
-    PacketFrame *frame = &link->latest_packet;
+    if (link->packet_queue_count >= UART_LINK_PACKET_QUEUE_SIZE) {
+        link->packets_dropped++;
+        return;
+    }
+    PacketFrame *frame = &link->packet_queue[link->packet_queue_tail];
 
     memset(frame, 0, sizeof(*frame));
     frame->message_type = parser->message_type;
@@ -73,11 +77,9 @@ static void parser_finish_packet(UartLink *link) {
         memcpy(frame->payload, parser->payload, parser->payload_len);
     }
 
-    if (link->has_new_packet) {
-        link->packets_overwritten++;
-    }
-
-    link->has_new_packet = true;
+    link->packet_queue_tail = (uint8_t)((link->packet_queue_tail + 1U) %
+                                        UART_LINK_PACKET_QUEUE_SIZE);
+    link->packet_queue_count++;
     link->packets_received++;
 }
 
@@ -286,15 +288,17 @@ esp_err_t uart_link_send(UartLink *link, PacketMessageType message_type, const u
 esp_err_t uart_link_take_packet(UartLink *link, PacketFrame *packet_out) {
     if (link == NULL || packet_out == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
-    if (!link->has_new_packet) return ESP_ERR_NOT_FOUND;
+    if (link->packet_queue_count == 0U) return ESP_ERR_NOT_FOUND;
 
-    *packet_out = link->latest_packet;
-    link->has_new_packet = false;
+    *packet_out = link->packet_queue[link->packet_queue_head];
+    link->packet_queue_head = (uint8_t)((link->packet_queue_head + 1U) %
+                                        UART_LINK_PACKET_QUEUE_SIZE);
+    link->packet_queue_count--;
     return ESP_OK;
 }
 
 // Checks whether the initialized link currently holds an unread packet.
 bool uart_link_has_packet(const UartLink *link) {
     if (link == NULL || !link->initialized) return false;
-    return link->has_new_packet;
+    return link->packet_queue_count > 0U;
 }
