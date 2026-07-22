@@ -45,6 +45,10 @@ typedef struct {
     float final_heading_rad;
     float last_heading_rad;
     bool initialized_phase;
+    bool braking;
+    bool settling;
+    float settle_pulse_remaining_s;
+    float settle_pause_remaining_s;
     MoveCStatus status;
     OffTapeMotion off_tape_motion;
     SpeedProfile translation_profile;

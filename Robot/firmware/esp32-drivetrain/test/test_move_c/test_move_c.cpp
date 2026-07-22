@@ -111,6 +111,64 @@ void test_move_c_invalid_active_estimate_faults_with_zero_output() {
     TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.omega);
 }
 
+void test_move_c_stalled_arc_progress_faults_instead_of_hanging() {
+    MoveC m = {};
+    const MoveCConfig c = config();
+    const MotionEstimate start = {.x_m = 0.0f, .y_m = 0.0f,
+                                  .heading_rad = 0.0f, .valid = true};
+    TEST_ASSERT_EQUAL(ESP_OK, move_c_start(&m, &c, &start, 1.0f,
+                                           1.5707963f, 0.3f));
+    // A point on the same quarter-circle (center (0,1), radius 1) 0.05 m of
+    // arc-length short of the endpoint -- simulates wheel slip that leaves
+    // the robot permanently unable to close the remaining arc-length gap
+    // (bigger than arc_length_tolerance_m) once its one-way profile stops.
+    const MotionEstimate stalled = {.x_m = 0.99875026f, .y_m = 0.95002083f,
+                                    .heading_rad = 1.5208f, .valid = true};
+    MoveCOutput out = {};
+    MoveCStatus status = MOVE_C_RUNNING;
+    for (int i = 0; i < 500 && status == MOVE_C_RUNNING; ++i) {
+        TEST_ASSERT_EQUAL(ESP_OK, move_c_update(&m, &stalled, 0.02f, &out));
+        status = out.status;
+    }
+    TEST_ASSERT_EQUAL(MOVE_C_FAULT, status);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.vx);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.vy);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.omega);
+}
+
+void test_move_c_endpoint_radial_residual_pulses_above_deadband() {
+    MoveC m = {};
+    const MoveCConfig c = config();
+    const MotionEstimate start = {.x_m = 0.0f, .y_m = 0.0f,
+                                  .heading_rad = 0.0f, .valid = true};
+    TEST_ASSERT_EQUAL(ESP_OK, move_c_start(&m, &c, &start, 1.0f,
+                                           1.5707963f, 0.3f));
+    // Endpoint of the quarter-circle (center (0,1)), but 0.03 m radially
+    // outside the target circle -- past this config's radial_tolerance_m
+    // (0.02f). A plain continuous PID (proportional_gain = 1.0) would
+    // command only 0.03 m/s here, well under the ~0.05 m/s characterized
+    // wheel-velocity floor, and would never actually move the robot.
+    const MotionEstimate stalled = {.x_m = 1.03f, .y_m = 1.0f,
+                                    .heading_rad = 1.5707963f, .valid = true};
+    MoveCOutput out = {};
+
+    // Pulse windows (0.05 s) survive the first three 0.02 s steps and command
+    // a body speed clearly above the deadband, not the tiny continuous value.
+    for (int i = 0; i < 3; ++i) {
+        TEST_ASSERT_EQUAL(ESP_OK, move_c_update(&m, &stalled, 0.02f, &out));
+        TEST_ASSERT_EQUAL(MOVE_C_RUNNING, out.status);
+        const float speed = hypotf(out.requested_velocity.vx, out.requested_velocity.vy);
+        TEST_ASSERT_TRUE(speed >= 0.08f - 1.0e-4f);
+        TEST_ASSERT_TRUE(speed <= 0.12f + 1.0e-4f);
+    }
+    // The pause window (0.10 s) then commands exact zero, not a residual
+    // sub-deadband trickle.
+    TEST_ASSERT_EQUAL(ESP_OK, move_c_update(&m, &stalled, 0.02f, &out));
+    TEST_ASSERT_EQUAL(MOVE_C_RUNNING, out.status);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.vx);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out.requested_velocity.vy);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_move_c_starts_with_tangent_translation_and_turn);
@@ -118,5 +176,7 @@ int main(int, char**) {
     RUN_TEST(test_move_c_clockwise_radial_correction_reverses_sign);
     RUN_TEST(test_move_c_completion_has_exact_zero_command);
     RUN_TEST(test_move_c_invalid_active_estimate_faults_with_zero_output);
+    RUN_TEST(test_move_c_stalled_arc_progress_faults_instead_of_hanging);
+    RUN_TEST(test_move_c_endpoint_radial_residual_pulses_above_deadband);
     return UNITY_END();
 }

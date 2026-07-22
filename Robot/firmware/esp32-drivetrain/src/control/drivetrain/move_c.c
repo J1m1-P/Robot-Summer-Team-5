@@ -9,6 +9,14 @@
 
 static const float kPi = 3.14159265358979323846f;
 static const float kStoppedSpeed = 0.005f;
+static const float kSettleHoldGain = 1.5f;
+/* The characterized wheel loop has an effective floor near 0.05 m/s. Use a
+ * slightly larger body-frame correction so the projected wheel targets clear
+ * that deadband during endpoint adjustment (matches MoveP's settle-hold). */
+static const float kSettleHoldMinSpeed = 0.08f;
+static const float kSettleHoldMaxSpeed = 0.12f;
+static const float kSettlePulseDurationS = 0.05f;
+static const float kSettlePulsePauseS = 0.10f;
 
 bool move_c_config_is_valid(const MoveCConfig *c) {
     return c != NULL && off_tape_motion_config_is_valid(&c->off_tape_motion) &&
@@ -103,18 +111,27 @@ esp_err_t move_c_update(MoveC *m, const MotionEstimate *estimate, float dt,
     out->remaining_arc_m = remaining;
     out->radial_error_m = radial_error;
 
-    float stop_distance = 0.0f;
-    if (speed_profile_predict_stopping_distance(&m->translation_profile,
-            &m->config->speed_profile, m->config->max_accel_mps2, dt,
-            kStoppedSpeed, &stop_distance) != ESP_OK) {
-        m->status = MOVE_C_FAULT;
-        out->status = MOVE_C_FAULT;
-        return ESP_ERR_INVALID_STATE;
+    /* Braking is a one-way commitment, matching MoveS/MoveL/MoveP: once the
+     * predicted stopping distance says it's time to brake, never re-evaluate
+     * against a shrinking stop-distance as speed falls, or the profile can
+     * oscillate between accelerating and braking forever instead of
+     * committing to zero. */
+    if (!m->braking) {
+        float stop_distance = 0.0f;
+        if (speed_profile_predict_stopping_distance(&m->translation_profile,
+                &m->config->speed_profile, m->config->max_accel_mps2, dt,
+                kStoppedSpeed, &stop_distance) != ESP_OK) {
+            m->status = MOVE_C_FAULT;
+            out->status = MOVE_C_FAULT;
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (remaining <= stop_distance + m->config->arc_length_tolerance_m) {
+            m->braking = true;
+        }
     }
-    const bool braking = remaining <= stop_distance + m->config->arc_length_tolerance_m;
     float speed = 0.0f;
     if (speed_profile_update(&m->translation_profile, &m->config->speed_profile,
-            braking ? 0.0f : m->max_speed_mps, m->config->max_accel_mps2,
+            m->braking ? 0.0f : m->max_speed_mps, m->config->max_accel_mps2,
             dt, &speed) != ESP_OK) {
         m->status = MOVE_C_FAULT;
         out->status = MOVE_C_FAULT;
@@ -156,23 +173,69 @@ esp_err_t move_c_update(MoveC *m, const MotionEstimate *estimate, float dt,
     }
     omega = clamp(omega, -m->config->max_omega_rad_s, m->config->max_omega_rad_s);
 
+    /* Once translation has genuinely stopped (arc length closed, one-way
+     * profile at rest), a small residual radial error produces a continuous
+     * PID correction below the characterized ~0.05 m/s wheel-velocity floor
+     * -- physically inert, so radial_error would never shrink and this
+     * primitive would sit in RUNNING forever. Switch to the same pulse-and-
+     * measure pattern MoveP's endpoint hold uses: a short burst clearly above
+     * the deadband, then a pause for a fresh estimate, repeated only while
+     * still outside tolerance. */
+    float radial_component = correction.requested_velocity.vy;
+    const bool translation_stopped = m->braking && speed <= kStoppedSpeed &&
+                                     fabsf(remaining) <= m->config->arc_length_tolerance_m;
+    if (translation_stopped) {
+        if (!m->settling) {
+            m->settling = true;
+            m->settle_pulse_remaining_s = 0.0f;
+            m->settle_pause_remaining_s = 0.0f;
+        }
+        if (fabsf(radial_error) > m->config->radial_tolerance_m) {
+            if (m->settle_pulse_remaining_s <= 0.0f && m->settle_pause_remaining_s <= 0.0f) {
+                m->settle_pulse_remaining_s = kSettlePulseDurationS;
+            }
+            if (m->settle_pulse_remaining_s > 0.0f) {
+                const float hold_speed = clamp(fabsf(radial_error) * kSettleHoldGain,
+                                               kSettleHoldMinSpeed, kSettleHoldMaxSpeed);
+                radial_component = copysignf(hold_speed, -turn_sign * radial_error);
+                m->settle_pulse_remaining_s = fmaxf(0.0f, m->settle_pulse_remaining_s - dt);
+                if (m->settle_pulse_remaining_s <= 0.0f) {
+                    m->settle_pause_remaining_s = kSettlePulsePauseS;
+                }
+            } else {
+                radial_component = 0.0f;
+                m->settle_pause_remaining_s = fmaxf(0.0f, m->settle_pause_remaining_s - dt);
+            }
+        } else {
+            radial_component = 0.0f;
+        }
+    }
+
     const float tangent_heading = desired_heading;
     const float tangent_c = cosf(tangent_heading), tangent_s = sinf(tangent_heading);
     const float world_x = correction.requested_velocity.vx * tangent_c -
-                          correction.requested_velocity.vy * tangent_s;
+                          radial_component * tangent_s;
     const float world_y = correction.requested_velocity.vx * tangent_s +
-                          correction.requested_velocity.vy * tangent_c;
+                          radial_component * tangent_c;
     const float c_heading = cosf(estimate->heading_rad), s_heading = sinf(estimate->heading_rad);
     out->requested_velocity.vx = c_heading * world_x + s_heading * world_y;
     out->requested_velocity.vy = -s_heading * world_x + c_heading * world_y;
     out->requested_velocity.omega = omega;
 
-    if (braking && speed <= kStoppedSpeed &&
-        fabsf(remaining) <= m->config->arc_length_tolerance_m &&
-        fabsf(radial_error) <= m->config->radial_tolerance_m &&
-        fabsf(out->heading_error_rad) <= m->config->heading_tolerance_rad &&
-        fabsf(omega) <= kStoppedSpeed) {
-        m->status = MOVE_C_COMPLETE;
+    if (m->braking && speed <= kStoppedSpeed) {
+        if (fabsf(remaining) > m->config->arc_length_tolerance_m) {
+            /* MoveC has only radial and heading correction; once its one-way
+             * arc-length profile has stopped, it cannot repair a residual
+             * arc-length miss the way it can radial/heading error. Fault
+             * instead of leaving the motion RUNNING forever with a target
+             * speed permanently pinned to zero (mirrors MoveL's along-track
+             * fault). */
+            m->status = MOVE_C_FAULT;
+        } else if (fabsf(radial_error) <= m->config->radial_tolerance_m &&
+                   fabsf(out->heading_error_rad) <= m->config->heading_tolerance_rad &&
+                   fabsf(omega) <= kStoppedSpeed) {
+            m->status = MOVE_C_COMPLETE;
+        }
     }
     if (m->status == MOVE_C_COMPLETE || m->status == MOVE_C_FAULT) {
         out->requested_velocity.vx = 0.0f;

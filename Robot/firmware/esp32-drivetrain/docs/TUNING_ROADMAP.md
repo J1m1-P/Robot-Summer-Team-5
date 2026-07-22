@@ -260,13 +260,36 @@ be collected under this same profile before final factors are accepted.
 
 ### Motion API fix list — complete before MoveC
 
-- [x] **Correct arrival criteria in `MoveL` and `MoveP`.** Do not mark a move
-      complete merely because its along-track profile has stopped. `MoveL` must
-      also meet its cross-track tolerance; `MoveP` must meet a Euclidean
-      endpoint tolerance as well as its final-heading tolerance. Lateral
-      residual is corrected while stopped; an uncorrectable residual
-      along-track miss faults with an exact zero command rather than claiming
-      completion.
+- [x] **Correct arrival criteria in `MoveL`, `MoveP`, and `MoveC`.** Do not
+      mark a move complete merely because its along-track (or arc-length)
+      profile has stopped. `MoveL` must also meet its cross-track tolerance;
+      `MoveP` must meet a Euclidean endpoint tolerance as well as its
+      final-heading tolerance; `MoveC` must also meet its radial and
+      final-heading tolerance. Lateral/radial residual is corrected while
+      stopped; an uncorrectable residual along-track/arc-length miss faults
+      with an exact zero command rather than claiming completion or hanging
+      in `RUNNING` forever. `MoveC` was missing this fault path (it would sit
+      in `RUNNING` indefinitely once braking had stopped but the arc-length
+      residual stayed outside tolerance, since a stopped translation profile
+      never advances arc progress again) — fixed, along with making `MoveC`'s
+      braking decision a sticky one-way flag (`MoveC.braking`) like
+      `MoveS`/`MoveL`/`MoveP` instead of a value recomputed fresh every cycle,
+      which could otherwise oscillate between accelerating and braking near
+      the tolerance boundary and never actually reach zero speed. Regression
+      coverage: `test_move_c_stalled_arc_progress_faults_instead_of_hanging`
+      in `test/test_move_c/`.
+      A related gap: once translation genuinely stops, a small residual
+      radial error produced a continuous PID correction below the
+      characterized ~0.05 m/s wheel-velocity floor (e.g. `1.0 * 0.02 m/s`
+      proportional output) — physically inert, so `radial_error` would never
+      shrink and the move would sit in `RUNNING` forever without ever
+      faulting or completing. Fixed by reusing `MoveP`'s pulse-and-measure
+      endpoint hold (0.08–0.12 m/s bursts for 50 ms, 100 ms pause, repeated
+      only while outside `radial_tolerance_m`) for `MoveC`'s radial channel
+      once translation has stopped; heading correction stays continuous,
+      matching `MoveP`'s precedent that only translation hits the deadband.
+      Regression coverage:
+      `test_move_c_endpoint_radial_residual_pulses_above_deadband`.
 - [x] **Enforce the zero-power completion contract in every movement API.** A
       `COMPLETE` output from `MoveL`, `MoveP`, or `MoveC` must contain an exact
       zero body-velocity request (no residual lateral PID or angular-profile
@@ -276,7 +299,13 @@ be collected under this same profile before final factors are accepted.
       `vx`/`vy`/`omega` command against the 30° omniwheel wheel-speed ceiling
       before it reaches the drivetrain facade. This must be shared by
       `MoveL`, `MoveP`, and `MoveC`; independently valid component limits do
-      not guarantee that their combination is achievable.
+      not guarantee that their combination is achievable. The governor must
+      run on the raw requested body command *before* `F_lon` is applied, per
+      the advanced-motion architecture diagram below (`set_body_velocity()`
+      in `drivetrain.c` previously applied `F_lon` first, ahead of the
+      governor, while `F_lat` correctly ran after it in `drivetrain_update()`
+      — fixed so both calibration factors are downstream of the governor,
+      each with their own post-calibration wheel-speed re-clamp).
 - [x] **Harden outer-loop timing.** Apply a bounded controller timestep and
       reset/hold the relevant outer PID after an excessive update gap, including
       `MoveP`'s heading controller. This prevents a scheduler stall from
@@ -317,17 +346,21 @@ Reference: *"Calibration Method of Mecanum Wheeled Mobile Robot Odometer"*
 the failure mode this paper targets, and its procedure gives a concrete calibration
 recipe rather than just ad-hoc gain tweaking.
 
-- [ ] **Static/kinematic calibration** — three correction factors, only two of
+- [x] **Static/kinematic calibration** — three correction factors, only two of
       which are Jacobian-level (paper eq. 22-23: `J_c⁻¹ = F_lon · F_lat · J⁻¹`,
       applied to the body velocity → per-wheel target speed conversion);
       `F_ang` is a separate command-level correction, not part of that matrix
-      (see its own bullet below):
-  - [ ] `F_lon` (longitudinal, one scalar, eq. 18): repeated straight-line
+      (see its own bullet below). **Done** — measured and locked into
+      `src/config/drivetrain/move_calibration_config.c` (`enabled = true`)
+      from a three-trial session at 0.30 m/s / 60 deg/s; see the file's own
+      header comment for the exact values and rationale for keeping
+      per-direction entries unaveraged:
+  - [x] `F_lon` (longitudinal, one scalar, eq. 18): repeated straight-line
         `MoveS` runs of known distance `L1` → measure the endpoint's
         longitudinal/lateral error `x̄e`/`ȳe` (averaged over trials) →
         `F_lon = L1 / √((L1-x̄e)² + ȳe²)` → uniformly rescale all wheel
         speeds to fix systematic under/overshoot.
-  - [ ] `F_lat` (lateral, diagonal 4×4 — **one term per wheel**, eq. 19-20):
+  - [x] `F_lat` (lateral, diagonal 4×4 — **one term per wheel**, eq. 19-20):
         from the *same* straight-line trial, also directly protractor-measure
         `θe` — the robot's own heading drift from where it started to where
         it stopped (mark the robot's heading before the run; this is not
@@ -338,7 +371,7 @@ recipe rather than just ad-hoc gain tweaking.
         velocity during the trial). This is the answer to "do we need
         separate per-motor curves" from §4 below — a cheap per-wheel scale
         factor instead of fully separate PID tuning.
-  - [ ] `F_ang` (angular, one scalar, eq. 21): a **separate** repeated
+  - [x] `F_ang` (angular, one scalar, eq. 21): a **separate** repeated
         in-place rotation `RotS` trial (§2 — `RotS` was added specifically so
         this trial has a real dead-reckoned primitive instead of the
         diagnostic harness's ad hoc `turn-angle` command) of a known angle
@@ -348,16 +381,18 @@ recipe rather than just ad-hoc gain tweaking.
         Jacobian like F_lon/F_lat** — applied as a scalar on the *commanded
         target angle* passed to `rot_s_start()` (`angle_rad = θ_want *
         F_ang`), not on angular speed and not via `x_drive_kinematics.c`.
-- [ ] **Dynamic calibration** — bench-measure per-wheel current/voltage/speed,
-      least-squares fit viscous + Coulomb friction and effective mass/inertia, and
-      derive a maximum commanded acceleration that keeps required wheel traction
-      under available floor friction. This becomes the default `max_accel` ceiling
-      the S-curve profile generator (§4) should respect — exceeding it causes wheel
-      slip, which is non-systematic error that no static correction can fix.
+- [x] ~~Dynamic calibration~~ — **out of scope, decided against.** The paper's
+      bench-measured current/voltage/speed friction fit and derived slip-
+      avoidance `max_accel` ceiling will not be pursued; the static/kinematic
+      factors above are the accepted calibration for this robot. The `2.5
+      m/s²` / `10.0 m/s³` accel/jerk defaults characterized in §5c-note are
+      being kept as final operating values, not placeholders awaiting a
+      dynamic-calibration refinement.
 - [ ] Use **radial position error** `δr_e` (Euclidean distance between commanded
       and actual endpoint, averaged over repeated trials) and percent improvement
       `δr_m` as the objective metric — same statistic the tuning harness (§5)
-      should report for locking in FF/Kp/Ki.
+      should report for validating the calibration above against the square/
+      hemicycle trajectories.
 
 ### Final integration plan (after measured values exist)
 
@@ -559,11 +594,14 @@ This avoids globally applying movement calibration to unrelated control loops.
       profile generator rather than commanding raw step targets. `MoveS` and
       `RotS` (§2) now both call `speed_profile_update()` directly.
       `MoveL`/`MoveP`/`MoveC` use it today.
-- [ ] `max_accel` defaults should respect the slip-avoidance ceiling derived in §3's
-      dynamic calibration. `MoveSConfig.max_accel_mps2` / `RotSConfig.max_alpha_rad_s2`
-      exist now (as config defaults, not per-call params — see §2), currently set to
-      placeholder values (`0.5f` / `1.5f`, borrowed from existing harness/tape-following
-      defaults), not yet the real calibrated ceiling this bullet is about.
+- [x] ~~`max_accel` defaults should respect the slip-avoidance ceiling derived
+      in §3's dynamic calibration~~ — **moot: dynamic calibration is out of
+      scope** (see §3). `MoveSConfig.max_accel_mps2` is locked at the
+      characterized `2.5f` (§5c-note), the accepted final value, not a
+      placeholder awaiting a slip ceiling that will never be derived.
+      `RotSConfig.max_alpha_rad_s2` remains at its original `1.5f`
+      tape-following-borrowed value — untouched by this decision, since it was
+      never a slip-derived ceiling candidate to begin with.
 
 ## 5. Wheel-velocity PI tuning harness + calibration workflow
 
@@ -782,25 +820,38 @@ defaults to the §5c-note values above; overridable live via `jerk`/`accel`.
         **cannot** detect real-world error (wheel slip, radius mismatch,
         per-wheel response differences). It is a sanity check that the move
         completed and behaved reasonably, not the paper's `x_e`/`y_e`/`θ_e`.
-- [ ] Run the actual trials (needs the harness above, now available):
-  - [ ] **Straight-line** — used to *derive* `F_lon`/`F_lat` (paper's eq. 18–20).
+- [x] Run the actual trials (needs the harness above, now available):
+  - [x] **Straight-line** — used to *derive* `F_lon`/`F_lat` (paper's eq. 18–20).
         Before running, mark both the robot's start **position** and its
         **heading** (a line off the front) — you need both for the three
         measurements this trial produces. Command `move <L1> 0 <speed>`,
         then measure: `xe`/`ye` (longitudinal/lateral endpoint error, tape
         measure against `commanded_mm`) *and* `θe` (heading drift, protractor
         against the marked starting heading — measured directly, not derived
-        from `xe`/`ye`). Repeat for an average of each.
-  - [ ] **In-place rotation (`RotS`)** — used to derive `F_ang` (paper's eq. 21).
+        from `xe`/`ye`). Repeat for an average of each. **Done** — three
+        trials per direction at 0.30 m/s, locked into
+        `move_calibration_config.c`.
+  - [x] **In-place rotation (`RotS`)** — used to derive `F_ang` (paper's eq. 21).
         Command `rotate <angle> <max_omega>`, measure the real rotation with
-        a protractor against `commanded_deg`, repeat for an average.
-  - [ ] **Square** — validation only; confirms factors generalize.
+        a protractor against `commanded_deg`, repeat for an average. **Done**
+        — measured at 60 deg/s, `F_ang = 0.93755`, locked into
+        `move_calibration_config.c`.
+  - [ ] **Square** — validation only; confirms factors generalize. Not yet
+        run — should be re-checked against the current open-loop `MoveS`/
+        `RotS` redesign and `odometry.c` sign fix, since the locked-in
+        factors predate both.
   - [ ] **Hemicycle (semicircle)** — validation only; requires `MoveC` (§2).
+        Not yet run.
 - [ ] Compute radial position error metrics (`δr_e`, `δr_m` per paper eq. 24–25)
-      to quantify improvement before/after correction factors applied.
+      to quantify improvement before/after correction factors applied — useful
+      for validating the square/hemicycle runs above, not for re-deriving
+      `F_lon`/`F_lat`/`F_ang` themselves.
 - [ ] Evaluate whether individual motors need **separate tuning curves** if
       per-motor spreads are large after `F_lat` applied, or accept per-wheel
-      `F_lat` scaling as sufficient compensation.
+      `F_lat` scaling as sufficient compensation. The measured `F_lat` spread
+      (0.974–1.026 across wheels/directions, see `move_calibration_config.c`)
+      is currently accepted as-is; revisit only if square/hemicycle validation
+      shows it isn't enough.
 
 ## 6. Post-tuning jog + program-builder webpage (end goal)
 
@@ -815,24 +866,34 @@ defaults to the §5c-note values above; overridable live via `jerk`/`accel`.
 ## Suggested next steps (current state)
 
 The implemented motion APIs (`MoveS`, `RotS`, `MoveL`, `MoveP`, and `MoveC`) and
-tuning harness (§5a) are **implemented and unit-tested**. Physical validation
-remains open.
-The wheel-velocity PI gains **are now tuned and locked into config** (§5b/§5c:
+tuning harness (§5a) are **implemented and unit-tested**.
+The wheel-velocity PI gains **are tuned and locked into config** (§5b/§5c:
 `kff=1.2`, `kff_offset=0.15`, `kp=0.4`, `ki=0.1`; achievable wheel speed range
-~0.05–0.54 m/s). The calibration harness (§5d) and hardware targets compile
-cleanly; physical validation remains open. Here's the path forward:
+~0.05–0.54 m/s). The static/kinematic calibration factors (`F_lon`/`F_lat`/
+`F_ang`, §3) **are measured and locked into `move_calibration_config.c`
+(`enabled = true`)** from a three-trial session at 0.30 m/s / 60 deg/s.
+Dynamic (slip-based) calibration is out of scope and will not be pursued —
+the static factors above are the accepted, final calibration. Here's the
+path forward:
 
 1. **Run the calibration harness on hardware** — flash `[env:calibration]`,
    open `tools/calibration_dashboard.html` in Chrome/Edge, and verify
    `move`/`rotate`/`arc`/`movel`/`movep` complete with zero PWM and no
-   oscillation.
-2. **Run straight-line and rotation trials (§5d)** — physically measure real
-   endpoints against the harness's `commanded_mm`/`commanded_deg`, derive
-   `F_lon`, `F_lat`, `F_ang` per the paper.
+   oscillation. This exercises `MoveS`/`RotS`'s open-loop redesign and the
+   `odometry.c` Y-sign fix on hardware for the first time — neither has been
+   validated outside unit tests yet.
+2. **Re-validate `F_lon`/`F_lat`/`F_ang` against the current code** — the
+   locked-in values were measured before the open-loop `MoveS`/`RotS`
+   redesign and the odometry sign fix; confirm a square/hemicycle trajectory
+   still tracks well under the corrected code, and re-run the straight-line/
+   rotation trials only if it doesn't.
 3. **Validate the shared wheel-feasibility governor** against measured wheel
-   speeds and refine the configured acceleration/jerk ceiling if needed.
+   speeds, including the corrected `F_lon`-after-governor ordering.
 4. **Run a reverse-direction Duty sweep** (§5b) to confirm forward/reverse
    symmetry, or capture separate gains if it doesn't hold.
 5. **Run MoveC's physical arc trials (§5d)** — verify radial tracking, terminal
-   heading, and zero-power completion with the serial monitor connected.
+   heading, and zero-power completion with the serial monitor connected, and
+   confirm the new arc-length-residual fault path and radial-endpoint pulse
+   hold (§2's fix list) don't trigger spuriously under normal slip-free
+   operation.
 6. **Add jog + program-builder webpage (§6)** — final layer for real operation.

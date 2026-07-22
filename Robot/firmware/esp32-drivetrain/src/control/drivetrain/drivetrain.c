@@ -358,24 +358,30 @@ static esp_err_t set_body_velocity(
         .vy = vy_mps,
         .omega = omega_rad_s,
     };
-    const MoveCalibrationConfig *calibration = drivetrain->config->move_calibration;
-    if (advanced_motion && calibration != NULL && calibration->enabled &&
-        hypotf(requested.vx, requested.vy) > 1.0e-6f) {
-        if (fabsf(requested.vx) > 1.0e-6f) {
-            const MoveCalibrationDirection x_direction = requested.vx >= 0.0f
-                ? MOVE_CALIBRATION_POS_X : MOVE_CALIBRATION_NEG_X;
-            requested.vx *= calibration->f_lon[x_direction];
-        }
-        if (fabsf(requested.vy) > 1.0e-6f) {
-            const MoveCalibrationDirection y_direction = requested.vy >= 0.0f
-                ? MOVE_CALIBRATION_POS_Y : MOVE_CALIBRATION_NEG_Y;
-            requested.vy *= calibration->f_lon[y_direction];
-        }
-    }
+    /* The wheel-feasibility governor must bound the raw requested command
+     * before calibration adjusts it (see TUNING_ROADMAP.md's advanced-motion
+     * architecture diagram): world-to-body -> governor -> calibration
+     * adapter. Applying F_lon first would let it push a command past the
+     * ceiling that the governor is supposed to be bounding. */
     DrivetrainBodyVelocity limited = {0};
     const esp_err_t limit_error = limit_body_to_wheel_feasibility(
         drivetrain->config, &requested, &limited);
     if (limit_error != ESP_OK) return limit_error;
+
+    const MoveCalibrationConfig *calibration = drivetrain->config->move_calibration;
+    if (advanced_motion && calibration != NULL && calibration->enabled &&
+        hypotf(limited.vx, limited.vy) > 1.0e-6f) {
+        if (fabsf(limited.vx) > 1.0e-6f) {
+            const MoveCalibrationDirection x_direction = limited.vx >= 0.0f
+                ? MOVE_CALIBRATION_POS_X : MOVE_CALIBRATION_NEG_X;
+            limited.vx *= calibration->f_lon[x_direction];
+        }
+        if (fabsf(limited.vy) > 1.0e-6f) {
+            const MoveCalibrationDirection y_direction = limited.vy >= 0.0f
+                ? MOVE_CALIBRATION_POS_Y : MOVE_CALIBRATION_NEG_Y;
+            limited.vy *= calibration->f_lon[y_direction];
+        }
+    }
     drivetrain->status.target_body = limited;
     drivetrain->control.apply_motion_calibration = advanced_motion;
     drivetrain->control.last_command_us = esp_timer_get_time();
