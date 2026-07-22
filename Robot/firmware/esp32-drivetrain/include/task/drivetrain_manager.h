@@ -12,9 +12,7 @@ extern "C" {
 
 typedef struct {
     Drivetrain *drivetrain;
-    TaskStepCommand command;
     TaskActionResult result;
-    bool active;
 } DrivetrainManager;
 
 void drivetrain_manager_init(DrivetrainManager *manager,

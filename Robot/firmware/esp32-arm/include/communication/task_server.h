@@ -37,7 +37,6 @@ typedef struct {
     uint32_t last_receive_ms;
     uint32_t last_heartbeat_ms;
     uint32_t last_status_ms;
-    bool coordinator_seen;
     bool has_command;
     TaskCommandMessage command;
     TaskStepStatus last_sent_status;
@@ -47,13 +46,13 @@ typedef struct {
 bool arm_task_server_init(ArmTaskServer *server, UartLink *link,
                           ArmManager *manager, uint32_t arm_session_id,
                           const ArmTaskServerConfig *config);
+// Consumes only task-command and drivetrain-heartbeat frames routed from the shared UART link.
+void arm_task_server_process_packet(void *context, const PacketFrame *frame,
+                                    uint32_t now_ms);
+// Updates arm execution, heartbeat, timeout, and status scheduling without polling UART.
 void arm_task_server_update(ArmTaskServer *server, uint32_t now_ms);
-void arm_task_server_process_command(ArmTaskServer *server,
-                                     const TaskCommandMessage *command,
-                                     uint32_t now_ms);
-const ArmTaskServerDiagnostics *arm_task_server_get_diagnostics(
-    const ArmTaskServer *server);
-
+// Cancels remote work when the physical ESP32 link cannot be polled safely.
+void arm_task_server_handle_link_error(ArmTaskServer *server);
 #ifdef __cplusplus
 }
 #endif

@@ -4,6 +4,7 @@
 #include "esp_random.h"
 
 #include <robot_common/app_log.h>
+#include <robot_common/packet_router.h>
 #include <robot_common/uart_link.h>
 
 #include "communication/task_server.h"
@@ -16,6 +17,7 @@
 static TofManager tof_manager = {};
 static ArmManager arm_manager = {};
 static UartLink drivetrain_uart = {};
+static PacketRouter drivetrain_packet_router = {};
 static ArmTaskServer task_server = {};
 static bool application_ready = false;
 
@@ -37,6 +39,17 @@ void setup() {
         APP_LOGE(LOG_TAG_UART, "Arm task server initialization failed");
         return;
     }
+    if (!packet_router_init(&drivetrain_packet_router, &drivetrain_uart) ||
+        !packet_router_set_handler(&drivetrain_packet_router,
+                                   PACKET_TYPE_TASK_COMMAND,
+                                   arm_task_server_process_packet, &task_server) ||
+        !packet_router_set_handler(&drivetrain_packet_router,
+                                   PACKET_TYPE_HEARTBEAT,
+                                   arm_task_server_process_packet, &task_server)) {
+        APP_LOGE(LOG_TAG_UART,
+                 "Drivetrain UART packet routing initialization failed");
+        return;
+    }
     application_ready = true;
 }
 
@@ -49,7 +62,11 @@ void loop() {
                                         TASK_FAILURE_STEP_FAILED);
     }
     if (application_ready) {
-        arm_task_server_update(&task_server, millis());
+        const uint32_t now_ms = millis();
+        if (packet_router_update(&drivetrain_packet_router, now_ms) != ESP_OK) {
+            arm_task_server_handle_link_error(&task_server);
+        }
+        arm_task_server_update(&task_server, now_ms);
     }
     delay(1);
 }

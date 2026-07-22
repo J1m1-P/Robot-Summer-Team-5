@@ -6,34 +6,155 @@
 #include <stddef.h>
 #include <string.h>
 
+typedef struct {
+    TaskAction action;
+    TaskOwner owner;
+} TaskStepDefinition;
+
+typedef struct {
+    const TaskStepDefinition *steps;
+    uint8_t count;
+} WorkflowDefinition;
+
+static const TaskStepDefinition TAPE_WORKFLOW[] = {
+    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
+};
+
+static const TaskStepDefinition PICKING_WORKFLOW[] = {
+    {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_ARM},
+    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+};
+
+static const TaskStepDefinition BUILDING_WORKFLOW[] = {
+    {TASK_ACTION_ALIGN_TO_BASE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_ARM},
+    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+};
+
+static const TaskStepDefinition ROUTINE_WORKFLOW[] = {
+    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_ARM},
+    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_ALIGN_TO_BASE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_ARM},
+    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+};
+
+// Keeps workflow lookup and representation private to the sole sequencing owner.
+static bool get_workflow(TaskType type, WorkflowDefinition *workflow_out) {
+    if (workflow_out == NULL) return false;
+
+    switch (type) {
+        case TASK_TYPE_TAPE_FOLLOWING:
+            *workflow_out = (WorkflowDefinition){
+                TAPE_WORKFLOW, sizeof(TAPE_WORKFLOW) / sizeof(TAPE_WORKFLOW[0])};
+            return true;
+        case TASK_TYPE_TOWER_PICKING:
+            *workflow_out = (WorkflowDefinition){
+                PICKING_WORKFLOW,
+                sizeof(PICKING_WORKFLOW) / sizeof(PICKING_WORKFLOW[0])};
+            return true;
+        case TASK_TYPE_TOWER_BUILDING:
+            *workflow_out = (WorkflowDefinition){
+                BUILDING_WORKFLOW,
+                sizeof(BUILDING_WORKFLOW) / sizeof(BUILDING_WORKFLOW[0])};
+            return true;
+        case TASK_TYPE_TOWER_ROUTINE:
+            *workflow_out = (WorkflowDefinition){
+                ROUTINE_WORKFLOW,
+                sizeof(ROUTINE_WORKFLOW) / sizeof(ROUTINE_WORKFLOW[0])};
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Resolves one private workflow entry without exposing workflow internals publicly.
+static bool get_step(TaskType type, uint8_t index,
+                     TaskStepDefinition *step_out) {
+    WorkflowDefinition workflow = {0};
+    if (step_out == NULL || !get_workflow(type, &workflow) ||
+        index >= workflow.count) {
+        return false;
+    }
+    *step_out = workflow.steps[index];
+    return true;
+}
+
+// Builds the current executor command from authoritative coordinator state.
+static bool build_step_command(const TaskRuntime *runtime,
+                               TaskStepCommand *command_out) {
+    if (runtime == NULL || command_out == NULL ||
+        runtime->status != TASK_STATUS_RUNNING) {
+        return false;
+    }
+
+    TaskStepDefinition step = {0};
+    if (!get_step(runtime->request.type, runtime->current_step, &step)) {
+        return false;
+    }
+
+    memset(command_out, 0, sizeof(*command_out));
+    command_out->execution_id = runtime->execution_id;
+    command_out->step = runtime->current_step;
+    command_out->action = step.action;
+    if (step.action != TASK_ACTION_FOLLOW_TAPE) return true;
+
+    if (runtime->request.type == TASK_TYPE_TAPE_FOLLOWING) {
+        command_out->tape_following = runtime->request.params.tape_following;
+        return true;
+    }
+    if (runtime->request.type == TASK_TYPE_TOWER_ROUTINE) {
+        command_out->tape_following =
+            runtime->current_step == 0U
+                ? runtime->request.params.tower_routine.tape_to_pieces
+                : runtime->request.params.tower_routine.tape_to_base;
+        return true;
+    }
+    return false;
+}
+
+// Validates the callback table at the one module that invokes it.
+static bool executor_is_valid(const TaskActionExecutor *executor) {
+    return executor != NULL && executor->start != NULL &&
+           executor->update != NULL && executor->cancel != NULL;
+}
+
+// Treats the runtime status as the sole authority for whether work may advance.
 static bool task_is_running(const TaskCoordinator *coordinator) {
     return coordinator != NULL &&
            coordinator->runtime.status == TASK_STATUS_RUNNING;
 }
 
+// Performs wrap-safe millisecond deadline checks.
 static bool elapsed_at_least(uint32_t now, uint32_t then, uint32_t duration) {
     return (uint32_t)(now - then) >= duration;
 }
 
+// Resolves the current immutable workflow step to its registered owner executor.
 static TaskActionExecutor *current_executor(TaskCoordinator *coordinator,
                                             TaskStepDefinition *step_out) {
     TaskStepDefinition step = {0};
-    if (!task_get_step_definition(coordinator->runtime.request.type,
-                                  coordinator->runtime.current_step, &step) ||
-        !task_owner_is_valid(step.owner)) {
+    if (!get_step(coordinator->runtime.request.type,
+                  coordinator->runtime.current_step, &step) ||
+        step.owner >= TASK_OWNER_COUNT) {
         return NULL;
     }
     if (step_out != NULL) *step_out = step;
     return &coordinator->executors[step.owner];
 }
 
+// Applies the common failed-task transition and optionally cancels active hardware.
 static void finish_failed(TaskCoordinator *coordinator,
                           TaskFailure failure,
                           uint32_t now_ms,
                           bool cancel_executor) {
     TaskActionExecutor *executor = current_executor(coordinator, NULL);
     if (cancel_executor && coordinator->runtime.step_status == TASK_STEP_RUNNING &&
-        task_action_executor_is_valid(executor)) {
+        executor_is_valid(executor)) {
         executor->cancel(executor->context, now_ms);
     }
     coordinator->runtime.step_status = TASK_STEP_FAILED;
@@ -43,14 +164,15 @@ static void finish_failed(TaskCoordinator *coordinator,
                                        : failure;
 }
 
+// Validates dependencies and creates one idle authoritative task runtime.
 bool task_coordinator_init(TaskCoordinator *coordinator,
                            const TaskCoordinatorConfig *config,
                            const TaskActionExecutor *drivetrain_executor,
                            const TaskActionExecutor *arm_executor) {
     if (coordinator == NULL || config == NULL ||
         config->step_timeout_ms == 0U ||
-        !task_action_executor_is_valid(drivetrain_executor) ||
-        !task_action_executor_is_valid(arm_executor)) {
+        !executor_is_valid(drivetrain_executor) ||
+        !executor_is_valid(arm_executor)) {
         return false;
     }
     memset(coordinator, 0, sizeof(*coordinator));
@@ -62,11 +184,10 @@ bool task_coordinator_init(TaskCoordinator *coordinator,
     return true;
 }
 
+// Accepts a validated request only when no workflow is already running.
 bool task_coordinator_start(TaskCoordinator *coordinator,
                             const TaskRequest *request,
-                            uint32_t execution_id,
-                            uint32_t now_ms) {
-    (void)now_ms;
+                            uint32_t execution_id) {
     if (coordinator == NULL || request == NULL || execution_id == 0U ||
         !task_request_is_valid(request) || task_is_running(coordinator)) {
         return false;
@@ -80,18 +201,19 @@ bool task_coordinator_start(TaskCoordinator *coordinator,
     return true;
 }
 
+// Starts, monitors, times out, and advances exactly one workflow step per state transition.
 void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms) {
     if (!task_is_running(coordinator)) return;
 
     TaskActionExecutor *executor = current_executor(coordinator, NULL);
-    if (!task_action_executor_is_valid(executor)) {
+    if (!executor_is_valid(executor)) {
         finish_failed(coordinator, TASK_FAILURE_INVALID_STEP, now_ms, false);
         return;
     }
 
     if (coordinator->runtime.step_status == TASK_STEP_NOT_STARTED) {
         TaskStepCommand command = {0};
-        if (!task_build_step_command(&coordinator->runtime, &command) ||
+        if (!build_step_command(&coordinator->runtime, &command) ||
             !executor->start(executor->context, &command, now_ms)) {
             finish_failed(coordinator, TASK_FAILURE_STEP_REJECTED,
                           now_ms, false);
@@ -113,17 +235,17 @@ void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms) {
         case TASK_STEP_RUNNING:
             return;
         case TASK_STEP_SUCCEEDED: {
-            uint8_t step_count = 0U;
+            WorkflowDefinition workflow = {0};
             coordinator->runtime.step_status = TASK_STEP_SUCCEEDED;
-            if (!task_get_step_count(coordinator->runtime.request.type,
-                                     &step_count) || step_count == 0U) {
+            if (!get_workflow(coordinator->runtime.request.type, &workflow) ||
+                workflow.count == 0U) {
                 finish_failed(coordinator, TASK_FAILURE_INVALID_STEP,
                               now_ms, false);
                 return;
             }
             const uint8_t next_step =
                 (uint8_t)(coordinator->runtime.current_step + 1U);
-            if (next_step >= step_count) {
+            if (next_step >= workflow.count) {
                 coordinator->runtime.status = TASK_STATUS_SUCCEEDED;
                 coordinator->runtime.failure = TASK_FAILURE_NONE;
                 return;
@@ -146,11 +268,12 @@ void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms) {
     }
 }
 
+// Cancels the active owner first, then marks the authoritative runtime cancelled.
 bool task_coordinator_cancel(TaskCoordinator *coordinator, uint32_t now_ms) {
     if (!task_is_running(coordinator)) return false;
     TaskActionExecutor *executor = current_executor(coordinator, NULL);
     if (coordinator->runtime.step_status == TASK_STEP_RUNNING &&
-        task_action_executor_is_valid(executor)) {
+        executor_is_valid(executor)) {
         executor->cancel(executor->context, now_ms);
     }
     coordinator->runtime.step_status = TASK_STEP_CANCELLED;
@@ -159,6 +282,7 @@ bool task_coordinator_cancel(TaskCoordinator *coordinator, uint32_t now_ms) {
     return true;
 }
 
+// Injects an external subsystem failure through the same fail-safe transition path.
 bool task_coordinator_fail(TaskCoordinator *coordinator,
                            TaskFailure failure,
                            uint32_t now_ms) {
@@ -166,25 +290,5 @@ bool task_coordinator_fail(TaskCoordinator *coordinator,
         return false;
     }
     finish_failed(coordinator, failure, now_ms, true);
-    return true;
-}
-
-const TaskRuntime *task_coordinator_get_runtime(
-    const TaskCoordinator *coordinator) {
-    return coordinator == NULL ? NULL : &coordinator->runtime;
-}
-
-bool task_coordinator_get_current_owner(const TaskCoordinator *coordinator,
-                                        TaskOwner *owner_out) {
-    if (coordinator == NULL || owner_out == NULL ||
-        coordinator->runtime.status != TASK_STATUS_RUNNING) {
-        return false;
-    }
-    TaskStepDefinition step = {0};
-    if (!task_get_step_definition(coordinator->runtime.request.type,
-                                  coordinator->runtime.current_step, &step)) {
-        return false;
-    }
-    *owner_out = step.owner;
     return true;
 }

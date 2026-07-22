@@ -8,12 +8,14 @@ static bool server_elapsed_at_least(uint32_t now, uint32_t then,
     return (uint32_t)(now - then) >= duration;
 }
 
+// Sends a protocol-produced frame through the generic UART framing layer.
 static bool send_frame(UartLink *link, const PacketFrame *frame) {
     return link != NULL && frame != NULL &&
            uart_link_send(link, (PacketMessageType)frame->message_type,
                           frame->payload, frame->payload_len) == ESP_OK;
 }
 
+// Advertises the arm boot session so the drivetrain can detect arm resets.
 static bool send_heartbeat(ArmTaskServer *server) {
     const TaskHeartbeatMessage heartbeat = {
         .sender = TASK_CONTROLLER_ARM,
@@ -24,6 +26,7 @@ static bool send_heartbeat(ArmTaskServer *server) {
            send_frame(server->link, &frame);
 }
 
+// Serializes the current arm result while echoing the command identity used for retries.
 static bool send_status_for(ArmTaskServer *server,
                             const TaskCommandMessage *command,
                             TaskStepStatus status, TaskFailure failure) {
@@ -40,26 +43,27 @@ static bool send_status_for(ArmTaskServer *server,
            send_frame(server->link, &frame);
 }
 
+// Cancels old work and starts synchronization state for a newly observed coordinator boot.
 static void reset_for_coordinator(ArmTaskServer *server,
                                   uint32_t coordinator_session_id,
                                   uint32_t now_ms) {
-    if (server->coordinator_seen &&
+    if (server->coordinator_session_id != 0U &&
         server->coordinator_session_id != coordinator_session_id) {
         (void)arm_manager_cancel(server->manager);
         server->previous_coordinator_session_id =
             server->coordinator_session_id;
     }
     server->coordinator_session_id = coordinator_session_id;
-    server->coordinator_seen = true;
     server->has_command = false;
     server->last_receive_ms = now_ms;
 }
 
-void arm_task_server_process_command(ArmTaskServer *server,
-                                     const TaskCommandMessage *command,
-                                     uint32_t now_ms) {
+// Validates command ordering, handles idempotent retries, and delegates new work to ArmManager.
+static void process_command(ArmTaskServer *server,
+                            const TaskCommandMessage *command,
+                            uint32_t now_ms) {
     if (server == NULL || command == NULL) return;
-    if (server->coordinator_seen &&
+    if (server->coordinator_session_id != 0U &&
         command->coordinator_session_id ==
             server->previous_coordinator_session_id) {
         server->diagnostics.stale_command_count++;
@@ -67,7 +71,7 @@ void arm_task_server_process_command(ArmTaskServer *server,
                               TASK_FAILURE_STALE_MESSAGE);
         return;
     }
-    if (!server->coordinator_seen ||
+    if (server->coordinator_session_id == 0U ||
         server->coordinator_session_id != command->coordinator_session_id) {
         reset_for_coordinator(server, command->coordinator_session_id, now_ms);
     }
@@ -125,6 +129,7 @@ void arm_task_server_process_command(ArmTaskServer *server,
                           TASK_FAILURE_NONE);
 }
 
+// Initializes server synchronization state while sharing, but not owning, the UART link.
 bool arm_task_server_init(ArmTaskServer *server, UartLink *link,
                           ArmManager *manager, uint32_t arm_session_id,
                           const ArmTaskServerConfig *config) {
@@ -143,41 +148,38 @@ bool arm_task_server_init(ArmTaskServer *server, UartLink *link,
     return true;
 }
 
+// Handles task packets selected by PacketRouter; unrelated link traffic never reaches this module.
+void arm_task_server_process_packet(void *context, const PacketFrame *frame,
+                                    uint32_t now_ms) {
+    ArmTaskServer *server = (ArmTaskServer *)context;
+    if (server == NULL || frame == NULL) return;
+
+    TaskHeartbeatMessage heartbeat = {0};
+    TaskCommandMessage command = {0};
+    if (task_protocol_decode_heartbeat(frame, &heartbeat) &&
+        heartbeat.sender == TASK_CONTROLLER_DRIVETRAIN) {
+        if (server->coordinator_session_id != 0U &&
+            heartbeat.session_id == server->previous_coordinator_session_id) {
+            return;
+        }
+        if (server->coordinator_session_id == 0U ||
+            server->coordinator_session_id != heartbeat.session_id) {
+            reset_for_coordinator(server, heartbeat.session_id, now_ms);
+        } else {
+            server->last_receive_ms = now_ms;
+        }
+    } else if (task_protocol_decode_command(frame, &command)) {
+        process_command(server, &command, now_ms);
+    } else {
+        server->diagnostics.protocol_error_count++;
+    }
+}
+
+// Advances arm execution and communication timers after the composition root polls the router.
 void arm_task_server_update(ArmTaskServer *server, uint32_t now_ms) {
     if (server == NULL || server->link == NULL || server->manager == NULL) {
         return;
     }
-    arm_manager_update(server->manager);
-    if (uart_link_update(server->link) != ESP_OK) {
-        (void)arm_manager_cancel(server->manager);
-        server->coordinator_seen = false;
-        return;
-    }
-
-    PacketFrame frame = {0};
-    while (uart_link_take_packet(server->link, &frame) == ESP_OK) {
-        TaskHeartbeatMessage heartbeat = {0};
-        TaskCommandMessage command = {0};
-        if (task_protocol_decode_heartbeat(&frame, &heartbeat) &&
-            heartbeat.sender == TASK_CONTROLLER_DRIVETRAIN) {
-            if (server->coordinator_seen &&
-                heartbeat.session_id ==
-                    server->previous_coordinator_session_id) {
-                continue;
-            }
-            if (!server->coordinator_seen ||
-                server->coordinator_session_id != heartbeat.session_id) {
-                reset_for_coordinator(server, heartbeat.session_id, now_ms);
-            } else {
-                server->last_receive_ms = now_ms;
-            }
-        } else if (task_protocol_decode_command(&frame, &command)) {
-            arm_task_server_process_command(server, &command, now_ms);
-        } else {
-            server->diagnostics.protocol_error_count++;
-        }
-    }
-
     if (server->last_heartbeat_ms == 0U ||
         server_elapsed_at_least(now_ms, server->last_heartbeat_ms,
                                 server->config.heartbeat_interval_ms)) {
@@ -185,11 +187,11 @@ void arm_task_server_update(ArmTaskServer *server, uint32_t now_ms) {
         server->last_heartbeat_ms = now_ms;
     }
 
-    if (server->coordinator_seen &&
+    if (server->coordinator_session_id != 0U &&
         server_elapsed_at_least(now_ms, server->last_receive_ms,
                                 server->config.link_timeout_ms)) {
         (void)arm_manager_cancel(server->manager);
-        server->coordinator_seen = false;
+        server->coordinator_session_id = 0U;
         server->has_command = false;
     }
 
@@ -207,7 +209,10 @@ void arm_task_server_update(ArmTaskServer *server, uint32_t now_ms) {
     }
 }
 
-const ArmTaskServerDiagnostics *arm_task_server_get_diagnostics(
-    const ArmTaskServer *server) {
-    return server == NULL ? NULL : &server->diagnostics;
+// Stops remote work immediately when the shared ESP32 UART driver reports an error.
+void arm_task_server_handle_link_error(ArmTaskServer *server) {
+    if (server == NULL || server->manager == NULL) return;
+    (void)arm_manager_cancel(server->manager);
+    server->coordinator_session_id = 0U;
+    server->has_command = false;
 }

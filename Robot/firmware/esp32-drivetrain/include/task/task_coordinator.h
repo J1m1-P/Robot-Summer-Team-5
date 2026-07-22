@@ -29,18 +29,12 @@ bool task_coordinator_init(TaskCoordinator *coordinator,
                            const TaskActionExecutor *arm_executor);
 bool task_coordinator_start(TaskCoordinator *coordinator,
                             const TaskRequest *request,
-                            uint32_t execution_id,
-                            uint32_t now_ms);
+                            uint32_t execution_id);
 void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms);
 bool task_coordinator_cancel(TaskCoordinator *coordinator, uint32_t now_ms);
 bool task_coordinator_fail(TaskCoordinator *coordinator,
                            TaskFailure failure,
                            uint32_t now_ms);
-const TaskRuntime *task_coordinator_get_runtime(
-    const TaskCoordinator *coordinator);
-bool task_coordinator_get_current_owner(const TaskCoordinator *coordinator,
-                                        TaskOwner *owner_out);
-
 #ifdef __cplusplus
 }
 #endif

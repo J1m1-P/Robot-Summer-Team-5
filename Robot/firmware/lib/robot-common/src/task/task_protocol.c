@@ -10,6 +10,7 @@
 #define TASK_STATUS_PAYLOAD_SIZE 18U
 #define TASK_HEARTBEAT_PAYLOAD_SIZE 5U
 
+// Writes a 32-bit integer in a CPU-independent little-endian wire format.
 static void encode_u32(uint8_t *output, uint32_t value) {
     output[0] = (uint8_t)value;
     output[1] = (uint8_t)(value >> 8U);
@@ -17,17 +18,20 @@ static void encode_u32(uint8_t *output, uint32_t value) {
     output[3] = (uint8_t)(value >> 24U);
 }
 
+// Reconstructs a little-endian integer without alignment-dependent pointer casts.
 static uint32_t decode_u32(const uint8_t *input) {
     return (uint32_t)input[0] | ((uint32_t)input[1] << 8U) |
            ((uint32_t)input[2] << 16U) | ((uint32_t)input[3] << 24U);
 }
 
+// Preserves an IEEE-754 float's bits before using the integer encoder.
 static void encode_float(uint8_t *output, float value) {
     uint32_t bits = 0U;
     memcpy(&bits, &value, sizeof(bits));
     encode_u32(output, bits);
 }
 
+// Reconstructs a float through memcpy to avoid strict-aliasing violations.
 static float decode_float(const uint8_t *input) {
     const uint32_t bits = decode_u32(input);
     float value = 0.0f;
@@ -35,13 +39,42 @@ static float decode_float(const uint8_t *input) {
     return value;
 }
 
+// Shares command validation between encoding and decoding.
+static bool command_is_valid(const TaskCommandMessage *message) {
+    return message != NULL && message->coordinator_session_id != 0U &&
+           message->step.execution_id != 0U && message->command_id != 0U &&
+           message->type <= TASK_COMMAND_CANCEL &&
+           task_action_is_valid(message->step.action);
+}
+
+// Enforces the one valid failure-code rule for each terminal/running status.
+static bool result_is_valid(TaskStepStatus status, TaskFailure failure) {
+    if (status < TASK_STEP_RUNNING || status > TASK_STEP_FAILED ||
+        failure < TASK_FAILURE_NONE || failure >= TASK_FAILURE_COUNT) {
+        return false;
+    }
+    return status == TASK_STEP_FAILED ? failure != TASK_FAILURE_NONE
+                                      : failure == TASK_FAILURE_NONE;
+}
+
+// Shares status identity and result validation between both wire directions.
+static bool status_is_valid(const TaskStatusMessage *message) {
+    return message != NULL && message->coordinator_session_id != 0U &&
+           message->arm_session_id != 0U && message->execution_id != 0U &&
+           message->command_id != 0U &&
+           result_is_valid(message->status, message->failure);
+}
+
+// Rejects reserved sessions and controller IDs before or after serialization.
+static bool heartbeat_is_valid(const TaskHeartbeatMessage *message) {
+    return message != NULL && message->sender <= TASK_CONTROLLER_ARM &&
+           message->session_id != 0U;
+}
+
+// Validates and serializes a start/cancel command into an opaque packet payload.
 bool task_protocol_encode_command(const TaskCommandMessage *message,
                                   PacketFrame *frame_out) {
-    if (message == NULL || frame_out == NULL ||
-        message->coordinator_session_id == 0U ||
-        message->step.execution_id == 0U || message->command_id == 0U ||
-        message->type > TASK_COMMAND_CANCEL ||
-        !task_action_is_valid(message->step.action)) {
+    if (frame_out == NULL || !command_is_valid(message)) {
         return false;
     }
 
@@ -55,14 +88,15 @@ bool task_protocol_encode_command(const TaskCommandMessage *message,
     frame_out->payload[13] = (uint8_t)message->step.action;
     frame_out->payload[14] = message->step.step;
     frame_out->payload[15] =
-        (uint8_t)message->step.params.tape_following.direction;
+        (uint8_t)message->step.tape_following.direction;
     encode_float(&frame_out->payload[16],
-                 message->step.params.tape_following.speed_mps);
+                 message->step.tape_following.speed_mps);
     encode_float(&frame_out->payload[20],
-                 message->step.params.tape_following.distance_m);
+                 message->step.tape_following.distance_m);
     return true;
 }
 
+// Accepts only the exact command payload shape and validated task identifiers.
 bool task_protocol_decode_command(const PacketFrame *frame,
                                   TaskCommandMessage *message_out) {
     if (frame == NULL || message_out == NULL ||
@@ -78,37 +112,22 @@ bool task_protocol_decode_command(const PacketFrame *frame,
     decoded.type = (TaskCommandType)frame->payload[12];
     decoded.step.action = (TaskAction)frame->payload[13];
     decoded.step.step = frame->payload[14];
-    decoded.step.params.tape_following.direction =
+    decoded.step.tape_following.direction =
         (TapeDirection)frame->payload[15];
-    decoded.step.params.tape_following.speed_mps =
+    decoded.step.tape_following.speed_mps =
         decode_float(&frame->payload[16]);
-    decoded.step.params.tape_following.distance_m =
+    decoded.step.tape_following.distance_m =
         decode_float(&frame->payload[20]);
 
-    if (decoded.coordinator_session_id == 0U ||
-        decoded.step.execution_id == 0U ||
-        decoded.command_id == 0U || decoded.type > TASK_COMMAND_CANCEL ||
-        !task_action_is_valid(decoded.step.action)) {
-        return false;
-    }
+    if (!command_is_valid(&decoded)) return false;
     *message_out = decoded;
     return true;
 }
 
+// Serializes an arm result while enforcing consistent status/failure combinations.
 bool task_protocol_encode_status(const TaskStatusMessage *message,
                                  PacketFrame *frame_out) {
-    if (message == NULL || frame_out == NULL ||
-        message->coordinator_session_id == 0U ||
-        message->arm_session_id == 0U || message->execution_id == 0U ||
-        message->command_id == 0U || message->status < TASK_STEP_RUNNING ||
-        message->status > TASK_STEP_FAILED ||
-        message->failure > TASK_FAILURE_UNAVAILABLE ||
-        ((message->status == TASK_STEP_RUNNING ||
-          message->status == TASK_STEP_SUCCEEDED ||
-          message->status == TASK_STEP_CANCELLED) &&
-         message->failure != TASK_FAILURE_NONE) ||
-        (message->status == TASK_STEP_FAILED &&
-         message->failure == TASK_FAILURE_NONE)) {
+    if (frame_out == NULL || !status_is_valid(message)) {
         return false;
     }
 
@@ -124,6 +143,7 @@ bool task_protocol_encode_status(const TaskStatusMessage *message,
     return true;
 }
 
+// Decodes a status only after its size, identities, and result combination are valid.
 bool task_protocol_decode_status(const PacketFrame *frame,
                                  TaskStatusMessage *message_out) {
     if (frame == NULL || message_out == NULL ||
@@ -139,27 +159,15 @@ bool task_protocol_decode_status(const PacketFrame *frame,
     decoded.command_id = decode_u32(&frame->payload[12]);
     decoded.status = (TaskStepStatus)frame->payload[16];
     decoded.failure = (TaskFailure)frame->payload[17];
-    if (decoded.coordinator_session_id == 0U || decoded.arm_session_id == 0U ||
-        decoded.execution_id == 0U || decoded.command_id == 0U ||
-        decoded.status < TASK_STEP_RUNNING ||
-        decoded.status > TASK_STEP_FAILED ||
-        decoded.failure > TASK_FAILURE_UNAVAILABLE ||
-        ((decoded.status == TASK_STEP_RUNNING ||
-          decoded.status == TASK_STEP_SUCCEEDED ||
-          decoded.status == TASK_STEP_CANCELLED) &&
-         decoded.failure != TASK_FAILURE_NONE) ||
-        (decoded.status == TASK_STEP_FAILED &&
-         decoded.failure == TASK_FAILURE_NONE)) {
-        return false;
-    }
+    if (!status_is_valid(&decoded)) return false;
     *message_out = decoded;
     return true;
 }
 
+// Encodes the sender and boot-session identity used for reset detection.
 bool task_protocol_encode_heartbeat(const TaskHeartbeatMessage *message,
                                     PacketFrame *frame_out) {
-    if (message == NULL || frame_out == NULL ||
-        message->sender > TASK_CONTROLLER_ARM || message->session_id == 0U) {
+    if (frame_out == NULL || !heartbeat_is_valid(message)) {
         return false;
     }
     memset(frame_out, 0, sizeof(*frame_out));
@@ -170,6 +178,7 @@ bool task_protocol_encode_heartbeat(const TaskHeartbeatMessage *message,
     return true;
 }
 
+// Decodes a heartbeat and rejects unknown controllers or the reserved zero session.
 bool task_protocol_decode_heartbeat(const PacketFrame *frame,
                                     TaskHeartbeatMessage *message_out) {
     if (frame == NULL || message_out == NULL ||
@@ -181,13 +190,12 @@ bool task_protocol_decode_heartbeat(const PacketFrame *frame,
         .sender = (TaskControllerId)frame->payload[0],
         .session_id = decode_u32(&frame->payload[1]),
     };
-    if (decoded.sender > TASK_CONTROLLER_ARM || decoded.session_id == 0U) {
-        return false;
-    }
+    if (!heartbeat_is_valid(&decoded)) return false;
     *message_out = decoded;
     return true;
 }
 
+// Compares wrapping 32-bit command IDs as long as peers differ by less than half the range.
 bool task_protocol_sequence_is_newer(uint32_t candidate, uint32_t reference) {
     return candidate != reference &&
            (int32_t)(candidate - reference) > 0;

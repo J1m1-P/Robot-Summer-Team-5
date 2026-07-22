@@ -37,8 +37,6 @@ typedef struct {
     uint32_t last_receive_ms;
     uint32_t last_heartbeat_ms;
     uint32_t last_command_send_ms;
-    bool peer_seen;
-    bool peer_failure_pending;
     TaskFailure peer_failure;
     bool command_active;
     bool cancel_pending;
@@ -50,16 +48,16 @@ typedef struct {
 bool arm_task_client_init(ArmTaskClient *client, UartLink *link,
                           uint32_t coordinator_session_id,
                           const ArmTaskClientConfig *config);
-void arm_task_client_update_link(ArmTaskClient *client, uint32_t now_ms);
-void arm_task_client_process_status(ArmTaskClient *client,
-                                    const TaskStatusMessage *status,
+// Consumes only task-status and arm-heartbeat frames routed from the shared UART link.
+void arm_task_client_process_packet(void *context, const PacketFrame *frame,
                                     uint32_t now_ms);
+// Runs heartbeat, timeout, and retry scheduling without polling the shared UART itself.
+void arm_task_client_update(ArmTaskClient *client, uint32_t now_ms);
+// Converts a physical UART polling failure into the task subsystem's safe failure state.
+void arm_task_client_handle_link_error(ArmTaskClient *client);
 TaskActionExecutor arm_task_client_executor(ArmTaskClient *client);
-bool arm_task_client_is_connected(const ArmTaskClient *client);
 bool arm_task_client_take_peer_failure(ArmTaskClient *client,
                                        TaskFailure *failure_out);
-const ArmTaskClientDiagnostics *arm_task_client_get_diagnostics(
-    const ArmTaskClient *client);
 
 #ifdef __cplusplus
 }
