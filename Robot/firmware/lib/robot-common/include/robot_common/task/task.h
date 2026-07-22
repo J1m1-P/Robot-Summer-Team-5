@@ -1,5 +1,5 @@
 /** @file task.h
- *  @brief Shared task requests, runtime state, steps, and metadata.
+ *  @brief Shared task requests, workflow definitions, and runtime state.
  */
 #pragma once
 
@@ -10,132 +10,136 @@
 extern "C" {
 #endif
 
-/* --------------------------------------------------------------------------
- * Task lifecycle and execution results
- * -------------------------------------------------------------------------- */
-
-/** @brief Subsystem responsible for executing a task step. */
+/** Controller that physically executes a workflow action. */
 typedef enum {
-    TASK_OWNER_DRIVETRAIN,
+    TASK_OWNER_DRIVETRAIN = 0,
     TASK_OWNER_ARM,
+    TASK_OWNER_COUNT,
 } TaskOwner;
 
-/** @brief Supported single-task workflows. */
+/** Workflows currently supported by the coordinator. */
 typedef enum {
+    TASK_TYPE_TAPE_FOLLOWING = 0,
     TASK_TYPE_TOWER_PICKING,
     TASK_TYPE_TOWER_BUILDING,
-    TASK_TYPE_TAPE_FOLLOWING,
+    TASK_TYPE_TOWER_ROUTINE,
+    TASK_TYPE_COUNT,
 } TaskType;
 
-/** @brief Runtime state of a task. */
+/** Physical actions assigned to one subsystem manager. */
 typedef enum {
-    TASK_STATE_ACTIVE,
-    TASK_STATE_COMPLETED,
-    TASK_STATE_CANCELLED,
-    TASK_STATE_FAULTED,
-} TaskState;
+    TASK_ACTION_FOLLOW_TAPE = 0,
+    TASK_ACTION_ALIGN_TO_PIECES,
+    TASK_ACTION_PICK_UP_BLOCK,
+    TASK_ACTION_ALIGN_TO_TAPE,
+    TASK_ACTION_ALIGN_TO_BASE,
+    TASK_ACTION_BUILD_TOWER,
+    TASK_ACTION_COUNT,
+} TaskAction;
 
-/** @brief Current execution result of a task step. */
+/** Authoritative lifecycle state of one task execution. */
 typedef enum {
+    TASK_STATUS_IDLE = 0,
+    TASK_STATUS_RUNNING,
+    TASK_STATUS_SUCCEEDED,
+    TASK_STATUS_CANCELLED,
+    TASK_STATUS_FAILED,
+} TaskStatus;
+
+/** Lifecycle state of the task's current action. */
+typedef enum {
+    TASK_STEP_NOT_STARTED = 0,
     TASK_STEP_RUNNING,
     TASK_STEP_SUCCEEDED,
+    TASK_STEP_CANCELLED,
     TASK_STEP_FAILED,
-} TaskStepResult;
+} TaskStepStatus;
 
-/* --------------------------------------------------------------------------
- * Task requests and immutable parameters
- * -------------------------------------------------------------------------- */
-
-/** @brief Travel direction for a tape-following task. */
+/** Stable reason codes used for task behavior and wire status. */
 typedef enum {
-    TAPE_DIRECTION_FORWARD,
+    TASK_FAILURE_NONE = 0,
+    TASK_FAILURE_INVALID_REQUEST,
+    TASK_FAILURE_BUSY,
+    TASK_FAILURE_INVALID_STEP,
+    TASK_FAILURE_STEP_REJECTED,
+    TASK_FAILURE_STEP_FAILED,
+    TASK_FAILURE_STEP_TIMEOUT,
+    TASK_FAILURE_LINK_TIMEOUT,
+    TASK_FAILURE_PEER_RESET,
+    TASK_FAILURE_STALE_MESSAGE,
+    TASK_FAILURE_PROTOCOL,
+    TASK_FAILURE_UNAVAILABLE,
+} TaskFailure;
+
+/** Direction of travel during tape following. */
+typedef enum {
+    TAPE_DIRECTION_FORWARD = 0,
     TAPE_DIRECTION_REVERSE,
 } TapeDirection;
 
-/** @brief Inputs that configure a tape-following task. */
+/** Immutable inputs for one tape-following action. */
 typedef struct {
-    TapeDirection direction; /**< Direction of travel along the tape. */
-    float speed_mps;         /**< Requested positive travel speed. */
-    float distance_m;        /**< Requested positive travel distance. */
+    TapeDirection direction;
+    float speed_mps;
+    float distance_m;
 } TapeFollowingTaskParams;
 
-/** @brief Parameters for the selected task type. */
+/** Immutable inputs for the complete collect-and-build routine. */
+typedef struct {
+    TapeFollowingTaskParams tape_to_pieces;
+    TapeFollowingTaskParams tape_to_base;
+} TowerRoutineTaskParams;
+
+/** Type-specific request parameters. */
 typedef union {
-    TapeFollowingTaskParams tape_following; /**< Tape-following inputs. */
+    TapeFollowingTaskParams tape_following;
+    TowerRoutineTaskParams tower_routine;
 } TaskParams;
 
-/** @brief A task type paired with its immutable parameters. */
+/** Minimal immutable request submitted to the coordinator. */
 typedef struct {
-    TaskType type;     /**< Workflow to execute. */
-    TaskParams params; /**< Inputs for the selected workflow. */
+    TaskType type;
+    TaskParams params;
 } TaskRequest;
 
-/* --------------------------------------------------------------------------
- * Mutable task runtime state
- * -------------------------------------------------------------------------- */
-
-/** @brief Current state and routing information for one task. */
+/** One immutable entry in a workflow definition. */
 typedef struct {
-    TaskRequest request;   /**< Immutable request being executed. */
-    TaskOwner owner;       /**< Subsystem responsible for the current step. */
-    uint16_t current_step; /**< Current workflow step index. */
-    TaskState state;       /**< Current task lifecycle state. */
-} Task;
+    TaskAction action;
+    TaskOwner owner;
+} TaskStepDefinition;
 
-/* --------------------------------------------------------------------------
- * Task-specific workflow steps
- * -------------------------------------------------------------------------- */
+/** Parameters delivered to the manager executing the selected action. */
+typedef union {
+    TapeFollowingTaskParams tape_following;
+} TaskActionParams;
 
-/** @brief Ordered steps for collecting tower pieces. */
-typedef enum {
-    TOWER_PICKING_STEP_ALIGN_TO_PIECES = 0,
-    TOWER_PICKING_STEP_PICK_UP_BLOCK,
-    TOWER_PICKING_STEP_ALIGN_TO_TAPE,
-    TOWER_PICKING_STEP_COUNT
-} TowerPickingStep;
+/** Command passed from the coordinator to a local or remote manager. */
+typedef struct {
+    uint32_t execution_id;
+    uint8_t step;
+    TaskAction action;
+    TaskActionParams params;
+} TaskStepCommand;
 
-/** @brief Ordered steps for building a tower. */
-typedef enum {
-    TOWER_BUILDING_STEP_ALIGN_TO_BASE = 0,
-    TOWER_BUILDING_STEP_BUILD_TOWER,
-    TOWER_BUILDING_STEP_ALIGN_TO_TAPE,
-    TOWER_BUILDING_STEP_COUNT
-} TowerBuildingStep;
+/** The coordinator's single authoritative mutable task record. */
+typedef struct {
+    uint32_t execution_id;
+    TaskRequest request;
+    uint8_t current_step;
+    TaskStatus status;
+    TaskStepStatus step_status;
+    TaskFailure failure;
+} TaskRuntime;
 
-/** @brief Ordered steps for following tape. */
-typedef enum {
-    TAPE_FOLLOWING_STEP_FOLLOW_TAPE = 0,
-    TAPE_FOLLOWING_STEP_COUNT
-} TapeFollowingStep;
-
-/* --------------------------------------------------------------------------
- * Request validation and workflow metadata
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief Validates a task request and its type-specific parameters.
- * @param request Request to validate.
- * @return true when the request can be started.
- */
 bool task_request_is_valid(const TaskRequest *request);
-
-/**
- * @brief Gets the owner of a step for a supported task type.
- * @param type Task workflow containing the step.
- * @param step Workflow step index.
- * @param owner_out Receives the responsible subsystem.
- * @return true when the type and step are valid.
- */
-bool task_get_step_owner(TaskType type, uint16_t step,
-                         TaskOwner *owner_out);
-
-/**
- * @brief Gets the number of steps for a supported task type.
- * @param type Task workflow to inspect.
- * @param count_out Receives the workflow step count.
- * @return true when the task type is supported.
- */
-bool task_get_step_count(TaskType type, uint16_t *count_out);
+bool task_get_step_count(TaskType type, uint8_t *count_out);
+bool task_get_step_definition(TaskType type, uint8_t step,
+                              TaskStepDefinition *definition_out);
+bool task_build_step_command(const TaskRuntime *runtime,
+                             TaskStepCommand *command_out);
+bool task_owner_is_valid(TaskOwner owner);
+bool task_action_is_valid(TaskAction action);
+bool task_step_status_is_terminal(TaskStepStatus status);
 
 #ifdef __cplusplus
 }

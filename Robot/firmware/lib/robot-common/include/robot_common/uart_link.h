@@ -13,6 +13,8 @@
 #include "esp_err.h"
 #include <robot_common/packet_protocol.h>
 
+#define UART_LINK_PACKET_QUEUE_SIZE 8U
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -56,11 +58,13 @@ typedef struct {
     bool initialized;
     uint32_t packets_sent;
     uint32_t packets_received;
-    uint32_t packets_overwritten;
+    uint32_t packets_dropped;
     uint32_t checksum_errors;
     uint32_t parse_errors;
-    bool has_new_packet;
-    PacketFrame latest_packet;
+    PacketFrame packet_queue[UART_LINK_PACKET_QUEUE_SIZE];
+    uint8_t packet_queue_head;
+    uint8_t packet_queue_tail;
+    uint8_t packet_queue_count;
 } UartLink;
 
 // Installs and configures the UART driver. The link must be zero-initialized before its first call.

@@ -1,3 +1,6 @@
-/* Compiles the hardware-independent shared task sources into this native suite. */
-#include "../../../lib/robot-common/src/task/task_definition.c"
-#include "../../../lib/robot-common/src/task/task_controller.c"
+#include "../../../lib/robot-common/src/task/task.c"
+#include "../../../lib/robot-common/src/task/task_protocol.c"
+#include "../../src/task/task_action_executor.c"
+#include "../../src/task/task_coordinator.c"
+#include "../../../esp32-arm/src/task/arm_manager.c"
+#include "../../../esp32-arm/src/communication/task_server.c"
