@@ -21,15 +21,34 @@ extern "C" {
  * that module's math is unit-agnostic, so the same "m/s" fields work as
  * rad/s here without modification.
  *
+ * Genuinely open-loop, same reasoning as MoveS: rot_s_update() takes no
+ * heading/odometry input at all. "Remaining angle" is tracked by
+ * integrating this module's OWN commanded omega over time
+ * (`planned_progress_rad`), not by reading real heading back from odometry
+ * -- odometry is exactly what §3's calibration is trying to validate, so
+ * using it to decide when to decelerate/stop would let real mechanical
+ * error quietly change the rotation's own duration instead of showing up as
+ * measurable angle error. The caller reads real odometry/a protractor
+ * separately, once ROT_S_COMPLETE is reported, to compare against what was
+ * commanded -- that comparison is the calibration signal (F_ang).
+ *
  * F_ang is not threaded in yet -- until move_calibration.c (§3.2) exists,
- * there is nothing to apply it to. It can be threaded in later as a uniform
- * scalar on the commanded angular speed, the rotational analog of how
- * F_lon applies to MoveS's linear speed.
+ * there is nothing to apply it to. Unlike F_lon/F_lat (baked into the
+ * Jacobian: F_lon/F_lat scale the wheel-speed *output* of
+ * x_drive_kinematics_body_to_wheel_velocities(), per the paper's eq. 22-23
+ * J_c^-1 = F_lon*F_lat*J^-1), F_ang is explicitly NOT part of that matrix --
+ * the paper adds it as a separate command-level correction because F_lat
+ * alone didn't fully correct heading error (a second pass, not a Jacobian
+ * term). From the paper's eq. 21 (theta1 = F_ang * theta2, commanded over
+ * actual), it threads in as a scalar on the *commanded target angle*: to
+ * achieve a desired rotation theta_want, call
+ * rot_s_start(..., angle_rad = theta_want * F_ang, ...), not as a multiplier
+ * on omega/angular speed.
  */
 typedef struct {
     SpeedProfileConfig speed_profile;
 
-    /* Once the remaining angle is within this, the rotation reports
+    /* Once the planned remaining angle is within this, the rotation reports
      * complete and commands zero angular velocity instead of continuing to
      * creep. */
     float angle_tolerance_rad;
@@ -52,13 +71,14 @@ typedef enum {
     ROT_S_COMPLETE,
 } RotSStatus;
 
-/* Retains the jerk-bounded ramp, the starting heading, and this rotation's target. */
+/* Retains the jerk-bounded ramp, this rotation's target, and its own
+ * self-integrated progress -- no heading/odometry reference of any kind. */
 typedef struct {
     const RotSConfig *config;
     SpeedProfile profile;
-    float start_heading_rad;
     float angle_rad;  // signed target rotation; positive = counterclockwise
     float max_omega_rad_s;
+    float planned_progress_rad; // self-integrated: sum of commanded_omega_rad_s * dt_s
     RotSStatus status;
 } RotS;
 
@@ -71,30 +91,25 @@ typedef struct {
     bool motion_valid;
 } RotSOutput;
 
-/* Validates config and parameters, captures `start_heading_rad` as the
- * reference point progress is measured from, and prepares a running
- * rotation. `angle_rad` is the signed rotation to command (positive =
- * counterclockwise, matching DrivetrainBodyVelocity.omega's convention);
- * its sign is the only source of direction, there is no separate heading
- * parameter. The angular acceleration ceiling comes from
- * `config->max_alpha_rad_s2`, not a parameter here -- see RotSConfig.
- * Zero-initialize the runtime object before its first call:
- * RotS rot = {0}; */
+/* Validates config and parameters and prepares a running rotation.
+ * `angle_rad` is the signed rotation to command (positive = counterclockwise,
+ * matching DrivetrainBodyVelocity.omega's convention); its sign is the only
+ * source of direction, there is no separate heading parameter. The angular
+ * acceleration ceiling comes from `config->max_alpha_rad_s2`, not a
+ * parameter here -- see RotSConfig. Zero-initialize the runtime object
+ * before its first call: RotS rot = {0}; */
 esp_err_t rot_s_start(
     RotS *rot,
     const RotSConfig *config,
-    float start_heading_rad,
     float angle_rad,
     float max_omega_rad_s);
 
-/* Calculates one motion request from the caller-supplied current heading
- * (read from odometry each cycle -- DrivetrainPose.heading_rad accumulates
- * continuously rather than wrapping, so a plain subtraction against
- * start_heading_rad gives exact progress with no unwrap logic needed).
- * This function never commands the drivetrain directly. */
+/* Calculates one motion request purely from elapsed time (`dt_s`) and this
+ * rotation's own commanded-omega history -- no heading input, by design
+ * (see the header comment above). This function never commands the
+ * drivetrain directly. */
 esp_err_t rot_s_update(
     RotS *rot,
-    float current_heading_rad,
     float dt_s,
     RotSOutput *output);
 

@@ -21,12 +21,10 @@ bool rot_s_config_is_valid(const RotSConfig *config)
 esp_err_t rot_s_start(
     RotS *rot,
     const RotSConfig *config,
-    float start_heading_rad,
     float angle_rad,
     float max_omega_rad_s)
 {
     if (rot == NULL || !rot_s_config_is_valid(config) ||
-        !isfinite(start_heading_rad) ||
         !isfinite(angle_rad) || angle_rad == 0.0f ||
         !isfinite(max_omega_rad_s) || max_omega_rad_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
@@ -34,7 +32,6 @@ esp_err_t rot_s_start(
 
     memset(rot, 0, sizeof(*rot));
     rot->config = config;
-    rot->start_heading_rad = start_heading_rad;
     rot->angle_rad = angle_rad;
     rot->max_omega_rad_s = max_omega_rad_s;
     speed_profile_reset(&rot->profile, 0.0f);
@@ -44,12 +41,10 @@ esp_err_t rot_s_start(
 
 esp_err_t rot_s_update(
     RotS *rot,
-    float current_heading_rad,
     float dt_s,
     RotSOutput *output)
 {
     if (rot == NULL || output == NULL ||
-        !isfinite(current_heading_rad) ||
         !isfinite(dt_s) || dt_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -59,20 +54,27 @@ esp_err_t rot_s_update(
 
     memset(output, 0, sizeof(*output));
 
-    /* Progress against the heading captured at start. DrivetrainPose's
-     * heading_rad accumulates continuously (never wraps), so this plain
-     * subtraction is exact -- no unwrap logic needed, same as MoveS's
-     * position progress. */
-    const float progress_rad = current_heading_rad - rot->start_heading_rad;
-    const float remaining_rad = rot->angle_rad - progress_rad;
+    /* Remaining angle against this rotation's OWN self-integrated progress
+     * -- never against real heading. See rot_s.h's header comment: reading
+     * real odometry here would let genuine mechanical error quietly change
+     * how long the rotation runs instead of showing up as measurable angle
+     * error, defeating the calibration this primitive exists to feed. Since
+     * planned_progress_rad only ever moves in response to THIS module's own
+     * commanded omega (which speed_profile_update() guarantees converges
+     * cleanly to whatever target it's given), the runaway-in-one-direction
+     * failure mode a real sensor's lag/noise could previously trigger is no
+     * longer reachable -- there is no external signal left to disagree with
+     * the plan. copysignf is kept anyway as cheap, correct insurance. */
+    const float remaining_rad = rot->angle_rad - rot->planned_progress_rad;
     output->remaining_angle_rad = remaining_rad;
 
-    const float direction = rot->angle_rad >= 0.0f ? 1.0f : -1.0f;
     const bool within_tolerance = fabsf(remaining_rad) <= rot->config->angle_tolerance_rad;
     const float target_omega_rad_s = within_tolerance
         ? 0.0f
-        : direction * fminf(rot->max_omega_rad_s, sqrtf(fmaxf(0.0f, 2.0f * rot->config->max_alpha_rad_s2 *
-                 (fabsf(remaining_rad) - rot->config->angle_tolerance_rad))));
+        : copysignf(
+              fminf(rot->max_omega_rad_s, sqrtf(fmaxf(0.0f, 2.0f * rot->config->max_alpha_rad_s2 *
+                  (fabsf(remaining_rad) - rot->config->angle_tolerance_rad)))),
+              remaining_rad);
 
     float commanded_omega_rad_s = 0.0f;
     const esp_err_t error = speed_profile_update(
@@ -81,6 +83,8 @@ esp_err_t rot_s_update(
     if (error != ESP_OK) {
         return error;
     }
+
+    rot->planned_progress_rad += commanded_omega_rad_s * dt_s;
 
     output->requested_velocity.vx = 0.0f;
     output->requested_velocity.vy = 0.0f;

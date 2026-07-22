@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MoveS/RotS Calibration Helper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --accent:         #2a78d6;
+    --danger:         #d03b3b;
+    --good:           #008300;
+    --wheel-fl:       #2a78d6;
+    --wheel-fr:       #4a3aa7;
+    --wheel-bl:       #008300;
+    --wheel-br:       #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --accent:         #3987e5;
+      --danger:         #e66767;
+      --good:           #4fbf4f;
+      --wheel-fl:       #3987e5;
+      --wheel-fr:       #9085e9;
+      --wheel-bl:       #4fbf4f;
+      --wheel-br:       #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --accent:         #3987e5;
+    --danger:         #e66767;
+    --good:           #4fbf4f;
+    --wheel-fl:       #3987e5;
+    --wheel-fr:       #9085e9;
+    --wheel-bl:       #4fbf4f;
+    --wheel-br:       #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  .root { max-width: 920px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  h1 { font-size: 17px; margin: 0 0 3px; }
+  h2 { font-size: 14px; margin: 0 0 4px; }
+  .subtitle { color: var(--text-secondary); font-size: 12px; margin: 0 0 20px; line-height: 1.5; }
+  .note {
+    font-size: 11.5px; color: var(--text-secondary); line-height: 1.5;
+    margin: 0 0 14px;
+  }
+  .note code, code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--grid); padding: 1px 4px; border-radius: 4px; font-size: 0.95em;
+  }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .step-badge {
+    font-size: 10.5px; font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  .field-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 10px;
+  }
+  .field label {
+    display: block; font-size: 11px; color: var(--text-secondary);
+    margin-bottom: 3px; font-weight: 600;
+  }
+  .field input {
+    font: inherit; font-size: 13px; width: 100%; padding: 6px 8px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary);
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 8px; }
+  th, td { padding: 5px 6px; text-align: right; }
+  th { color: var(--text-muted); font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); }
+  td:first-child, th:first-child { text-align: left; }
+  td input {
+    font: inherit; font-size: 12.5px; width: 100%; padding: 4px 6px;
+    border-radius: 5px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary); text-align: right;
+  }
+  tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+  .row-remove {
+    font-size: 11px; padding: 3px 7px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-secondary); cursor: pointer;
+  }
+  .row-remove:hover { color: var(--danger); border-color: var(--danger); }
+
+  button {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary); cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button:hover { opacity: 0.85; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 4px; }
+
+  .results {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-top: 10px;
+  }
+  .result-tile {
+    background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .result-tile .label { font-size: 10.5px; color: var(--text-muted); font-weight: 600; margin-bottom: 2px; }
+  .result-tile .value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .result-tile.fl .value { color: var(--wheel-fl); }
+  .result-tile.fr .value { color: var(--wheel-fr); }
+  .result-tile.bl .value { color: var(--wheel-bl); }
+  .result-tile.br .value { color: var(--wheel-br); }
+
+  .summary-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;
+  }
+  pre#configOutput {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; background: var(--page); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre;
+    color: var(--text-primary);
+  }
+  .insufficient { color: var(--text-muted); font-size: 12px; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="root">
+  <h1>MoveS/RotS Calibration Helper</h1>
+  <p class="subtitle">
+    Computes F_lon, F_lat, and F_ang from trial measurements per Tu &amp; Min
+    (2019), "Calibration Method of Mecanum Wheeled Mobile Robot Odometer"
+    (<code>misc/Calibration_Method_of_Mecanum_Wheeled_Mobile_Robot_Odometer.pdf</code>).
+    Run trials with <code>src/harnesses/calibration_main.cpp</code>
+    (<code>[env:calibration]</code>), physically measure each trial's
+    result, enter the numbers below. Nothing here talks to the robot --
+    it's a standalone calculator. All math runs locally in this page.
+  </p>
+
+  <div class="card">
+    <div class="card-head"><h2>Robot geometry</h2></div>
+    <p class="note">
+      Matches <code>XDriveKinematicsConfig</code> in
+      <code>src/config/drivetrain/drivetrain_config.c</code> -- defaults
+      below are that file's current values. Update here if the config
+      changes; this page doesn't read it automatically.
+    </p>
+    <div class="field-grid">
+      <div class="field">
+        <label for="wheelRadius">Wheel radius (m)</label>
+        <input id="wheelRadius" type="number" step="0.001" value="0.035" />
+      </div>
+      <div class="field">
+        <label for="halfLength">Chassis half-length (m)</label>
+        <input id="halfLength" type="number" step="0.001" value="0.100" />
+      </div>
+      <div class="field">
+        <label for="halfWidth">Chassis half-width (m)</label>
+        <input id="halfWidth" type="number" step="0.001" value="0.1365" />
+      </div>
+      <div class="field">
+        <label for="wheelAngle">Wheel angle (deg)</label>
+        <input id="wheelAngle" type="number" step="1" value="30" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>1. Straight-line trials</h2>
+      <span class="step-badge">F_lon &amp; F_lat</span>
+    </div>
+    <p class="note">
+      Command <code>move &lt;L1&gt; 0 &lt;speed&gt;</code> on the calibration
+      harness. Before each run, mark the robot's start <b>position</b> and
+      <b>heading</b> (a line off the front). After it stops, tape-measure
+      <b>x_e</b> (longitudinal shortfall from L1) and <b>y_e</b> (lateral
+      drift), and separately protractor-measure <b>&theta;_e</b> (heading
+      drift from the marked starting heading -- a direct reading, not
+      derived from x_e/y_e). Enter one row per trial; more trials average
+      out measurement noise.
+    </p>
+    <div class="field-grid">
+      <div class="field">
+        <label for="L1">Commanded distance L1 (m)</label>
+        <input id="L1" type="number" step="0.01" value="1.0" />
+      </div>
+      <div class="field">
+        <label for="moveSpeed">Commanded speed (m/s)</label>
+        <input id="moveSpeed" type="number" step="0.01" value="0.3" />
+      </div>
+    </div>
+    <table id="moveTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>x_e (mm)</th>
+          <th>y_e (mm)</th>
+          <th>&theta;_e (deg)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="toolbar">
+      <button data-add="move">+ Add trial</button>
+    </div>
+    <div id="moveResults" class="results"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>2. In-place rotation trials</h2>
+      <span class="step-badge">F_ang</span>
+    </div>
+    <p class="note">
+      A <b>separate</b> experiment from the straight-line trials above --
+      does not reuse that data. Command
+      <code>rotate &lt;angle&gt; &lt;max_omega&gt;</code>, protractor-measure
+      the robot's actual rotation against the commanded angle. Enter one row
+      per trial.
+    </p>
+    <table id="rotateTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>&theta;1 commanded (deg)</th>
+          <th>&theta;2 actual (deg)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="toolbar">
+      <button data-add="rotate">+ Add trial</button>
+    </div>
+    <div id="rotateResults" class="results"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>3. Radial error validation (optional)</h2>
+      <span class="step-badge">&delta;r_e / &delta;r_m</span>
+    </div>
+    <p class="note">
+      Once F_lon/F_lat/F_ang are applied, re-run straight-line trials and
+      record the new endpoint error to confirm the correction actually
+      helped -- paper eq. 24-25. "Before" rows can reuse the x_e/y_e values
+      from section 1; "after" rows come from a fresh round of trials with
+      the correction factors applied.
+    </p>
+    <div class="field-grid">
+      <div class="field">
+        <label for="beforeLabel">Before-correction trials (x_e, y_e mm)</label>
+      </div>
+    </div>
+    <table id="beforeTable">
+      <thead><tr><th>#</th><th>x_e (mm)</th><th>y_e (mm)</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="toolbar"><button data-add="before">+ Add trial</button></div>
+    <div class="field-grid" style="margin-top: 10px;">
+      <div class="field">
+        <label for="afterLabel">After-correction trials (x_e, y_e mm)</label>
+      </div>
+    </div>
+    <table id="afterTable">
+      <thead><tr><th>#</th><th>x_e (mm)</th><th>y_e (mm)</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="toolbar"><button data-add="after">+ Add trial</button></div>
+    <div id="radialResults" class="results"></div>
+  </div>
+
+  <div class="summary-card">
+    <h2>Summary</h2>
+    <p class="note">Copy-pastable comment block for wherever these factors end up applied (not yet a config -- see docs/TUNING_ROADMAP.md §3).</p>
+    <pre id="configOutput">-- fill in trials above --</pre>
+  </div>
+</div>
+
+<script>
+(() => {
+  const state = {
+    move: [{ xe: '', ye: '', thetaE: '' }],
+    rotate: [{ t1: '', t2: '' }],
+    before: [{ xe: '', ye: '' }],
+    after: [{ xe: '', ye: '' }],
+  };
+
+  const geomEl = {
+    wheelRadius: document.getElementById('wheelRadius'),
+    halfLength: document.getElementById('halfLength'),
+    halfWidth: document.getElementById('halfWidth'),
+    wheelAngle: document.getElementById('wheelAngle'),
+  };
+
+  function getGeometry() {
+    return {
+      r: parseFloat(geomEl.wheelRadius.value) || 0,
+      l: parseFloat(geomEl.halfLength.value) || 0,
+      w: parseFloat(geomEl.halfWidth.value) || 0,
+      beta: (parseFloat(geomEl.wheelAngle.value) || 0) * Math.PI / 180,
+    };
+  }
+
+  // Mirrors x_drive_kinematics_body_to_wheel_velocities() exactly --
+  // same sign convention, same FL/FR/BL/BR order.
+  function bodyToWheel(vx, vy, omega, geom) {
+    const cosine = Math.cos(geom.beta);
+    const sine = Math.sin(geom.beta);
+    const arm = geom.l * sine + geom.w * cosine;
+    const r = geom.r;
+    return {
+      fl: (cosine * vx + sine * vy - arm * omega) / r,
+      fr: (cosine * vx - sine * vy + arm * omega) / r,
+      bl: (cosine * vx - sine * vy - arm * omega) / r,
+      br: (cosine * vx + sine * vy + arm * omega) / r,
+    };
+  }
+
+  function mean(arr) {
+    const valid = arr.filter(v => Number.isFinite(v));
+    if (valid.length === 0) return NaN;
+    return valid.reduce((a, b) => a + b, 0) / valid.length;
+  }
+
+  function fmt(v, digits = 4) {
+    return Number.isFinite(v) ? v.toFixed(digits) : '--';
+  }
+
+  // --- Table rendering ---
+
+  function renderTable(key, tbodyId, columns, addRowFn) {
+    const tbody = document.querySelector(`#${tbodyId} tbody`);
+    tbody.innerHTML = '';
+    state[key].forEach((row, i) => {
+      const tr = document.createElement('tr');
+      let html = `<td>${i + 1}</td>`;
+      for (const col of columns) {
+        html += `<td><input type="number" step="any" data-key="${key}" data-idx="${i}" data-field="${col}" value="${row[col]}" /></td>`;
+      }
+      html += `<td><button class="row-remove" data-remove="${key}" data-idx="${i}">&times;</button></td>`;
+      tr.innerHTML = html;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderAllTables() {
+    renderTable('move', 'moveTable', ['xe', 'ye', 'thetaE']);
+    renderTable('rotate', 'rotateTable', ['t1', 't2']);
+    renderTable('before', 'beforeTable', ['xe', 'ye']);
+    renderTable('after', 'afterTable', ['xe', 'ye']);
+  }
+
+  document.querySelectorAll('button[data-add]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.getAttribute('data-add');
+      const blank = key === 'rotate' ? { t1: '', t2: '' }
+        : key === 'move' ? { xe: '', ye: '', thetaE: '' }
+        : { xe: '', ye: '' };
+      state[key].push(blank);
+      renderAllTables();
+      compute();
+    });
+  });
+
+  document.addEventListener('input', (evt) => {
+    const el = evt.target;
+    if (el.dataset.key && el.dataset.idx !== undefined && el.dataset.field) {
+      state[el.dataset.key][Number(el.dataset.idx)][el.dataset.field] = el.value;
+      compute();
+    } else {
+      compute();
+    }
+  });
+
+  document.addEventListener('click', (evt) => {
+    const el = evt.target;
+    if (el.dataset.remove) {
+      const key = el.dataset.remove;
+      const idx = Number(el.dataset.idx);
+      state[key].splice(idx, 1);
+      if (state[key].length === 0) {
+        const blank = key === 'rotate' ? { t1: '', t2: '' }
+          : key === 'move' ? { xe: '', ye: '', thetaE: '' }
+          : { xe: '', ye: '' };
+        state[key].push(blank);
+      }
+      renderAllTables();
+      compute();
+    }
+  });
+
+  // --- Computation ---
+
+  function computeMove() {
+    const geom = getGeometry();
+    const L1 = parseFloat(document.getElementById('L1').value) || 0;
+    const speed = parseFloat(document.getElementById('moveSpeed').value) || 0;
+
+    const xeVals = state.move.map(r => parseFloat(r.xe) / 1000).filter(Number.isFinite);
+    const yeVals = state.move.map(r => parseFloat(r.ye) / 1000).filter(Number.isFinite);
+    const thetaVals = state.move.map(r => parseFloat(r.thetaE) * Math.PI / 180).filter(Number.isFinite);
+
+    const xeAvg = mean(xeVals);
+    const yeAvg = mean(yeVals);
+    const thetaAvg = mean(thetaVals);
+
+    const resultsEl = document.getElementById('moveResults');
+    if (!Number.isFinite(xeAvg) || !Number.isFinite(yeAvg) || L1 === 0) {
+      resultsEl.innerHTML = '<div class="insufficient">Enter at least one trial\'s x_e/y_e to compute F_lon.</div>';
+      return null;
+    }
+
+    // F_lon -- paper eq. 18
+    const denom = Math.sqrt(Math.pow(L1 - xeAvg, 2) + Math.pow(yeAvg, 2));
+    const fLon = denom > 0 ? L1 / denom : NaN;
+
+    // F_lat -- paper eq. 19-20. phi_e = J^-1 * [0,0,-theta_e]^T;
+    // phi_i = J^-1 applied to pure-forward commanded speed.
+    let fLat = null;
+    if (Number.isFinite(thetaAvg) && speed !== 0) {
+      const wheelsCmd = bodyToWheel(speed, 0, 0, geom);
+      const wheelsErr = bodyToWheel(0, 0, -thetaAvg, geom);
+      fLat = {
+        fl: 1 + wheelsErr.fl / wheelsCmd.fl,
+        fr: 1 + wheelsErr.fr / wheelsCmd.fr,
+        bl: 1 + wheelsErr.bl / wheelsCmd.bl,
+        br: 1 + wheelsErr.br / wheelsCmd.br,
+      };
+    }
+
+    let html = `
+      <div class="result-tile"><div class="label">x&#772;_e avg (mm)</div><div class="value">${fmt(xeAvg * 1000, 1)}</div></div>
+      <div class="result-tile"><div class="label">y&#772;_e avg (mm)</div><div class="value">${fmt(yeAvg * 1000, 1)}</div></div>
+      <div class="result-tile"><div class="label">&theta;&#772;_e avg (deg)</div><div class="value">${Number.isFinite(thetaAvg) ? fmt(thetaAvg * 180 / Math.PI, 2) : '--'}</div></div>
+      <div class="result-tile"><div class="label">F_lon</div><div class="value">${fmt(fLon)}</div></div>
+    `;
+    if (fLat) {
+      html += `
+        <div class="result-tile fl"><div class="label">F_lat FL</div><div class="value">${fmt(fLat.fl)}</div></div>
+        <div class="result-tile fr"><div class="label">F_lat FR</div><div class="value">${fmt(fLat.fr)}</div></div>
+        <div class="result-tile bl"><div class="label">F_lat BL</div><div class="value">${fmt(fLat.bl)}</div></div>
+        <div class="result-tile br"><div class="label">F_lat BR</div><div class="value">${fmt(fLat.br)}</div></div>
+      `;
+    } else {
+      html += `<div class="insufficient">Enter &theta;_e and a nonzero commanded speed to compute F_lat.</div>`;
+    }
+    resultsEl.innerHTML = html;
+
+    return { fLon, fLat, xeAvg, yeAvg, thetaAvg, L1, speed };
+  }
+
+  function computeRotate() {
+    const ratios = state.rotate
+      .map(r => ({ t1: parseFloat(r.t1), t2: parseFloat(r.t2) }))
+      .filter(r => Number.isFinite(r.t1) && Number.isFinite(r.t2) && r.t2 !== 0)
+      .map(r => r.t1 / r.t2);
+
+    const resultsEl = document.getElementById('rotateResults');
+    if (ratios.length === 0) {
+      resultsEl.innerHTML = '<div class="insufficient">Enter at least one trial\'s &theta;1/&theta;2 to compute F_ang.</div>';
+      return null;
+    }
+
+    const fAng = mean(ratios);
+    resultsEl.innerHTML = `
+      <div class="result-tile"><div class="label">F_ang</div><div class="value">${fmt(fAng)}</div></div>
+      <div class="result-tile"><div class="label">trials used</div><div class="value">${ratios.length}</div></div>
+    `;
+    return { fAng };
+  }
+
+  function radialError(rows) {
+    const vals = rows
+      .map(r => ({ x: parseFloat(r.xe), y: parseFloat(r.ye) }))
+      .filter(r => Number.isFinite(r.x) && Number.isFinite(r.y));
+    if (vals.length === 0) return NaN;
+    const radii = vals.map(r => Math.sqrt(r.x * r.x + r.y * r.y));
+    return mean(radii);
+  }
+
+  function computeRadial() {
+    const before = radialError(state.before);
+    const after = radialError(state.after);
+    const resultsEl = document.getElementById('radialResults');
+
+    if (!Number.isFinite(before) && !Number.isFinite(after)) {
+      resultsEl.innerHTML = '<div class="insufficient">Enter before/after trial endpoints to compute &delta;r_e/&delta;r_m.</div>';
+      return null;
+    }
+
+    const deltaRm = (Number.isFinite(before) && Number.isFinite(after) && before > 0)
+      ? (before - after) / before * 100
+      : NaN;
+
+    resultsEl.innerHTML = `
+      <div class="result-tile"><div class="label">&delta;r_e before (mm)</div><div class="value">${fmt(before, 1)}</div></div>
+      <div class="result-tile"><div class="label">&delta;r_e after (mm)</div><div class="value">${fmt(after, 1)}</div></div>
+      <div class="result-tile"><div class="label">&delta;r_m improvement</div><div class="value">${Number.isFinite(deltaRm) ? fmt(deltaRm, 1) + '%' : '--'}</div></div>
+    `;
+    return { before, after, deltaRm };
+  }
+
+  function compute() {
+    const moveResult = computeMove();
+    const rotateResult = computeRotate();
+    computeRadial();
+
+    const out = document.getElementById('configOutput');
+    if (!moveResult && !rotateResult) {
+      out.textContent = '-- fill in trials above --';
+      return;
+    }
+
+    const lines = ['/* Locked in from tools/calibration_helper.html -- see docs/TUNING_ROADMAP.md §3 */'];
+    if (moveResult) {
+      lines.push(`F_lon = ${fmt(moveResult.fLon)};  // paper eq. 18, L1=${moveResult.L1}m`);
+      if (moveResult.fLat) {
+        lines.push(`F_lat = diag[${fmt(moveResult.fLat.fl)}, ${fmt(moveResult.fLat.fr)}, ${fmt(moveResult.fLat.bl)}, ${fmt(moveResult.fLat.br)}];  // FL, FR, BL, BR -- paper eq. 19-20`);
+      }
+    }
+    if (rotateResult) {
+      lines.push(`F_ang = ${fmt(rotateResult.fAng)};  // paper eq. 21, applied to rot_s_start()'s angle_rad`);
+    }
+    out.textContent = lines.join('\n');
+  }
+
+  renderAllTables();
+  compute();
+})();
+</script>
+</body>
+</html>

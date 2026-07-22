@@ -30,11 +30,21 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
         .wheel_angle_rad = DEG_TO_RAD(30.0f),
     },
 
+    /* Locked in from tuning_main.cpp Duty-mode sweeps (kff/kff_offset) and
+     * PI-mode step response (kp/ki), all four motors enabled. Measured
+     * achievable wheel speed range at these gains: ~0.05 m/s (deadband
+     * floor, below this feedforward can't reliably break static friction)
+     * to ~0.54 m/s (output_max saturation ceiling) -- see
+     * docs/TUNING_ROADMAP.md §5b/§5c. max_vx_mps/max_vy_mps below are not
+     * yet reconciled against this: 1.0 m/s exceeds what a single wheel can
+     * deliver even for pure-forward motion (~0.62 m/s at this ceiling via
+     * the X-drive Jacobian's cos(30 deg) factor), so commanding anywhere
+     * near max_vx_mps will saturate before reaching the requested speed. */
     .wheel_controller = {
-        .kff = 1.14f,
-        .kff_offset = 0.069f,
+        .kff = 1.2f,
+        .kff_offset = 0.15f,
         .kp = 0.4f,
-        .ki = 0.2f,
+        .ki = 0.1f,
         .output_min = -0.8f,
         .output_max = 0.8f,
         .integral_min = -0.8f,

@@ -218,22 +218,37 @@ Reference: *"Calibration Method of Mecanum Wheeled Mobile Robot Odometer"*
 the failure mode this paper targets, and its procedure gives a concrete calibration
 recipe rather than just ad-hoc gain tweaking.
 
-- [ ] **Static/kinematic calibration** — three correction factors applied to the
-      wheel Jacobian (body velocity → per-wheel target speed conversion):
-  - [ ] `F_lon` (longitudinal, one scalar): repeated straight-line `MoveS` runs of
-        known distance → measure endpoint error → uniformly rescale all wheel
+- [ ] **Static/kinematic calibration** — three correction factors, only two of
+      which are Jacobian-level (paper eq. 22-23: `J_c⁻¹ = F_lon · F_lat · J⁻¹`,
+      applied to the body velocity → per-wheel target speed conversion);
+      `F_ang` is a separate command-level correction, not part of that matrix
+      (see its own bullet below):
+  - [ ] `F_lon` (longitudinal, one scalar, eq. 18): repeated straight-line
+        `MoveS` runs of known distance `L1` → measure the endpoint's
+        longitudinal/lateral error `x̄e`/`ȳe` (averaged over trials) →
+        `F_lon = L1 / √((L1-x̄e)² + ȳe²)` → uniformly rescale all wheel
         speeds to fix systematic under/overshoot.
-  - [ ] `F_lat` (lateral, diagonal 4×4 — **one term per wheel**): from the same
-        straight-line drift data, back out a per-wheel gain correction via the
-        inverse Jacobian. This is the answer to "do we need separate per-motor
-        curves" from §4 below — a cheap per-wheel scale factor instead of fully
-        separate PID tuning.
-  - [ ] `F_ang` (angular, one scalar): repeated in-place rotation `RotS` runs (§2 —
-        `RotS` was added specifically so this trial has a real dead-reckoned
-        primitive instead of the diagnostic harness's ad hoc `turn-angle`
-        command) of a known angle → measure actual rotation (protractor, or a
-        gyro if available) → `F_ang = commanded / actual`. Needed as a second
-        pass because `F_lat` alone doesn't fully correct heading error.
+  - [ ] `F_lat` (lateral, diagonal 4×4 — **one term per wheel**, eq. 19-20):
+        from the *same* straight-line trial, also directly protractor-measure
+        `θe` — the robot's own heading drift from where it started to where
+        it stopped (mark the robot's heading before the run; this is not
+        derived from `x̄e`/`ȳe` via trig, it's measured on its own). Compute
+        per-wheel wheel-speed error `φ̇e = J⁻¹·[0,0,-θe]ᵀ` (the same inverse
+        Jacobian `x_drive_kinematics.c` implements), then
+        `F_lat = diag[1 + φ̇e,i/φ̇i]` (`φ̇i` = each wheel's commanded angular
+        velocity during the trial). This is the answer to "do we need
+        separate per-motor curves" from §4 below — a cheap per-wheel scale
+        factor instead of fully separate PID tuning.
+  - [ ] `F_ang` (angular, one scalar, eq. 21): a **separate** repeated
+        in-place rotation `RotS` trial (§2 — `RotS` was added specifically so
+        this trial has a real dead-reckoned primitive instead of the
+        diagnostic harness's ad hoc `turn-angle` command) of a known angle
+        `θ1` → protractor-measure the actual rotation `θ2` → `F_ang = θ1/θ2`
+        (averaged over k trials). Needed as a second pass because `F_lat`
+        alone doesn't fully correct heading error. **Not baked into the
+        Jacobian like F_lon/F_lat** — applied as a scalar on the *commanded
+        target angle* passed to `rot_s_start()` (`angle_rad = θ_want *
+        F_ang`), not on angular speed and not via `x_drive_kinematics.c`.
 - [ ] **Dynamic calibration** — bench-measure per-wheel current/voltage/speed,
       least-squares fit viscous + Coulomb friction and effective mass/inertia, and
       derive a maximum commanded acceleration that keeps required wheel traction
@@ -270,27 +285,233 @@ recipe rather than just ad-hoc gain tweaking.
       placeholder values (`0.5f` / `1.5f`, borrowed from existing harness/tape-following
       defaults), not yet the real calibrated ceiling this bullet is about.
 
-## 5. Pre-lock-in tuning harness + webpage
+## 5. Wheel-velocity PI tuning harness + calibration workflow
 
-- [ ] Extend the existing diagnostic harness/dashboard pattern
-      (`src/harnesses/drivetrain_test_main.cpp` +
-      `tools/drivetrain_test_dashboard.html`) to support tuning:
-  - [ ] Final wheel-velocity PI parameters (`kff`, `kff_offset`, `kp`, `ki`, currently
-        in `src/config/drivetrain/drivetrain_config.c`).
-  - [ ] Off-tape PID path-travel parameters (§1).
-  - [ ] `MoveS` static/dynamic calibration procedure from §3 (`F_lon`, `F_lat`,
-        `F_ang`, max-acceleration index).
-- [ ] Add calibration/validation trajectories, matching the paper's methodology:
-  - [ ] **Straight-line** — used to *derive* `F_lon`/`F_lat`/`F_ang` (§3).
-  - [ ] **Square** — validation trajectory only; confirms the derived factors
-        generalize, does not re-derive them.
-  - [ ] **Hemicycle (semicircle)** — validation trajectory only, same as square.
-        Depends on `MoveC` (§2) existing, since it requires a true continuous arc,
-        not discrete straight segments + point turns.
-- [ ] Once tuned, **lock in** the FF/Kp/Ki values as the shipped config.
-- [ ] Evaluate whether individual motors need **separate tuning curves** if hardware
-      response differs noticeably wheel-to-wheel, or whether `F_lat` (§3) is
-      sufficient compensation instead of fully separate gain sets.
+### 5a. Manual tuning harness (DONE)
+
+- [x] Redesigned `src/harnesses/tuning_main.cpp` for simple manual single-run
+      testing (replaces the old automatic step-response harness):
+  - [x] **Duty mode** — open-loop: set raw duty directly, hold for a fixed
+        duration, measure peak speed. Used to characterize the raw duty→speed
+        curve (feedforward calibration) without feedback masking the response.
+  - [x] **PI mode** — closed-loop: set target speed + FF/Kp/Ki gains, run for
+        fixed duration, measure settled speed. Used to tune feedback after
+        feedforward is locked.
+  - [x] **Turn mode** — negates setpoint on FL/BL (vs FR/BR) to drive in-place
+        rotation instead of straight line, enabling peak omega measurement for
+        the paper's `F_ang` calibration.
+  - [x] All parameters (mode, duty, target, duration, turn, ff/ffo/kp/ki) are
+        set via serial commands or the dashboard, run only on explicit `start`,
+        auto-stop and freeze the chart after duration expires.
+  - [x] **S-curve (jerk-limited) speed profile**, PI mode only: `jerk
+        <value>` sets `SpeedProfileConfig.max_jerk_mps3` (0 disables —
+        PI sees the raw step target), `accel <value>` sets a dedicated
+        `max_accel_mps2` ceiling for the ramp (independent of `jerk`,
+        which only bounds how fast that ceiling is approached; defaults
+        to `0.5`, matching `MoveSConfig`'s own placeholder). The shared
+        target speed is ramped through `speed_profile_update()` once per
+        cycle (not per motor), then the turn sign-flip is applied per
+        motor to the already-ramped value — every enabled motor sees the
+        same smoothed target, not just whichever motor happens to be
+        index 0. Duty mode is intentionally unaffected: it commands raw
+        duty directly by design, so there's nothing to ramp. This gives
+        the S-curve a value **before** the paper's calibration trials run
+        (§5d) — see the note there on why it isn't itself derived from
+        the paper's procedure.
+- [x] Updated `tools/tuning_dashboard.html` to match:
+  - [x] Mode toggle (Duty ↔ PI), field visibility toggling based on mode.
+  - [x] Turn toggle (force-enables all four motors on next start).
+  - [x] Start/Stop buttons (nothing moves until start).
+  - [x] Jerk/accel fields (PI mode only, hidden in Duty mode).
+  - [x] Real-time charting of velocity + duty per motor during active run.
+
+### 5b. Feedforward characterization via Duty-mode sweeps (DONE)
+
+- [x] Ran manual Duty-mode sweeps (all four motors enabled) and PI-mode step
+      response to locate the wheel-velocity PI's gains. **Locked into
+      `src/config/drivetrain/drivetrain_config.c`'s `wheel_controller`:**
+      `kff = 1.2`, `kff_offset = 0.15`, `kp = 0.4`, `ki = 0.1`.
+  - [x] Measured achievable wheel speed range at these gains: **~0.05 m/s**
+        (deadband floor) to **~0.54 m/s** (`output_max` saturation ceiling)
+        — documented in a comment above `wheel_controller` in
+        `drivetrain_config.c`.
+  - [ ] **Follow-up, not yet done:** `DRIVETRAIN_CONFIG.max_vx_mps` /
+        `max_vy_mps` are still `1.0` — both exceed what a single wheel can
+        deliver even for pure-forward motion (~0.62 m/s via the X-drive
+        Jacobian's `cos(30°)` factor at this wheel-speed ceiling, before
+        even accounting for combined vx/vy/omega motions that load wheels
+        harder). Commanding anywhere near the current ceiling will saturate
+        before reaching the requested body speed. Needs a deliberate call
+        on what body-frame ceiling to set (worst-case combined motion, not
+        just pure-forward), not a blind plug-in of the wheel number.
+  - [ ] Reverse-direction sweep not yet run — current gains assume
+        forward/reverse symmetry.
+
+### 5c. PI loop tuning (DONE — see 5b)
+
+- [x] `kp`/`ki` tuned together with the feedforward sweep above (same
+      session, all four motors enabled) — see locked-in values in 5b.
+
+### 5c-note. S-curve values from this session
+
+- [x] `jerk = 1.0` (`max_jerk_mps3`), `accel = 2.5` (`max_accel_mps2`) tested
+      and settled on via the tuning harness's PI-mode fields.
+  - [x] Now have a home: `src/harnesses/calibration_main.cpp`'s
+        `MoveSConfig`/`RotSConfig` RAM defaults (§5d) — still not in a
+        `src/config/**` const definition, since nothing outside that harness
+        consumes them yet, but no longer literally unused.
+
+### 5d. Calibration harness (DONE — wiring) / procedure (NEXT — data + factors)
+
+**Note on the S-curve (§4/§5a):** the paper's `F_lon`/`F_lat`/`F_ang`
+correction factors are measured from *endpoint* error (distance/angle
+actually traveled vs. commanded), which doesn't depend on how smoothly the
+robot accelerated to get there — so the S-curve is not itself something the
+paper's procedure calibrates. It should still be **on and set to a
+reasonable value** (not left at infinite/unbounded jerk) during the
+calibration trials, since `max_jerk_mps3`/`max_accel_mps2` are part of the
+real operating configuration the robot will run calibrated values under —
+calibrating against an unrealistic (instant-step) acceleration profile risks
+factors that don't transfer to normal operation. `calibration_main.cpp`
+defaults to the §5c-note values above; overridable live via `jerk`/`accel`.
+
+- [x] **`MoveS`/`RotS` wired into a hardware harness**
+      (`src/harnesses/calibration_main.cpp`, `[env:calibration]` in
+      `platformio.ini`) — the piece every earlier version of this roadmap
+      section listed as the blocker. Runs `MoveS`/`RotS` through the
+      production `Drivetrain` facade (`drivetrain_set_body_velocity()` +
+      `drivetrain_update()`, same cycle `main.cpp` will eventually use) with
+      `drivetrain_odometry_source` continuously feeding live encoder counts
+      into a `DrivetrainPose` each cycle — the "not yet wired into any
+      harness or main loop" gap §0/§1 called out is closed for this harness.
+      Serial commands: `move <distance_m> <heading_deg> <speed_mps>`,
+      `rotate <angle_deg> <max_omega_deg_s>`, `tol`/`angtol`/`accel`/`alpha`/
+      `jerk` to adjust `MoveSConfig`/`RotSConfig` live, `stop`/`brake`/
+      `enable` for safety. Streams pose/remaining-distance telemetry during
+      a run and prints a completion summary.
+  - [x] **First hardware run found and fixed a real `RotS` bug**: `rotate`
+        never completed — a commanded 90° rotation spun past 600° and kept
+        going. Root cause (`rot_s.c`'s direction sign picked from the
+        *originally commanded* angle instead of the *current* remaining
+        error — once real PI tracking lag overshot the target, the module
+        kept commanding the original direction forever instead of
+        reversing to correct). Fixed with `copysignf(magnitude,
+        remaining_rad)`; regression tests added
+        (`test_overshoot_past_{positive,negative}_target_reverses_direction`
+        in `test/test_rot_s/`) since the existing self-consistent
+        Euler-integration tests couldn't reproduce it (their simulated
+        heading tracks the commanded profile perfectly and never diverges
+        enough to overshoot). `move`/`MoveS` doesn't share this bug — its
+        always-positive `distance_m` means `fmaxf(0.0f, ...)` alone clamps
+        overshoot to a stop.
+  - [x] **Light logic review (no new hardware run) found and fixed a second,
+        more severe latent bug in `odometry.c`** — the module `MoveS` (and
+        eventually `MoveL`/`MoveP`/`MoveC`) depends on for progress
+        tracking. `odometry.c`'s world-frame Y update had the wrong sign:
+        `y_mm += -sine*forward + cosine*lateral` instead of
+        `y_mm += sine*forward - cosine*lateral`. Traced by cross-checking
+        against the documented conventions (`vy` positive = right,
+        `omega` positive = CCW, both from `x_drive_kinematics.h`) and
+        `MoveS`'s own progress dot-product math: the combined effect made
+        `MoveS`'s tracked progress equal `distance × cos(2·θ0)`, where
+        `θ0` is the robot's actual world heading when the move starts —
+        only correct at `θ0 = 0`. At `θ0 = 90°` (e.g. immediately after a
+        `RotS` turn) progress would compute with the *wrong sign*
+        (thinks it's moving backward while moving forward, never
+        completes) — the same "runs forever" symptom as the `RotS` bug,
+        but latent, since every `move` run so far happened to start from
+        heading 0 (fresh boot) where the bug is invisible. Directly
+        threatens the square/multi-leg validation trajectories and any
+        future chained `Move*`/`Rot*` sequence. Fixed by negating the
+        `y_mm` update; existing tests that encoded the old (wrong) sign
+        were corrected (`test_rotates_body_delta_into_world_frame`,
+        `test_integrates_delta_at_origin`,
+        `test_integrates_known_displacement`), and new regression
+        coverage added: `test_rotates_lateral_delta_into_world_frame`
+        (`test/test_drivetrain_odometry/`) — a companion `MoveS` test
+        feeding this through real odometry math was added at the time and
+        later removed, superseded by the architecture change below, which
+        makes the whole scenario structurally unreachable rather than
+        just correctly handled.
+  - [x] **Architecture change: `MoveS`/`RotS` made genuinely open-loop.**
+        Both previously used *live* odometry each cycle (a caller-supplied
+        pose/heading) to decide when to decelerate/stop via a
+        stopping-distance formula — technically feedback, even though
+        billed as "open-loop, dead-reckoned." That's a problem specifically
+        *for calibration*: odometry is exactly what §3 is trying to
+        validate, so letting real mechanical error (wheel slip, radius
+        mismatch) influence when a move ends would quietly absorb some of
+        that error into the move's own duration instead of it showing up
+        as measurable endpoint error — undermining the systemic-error
+        measurement the whole harness exists for. Both `move_s_update()`
+        and `rot_s_update()` no longer take a pose/heading parameter at
+        all: "remaining" is now tracked via a new `planned_progress_m`/
+        `planned_progress_rad` field, self-integrated purely from each
+        module's own commanded output (`planned_progress += commanded *
+        dt_s`) every cycle. Real odometry is now used only by the *caller*
+        (`calibration_main.cpp`), captured separately at `move`/`rotate`
+        start purely for the post-hoc completion-summary comparison —
+        never fed back into the primitives. Side effects, both positive:
+        the `RotS` runaway-direction bug class from the fix above is now
+        structurally unreachable (there's no external signal left to
+        disagree with the plan, so its two regression tests were removed
+        as untestable-by-construction, replaced by a note in
+        `test/test_rot_s/` explaining why); and `move_s.h`/`move_s.c` no
+        longer depend on `odometry.h`/`DrivetrainPose` at all, so the
+        `odometry.c` Y-sign bug class above is also now unreachable from
+        `MoveS`'s side (though `odometry.c` itself is still correct and
+        still used elsewhere, e.g. by `calibration_main.cpp`'s own
+        reporting). `test/test_move_s/` and `test/test_rot_s/` updated
+        throughout for the new signatures; two tests that only made sense
+        with external pose/heading input were replaced with a
+        self-integration check
+        (`test_remaining_{distance,angle}_tracks_self_integrated_progress`).
+  - [ ] Still only lightly exercised on real hardware — one `move` and one
+        `rotate` run so far (both under the pre-open-loop design), not yet
+        a full trial session. Neither the `odometry.c` fix nor the
+        open-loop redesign has been verified on hardware yet — only
+        unit-tested.
+- [x] **`tools/calibration_helper.html`** — standalone calculator (no serial
+      connection, unlike `tuning_dashboard.html`/`drivetrain_test_dashboard.html`
+      — just takes hand-entered trial measurements and computes locally).
+      Implements the paper's eq. 18 (`F_lon`), eq. 19–20 (`F_lat`, via a JS
+      port of `x_drive_kinematics_body_to_wheel_velocities()`'s exact
+      sign/order convention), eq. 21 (`F_ang`), and eq. 24–25
+      (`δr_e`/`δr_m` before/after validation). Add-a-row tables for
+      straight-line trials (`xe`/`ye`/`θe`) and rotation trials (`θ1`/`θ2`),
+      averages automatically, outputs a copy-pastable comment block with
+      the final numbers. Sanity-checked against known edge cases (zero
+      error → identity factors; undershoot → correction factor > 1 in the
+      expected direction) but not yet validated against a real trial's
+      numbers end-to-end.
+  - [ ] **Important limitation, documented in the harness's own header
+        comment:** the completion summary's `odom_longitudinal_mm`/
+        `odom_lateral_mm`/`odom_delta_deg` are odometry's own estimate of
+        what happened, derived from the same encoder ticks and Jacobian
+        `MoveS`/`RotS` use to decide when to stop — by construction this
+        will always read close to zero against the commanded target and
+        **cannot** detect real-world error (wheel slip, radius mismatch,
+        per-wheel response differences). It is a sanity check that the move
+        completed and behaved reasonably, not the paper's `x_e`/`y_e`/`θ_e`.
+- [ ] Run the actual trials (needs the harness above, now available):
+  - [ ] **Straight-line** — used to *derive* `F_lon`/`F_lat` (paper's eq. 18–20).
+        Before running, mark both the robot's start **position** and its
+        **heading** (a line off the front) — you need both for the three
+        measurements this trial produces. Command `move <L1> 0 <speed>`,
+        then measure: `xe`/`ye` (longitudinal/lateral endpoint error, tape
+        measure against `commanded_mm`) *and* `θe` (heading drift, protractor
+        against the marked starting heading — measured directly, not derived
+        from `xe`/`ye`). Repeat for an average of each.
+  - [ ] **In-place rotation (`RotS`)** — used to derive `F_ang` (paper's eq. 21).
+        Command `rotate <angle> <max_omega>`, measure the real rotation with
+        a protractor against `commanded_deg`, repeat for an average.
+  - [ ] **Square** — validation only; confirms factors generalize.
+  - [ ] **Hemicycle (semicircle)** — validation only; requires `MoveC` (§2).
+- [ ] Compute radial position error metrics (`δr_e`, `δr_m` per paper eq. 24–25)
+      to quantify improvement before/after correction factors applied.
+- [ ] Evaluate whether individual motors need **separate tuning curves** if
+      per-motor spreads are large after `F_lat` applied, or accept per-wheel
+      `F_lat` scaling as sufficient compensation.
 
 ## 6. Post-tuning jog + program-builder webpage (end goal)
 
@@ -302,17 +523,27 @@ recipe rather than just ad-hoc gain tweaking.
 - [ ] This is the overall end goal of this roadmap — depends on §2–§5 being done
       first.
 
-## Suggested dependency order
+## Suggested next steps (current state)
 
-Not mandated, but a reasonable build order given the dependencies above:
+The motion APIs (§1–§4) and tuning harness (§5a) are **implemented and unit-tested**.
+The wheel-velocity PI gains **are now tuned and locked into config** (§5b/§5c:
+`kff=1.2`, `kff_offset=0.15`, `kp=0.4`, `ki=0.1`; achievable wheel speed range
+~0.05–0.54 m/s). The calibration harness (§5d) is **wired and compiling**
+(`[env:calibration]`, `src/harnesses/calibration_main.cpp`) but **not yet run
+on hardware**. Here's the path forward:
 
-1. Off-tape error-source module (§1) — needed before any outer-loop PID exists.
-2. S-curve profile generator (§4) — needed by all four motion APIs.
-3. `MoveS` (§2), then its calibration procedure (§3) — establishes `F_lon`,
-   `F_lat`, `F_ang`, and the max-acceleration ceiling used everywhere else.
-4. `MoveL` → `MoveP` → `MoveC` (§2), in that order (each adds a layer on the last).
-5. Tuning harness/webpage (§5), including straight-line/square/hemicycle
-   validation — needed to actually lock in gains before relying on the motion
-   APIs for real paths.
-6. Jog + program-builder webpage (§6) — final layer once everything above is tuned
-   and stable.
+1. **Run the calibration harness on hardware for the first time** — flash
+   `[env:calibration]`, verify `move`/`rotate` behave sanely (completes,
+   doesn't stall/oscillate) before trusting it for actual trials.
+2. **Run straight-line and rotation trials (§5d)** — physically measure real
+   endpoints against the harness's `commanded_mm`/`commanded_deg`, derive
+   `F_lon`, `F_lat`, `F_ang` per the paper.
+3. **Reconcile `max_vx_mps`/`max_vy_mps`/`max_omega_rad_s`** in
+   `drivetrain_config.c` against the measured ~0.54 m/s wheel ceiling (§5b's
+   follow-up) — currently `1.0`/`1.0`/`2.0`, which saturate before reaching
+   the requested body speed for any combined motion.
+4. **Run a reverse-direction Duty sweep** (§5b) to confirm forward/reverse
+   symmetry, or capture separate gains if it doesn't hold.
+5. **Implement `MoveL`/`MoveP`/`MoveC` (§2)** — as needed for the square/hemicycle
+   validation trajectories, or postpone until after calibration is complete.
+6. **Add jog + program-builder webpage (§6)** — final layer for real operation.

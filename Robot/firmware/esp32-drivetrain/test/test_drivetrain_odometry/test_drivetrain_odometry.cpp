@@ -35,23 +35,41 @@ void assert_pose(float x, float y, float heading, const DrivetrainPose &pose) {
 void setUp() {}
 void tearDown() {}
 
-// Confirms a body-frame delta is accumulated at zero heading.
+// Confirms a body-frame delta is accumulated at zero heading. lateral=25 is
+// a rightward strafe (DrivetrainBodyVelocity.vy's convention), which at
+// heading=0 (facing world +X) moves toward world -Y -- see
+// test_rotates_lateral_delta_into_world_frame for the full derivation.
 void test_integrates_delta_at_origin() {
     DrivetrainOdometry odometry = {};
     const DrivetrainOdometryDelta delta{100.0f, 25.0f, 0.2f};
 
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
-    assert_pose(100.0f, 25.0f, 0.2f, odometry.pose);
+    assert_pose(100.0f, -25.0f, 0.2f, odometry.pose);
 }
 
 // Confirms translation is rotated by the pose heading before accumulation.
+// At heading=+90deg (a 90-degree CCW turn from facing world +X, matching
+// DrivetrainBodyVelocity.omega's positive-CCW convention), the robot now
+// faces world +Y, so moving "forward" moves it toward +Y.
 void test_rotates_body_delta_into_world_frame() {
     DrivetrainOdometry odometry = {};
     odometry.pose.heading_rad = 3.14159265358979323846f / 2.0f;
     const DrivetrainOdometryDelta delta{100.0f, 0.0f, 0.0f};
 
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
-    assert_pose(0.0f, -100.0f, 3.14159265358979323846f / 2.0f, odometry.pose);
+    assert_pose(0.0f, 100.0f, 3.14159265358979323846f / 2.0f, odometry.pose);
+}
+
+// Confirms lateral (right-strafe) motion is projected consistently with
+// DrivetrainBodyVelocity.vy's "positive = right" convention: at heading=0
+// (facing world +X), strafing right moves the robot toward world -Y (since
+// +Y is 90 degrees CCW/left of +X in this CCW-positive heading frame).
+void test_rotates_lateral_delta_into_world_frame() {
+    DrivetrainOdometry odometry = {};
+    const DrivetrainOdometryDelta delta{0.0f, 100.0f, 0.0f};
+
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
+    assert_pose(0.0f, -100.0f, 0.0f, odometry.pose);
 }
 
 // Confirms invalid sensor cycles hold pose and record a recoverable fault.
@@ -94,6 +112,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_integrates_delta_at_origin);
     RUN_TEST(test_rotates_body_delta_into_world_frame);
+    RUN_TEST(test_rotates_lateral_delta_into_world_frame);
     RUN_TEST(test_invalid_cycle_holds_pose);
     RUN_TEST(test_rejects_non_finite_delta);
     RUN_TEST(test_reset_restores_defaults);

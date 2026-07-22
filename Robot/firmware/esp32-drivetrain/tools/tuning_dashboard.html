@@ -161,7 +161,7 @@
 <body>
 <div class="viz-root">
   <h1>Wheel PI Tuning Dashboard</h1>
-  <p class="subtitle">Live view of control/drivetrain/wheel_velocity_controller.h running on src/harnesses/tuning_main.cpp (platformio.ini's [env:tuning]). Chrome or Edge only — uses the Web Serial API.</p>
+  <p class="subtitle">Live view of src/harnesses/tuning_main.cpp (platformio.ini's [env:tuning]). Nothing moves until you hit Start — set a mode/setpoint/duration/turn below, then Start runs it and auto-stops. Chrome or Edge only — uses the Web Serial API.</p>
 
   <div class="toolbar">
     <button id="connectBtn" class="primary">Connect</button>
@@ -179,40 +179,57 @@
     <div class="session-row">
       <button id="showGainsBtn" title="Prints the board's actual current ff/ffo/kp/ki to the log below -- the fields never auto-sync, so use this to confirm what's really running before hitting Set on an untouched field.">Show current gains</button>
       <button id="invertBtn" title="Flips the sign of the measured speed reading -- see 'invert' in tuning_main.cpp">Reverse measured direction</button>
-      <button id="modeBtn" title="Step mode: target alternates 0/target every period, chart freezes when each step ends. Continuous mode: target holds steady.">Mode: Step</button>
+      <button id="modeBtn" title="Duty mode: commands a raw duty directly, bypassing the PI loop -- for characterizing duty->speed. PI mode: commands a target speed through the FF+PI loop -- for gain tuning.">Mode: PI</button>
+      <button id="turnBtn" title="On: FL/BL get the setpoint negated, FR/BR get it as-is, so the wheels drive an in-place rotation instead of a straight line -- and force-enables all four motors on Start.">Turn: off</button>
     </div>
     <div class="gain-grid">
-      <div class="control">
+      <div class="control" id="dutyControl" style="display:none;">
+        <label for="duty">Duty (open-loop)</label>
+        <div class="row"><input id="duty" type="number" step="0.05" value="0" /><button data-cmd="duty">Set</button></div>
+      </div>
+      <div class="control" id="ffControl">
         <label for="ff">Feedforward slope (ff)</label>
         <div class="row"><input id="ff" type="number" step="0.01" value="1.14" /><button data-cmd="ff">Set</button></div>
       </div>
-      <div class="control">
+      <div class="control" id="ffoControl">
         <label for="ffo">Feedforward offset (ffo)</label>
         <div class="row"><input id="ffo" type="number" step="0.001" value="0.069" /><button data-cmd="ffo">Set</button></div>
       </div>
-      <div class="control">
+      <div class="control" id="kpControl">
         <label for="kp">Proportional (kp)</label>
         <div class="row"><input id="kp" type="number" step="0.01" value="0.4" /><button data-cmd="kp">Set</button></div>
       </div>
-      <div class="control">
+      <div class="control" id="kiControl">
         <label for="ki">Integral (ki)</label>
         <div class="row"><input id="ki" type="number" step="0.001" value="0.2" /><button data-cmd="ki">Set</button></div>
       </div>
-      <div class="control">
-        <label for="target">Step target (m/s)</label>
+      <div class="control" id="targetControl">
+        <label for="target">Target speed (m/s)</label>
         <div class="row"><input id="target" type="number" step="0.05" value="1.0" /><button data-cmd="target">Set</button></div>
       </div>
       <div class="control">
-        <label for="period">Step period (ms)</label>
-        <div class="row"><input id="period" type="number" step="100" value="3000" /><button data-cmd="period">Set</button></div>
+        <label for="duration">Run duration (ms)</label>
+        <div class="row"><input id="duration" type="number" step="100" value="3000" /><button data-cmd="duration">Set</button></div>
       </div>
+      <div class="control" id="jerkControl">
+        <label for="jerk">Max jerk (m/s³)</label>
+        <div class="row"><input id="jerk" type="number" step="0.1" value="1.0" /><button data-cmd="jerk">Set</button></div>
+      </div>
+      <div class="control" id="accelControl">
+        <label for="accel">Max accel (m/s²)</label>
+        <div class="row"><input id="accel" type="number" step="0.1" value="0.5" /><button data-cmd="accel">Set</button></div>
+      </div>
+    </div>
+    <div class="session-row" style="margin-top: 10px;">
+      <button id="startBtn" class="primary">Start</button>
+      <button id="stopBtn">Stop</button>
     </div>
   </div>
 
   <div class="chart-card">
     <div class="chart-head">
-      <span class="chart-title">Velocity — measured per motor, shared target (m/s)</span>
-      <span class="frozen-badge" id="veloFrozenBadge">⏸ step complete — frozen</span>
+      <span class="chart-title">Velocity — measured per motor, target/duty (see legend)</span>
+      <span class="frozen-badge" id="veloFrozenBadge">⏸ run stopped — frozen</span>
       <span class="legend" id="veloLegend"></span>
     </div>
     <div class="chart-wrap" id="veloChartWrap">
@@ -242,20 +259,23 @@
   const state = {
     port: null, reader: null, writer: null, keepReading: false,
     // Per-motor sample arrays -- one CSV line per enabled motor per tick,
-    // "millis,motor,target_mps,measured_mps,duty". Target is shared
-    // across all motors (one step/continuous schedule), but stored
-    // per-motor anyway since it arrives on the same line.
+    // "millis,motor,target_mps,measured_mps,duty". In Duty mode the
+    // "target_mps" column actually holds the commanded duty, not a speed
+    // (see tuning_main.cpp's header comment) -- same shared-per-run
+    // setpoint either way, just stored per-motor since it arrives on the
+    // same line.
     samplesByMotor: { 1: [], 2: [], 3: [], 4: [] }, // motor -> [{t, target, measured, duty}]
     motorEnabled: { 1: true, 2: false, 3: false, 4: false }, // mirrors the firmware's boot default (M1 only)
     latestT: 0, // newest millis() seen across ALL motors -- drives the rolling-window cutoff
     rxBuffer: "",
     inverted: false,
-    continuous: false,
+    dutyMode: false, // mirrors the firmware's "mode duty|pi" -- starts in PI mode
+    turnOn: false,
     // Data keeps accumulating in the background while frozen -- freezing
     // only pauses the chart redraw, so unfreezing shows the current state
-    // immediately rather than a stale snapshot.
+    // immediately rather than a stale snapshot. A run auto-stopping is the
+    // natural freeze point: no more CSV lines arrive until the next Start.
     frozen: false,
-    previousTarget: null, // last target_mps seen, to detect a step's falling edge
   };
 
   const statusEl = document.getElementById("status");
@@ -297,7 +317,6 @@
       state.writer = textEncoder.writable.getWriter();
 
       state.keepReading = true;
-      state.previousTarget = null;
       setFrozen(false);
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
@@ -346,7 +365,7 @@
     }
   }
 
-  // Pauses chart redraws so the last step's settled values stay on screen
+  // Pauses chart redraws so the last run's settled values stay on screen
   // instead of scrolling away before they can be read off. Toggled off the
   // moment any command goes out (see writeLine below), since that's the
   // natural "I'm done reading, testing something new now" signal.
@@ -358,7 +377,14 @@
   }
 
   function handleLine(line) {
-    if (line.startsWith("#")) { log(line); return; }
+    if (line.startsWith("#")) {
+      log(line);
+      // A run auto-stopped or was stopped -- no more CSV lines are coming
+      // until the next Start, so freeze the chart on its last frame
+      // instead of leaving it looking like data just stopped arriving.
+      if (line.startsWith("# run stop")) setFrozen(true);
+      return;
+    }
     if (line.startsWith("millis")) return; // CSV header
 
     const parts = line.split(",");
@@ -383,15 +409,6 @@
       log("# board clock reset detected (reboot/reflash) -- charts cleared");
     }
     state.latestT = Math.max(state.latestT, t);
-
-    // Step mode's "high" phase just ended (target fell back to 0) -- freeze
-    // so the settled measured velocity from that step is easy to read
-    // instead of scrolling out of the window before you can look at it.
-    if (!state.continuous && state.previousTarget > 0 && target === 0) {
-      setFrozen(true);
-      log("# step complete -- chart frozen, read your values (any command resumes)");
-    }
-    state.previousTarget = target;
 
     const arr = state.samplesByMotor[motor];
     arr.push({ t, target, measured, duty });
@@ -637,13 +654,42 @@
     sendCommand("invert", state.inverted ? 1 : 0);
   });
 
+  // Duty mode's fields (raw duty) vs PI mode's fields (ff/ffo/kp/ki/target)
+  // are mutually exclusive -- only show the ones that apply.
+  const dutyControl = document.getElementById("dutyControl");
+  const piControls = [
+    document.getElementById("ffControl"),
+    document.getElementById("ffoControl"),
+    document.getElementById("kpControl"),
+    document.getElementById("kiControl"),
+    document.getElementById("targetControl"),
+    document.getElementById("jerkControl"),
+    document.getElementById("accelControl"),
+  ];
+
   const modeBtn = document.getElementById("modeBtn");
   modeBtn.addEventListener("click", () => {
-    state.continuous = !state.continuous;
-    modeBtn.classList.toggle("active", state.continuous);
-    modeBtn.textContent = state.continuous ? "Mode: Continuous" : "Mode: Step";
-    sendCommand("continuous", state.continuous ? 1 : 0);
+    state.dutyMode = !state.dutyMode;
+    modeBtn.classList.toggle("active", state.dutyMode);
+    modeBtn.textContent = state.dutyMode ? "Mode: Duty" : "Mode: PI";
+    dutyControl.style.display = state.dutyMode ? "" : "none";
+    piControls.forEach(el => { el.style.display = state.dutyMode ? "none" : ""; });
+    sendCommand("mode", state.dutyMode ? "duty" : "pi");
   });
+
+  const turnBtn = document.getElementById("turnBtn");
+  turnBtn.addEventListener("click", () => {
+    state.turnOn = !state.turnOn;
+    turnBtn.classList.toggle("active", state.turnOn);
+    turnBtn.textContent = state.turnOn ? "Turn: on" : "Turn: off";
+    sendCommand("turn", state.turnOn ? 1 : 0);
+  });
+
+  const startBtn = document.getElementById("startBtn");
+  startBtn.addEventListener("click", () => writeLine("start\n"));
+
+  const stopBtn = document.getElementById("stopBtn");
+  stopBtn.addEventListener("click", () => writeLine("stop\n"));
 
   document.querySelectorAll(".motor-toggle").forEach(btn => {
     const m = Number(btn.getAttribute("data-motor"));
