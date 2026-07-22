@@ -1,48 +1,42 @@
 #include <Arduino.h>
-#include "drivers/stepper_driver.h"
-#include "config/stepper_config.h"
+#include "drivers/servo_driver.h"
 
-StepperDriver habitatZStepper;
-StepperDriver habitatXStepper;
-StepperDriver towerZStepper;
-StepperDriver towerXStepper;
+// Add or remove entries here to test one servo or any group of servos.
+static const ServoConfig *const servoConfigs[] = {
+    &habitatLeftServoConfig,
+    // &habitatRightServoConfig,
+    // &towerRotateServoConfig,
+    // &towerLeftServoConfig,
+    // &towerMiddleServoConfig,
+    // &towerRightServoConfig,
+    // &solarPanelServoConfig,
+};
 
-const long habitatZRangeMM = 152;
-const long habitatXRangeMM = 187;
-const long towerZRangeMM = 220; // full is 254, but currently interferes with brace
-const long towerXRangeMM = 138;
+static constexpr size_t SERVO_COUNT = sizeof(servoConfigs) / sizeof(servoConfigs[0]);
+static constexpr uint32_t TOGGLE_INTERVAL_MS = 1000;
 
-bool movingOutward = true;
-
-static void start_full_range_move(bool outward) {
-    stepper_z_move_distanceMM(&habitatZStepper, outward ? -habitatZRangeMM : habitatZRangeMM);
-    stepper_x_move_distanceMM(&habitatXStepper, outward ? habitatXRangeMM : -habitatXRangeMM);
-    stepper_z_move_distanceMM(&towerZStepper, outward ? -towerZRangeMM : towerZRangeMM);
-    stepper_x_move_distanceMM(&towerXStepper, outward ? towerXRangeMM : -towerXRangeMM);
-}
+static ServoDriver servos[SERVO_COUNT];
+static ServoPosition currentTestPosition = SERVO_POSITION_A;
+static uint32_t lastToggleMs = 0;
 
 void setup() {
-    stepper_begin(&habitatZStepper, habitatZConfig);
-    stepper_begin(&habitatXStepper, habitatXConfig);
-    stepper_begin(&towerZStepper, towerZConfig);
-    stepper_begin(&towerXStepper, towerXConfig);
-
-    start_full_range_move(movingOutward);
+    for (size_t index = 0; index < SERVO_COUNT; ++index) {
+        servo_init(&servos[index], *servoConfigs[index]);
+    }
+    lastToggleMs = millis();
 }
 
 void loop() {
-    stepper_update(&habitatZStepper);
-    stepper_update(&habitatXStepper);
-    stepper_update(&towerZStepper);
-    stepper_update(&towerXStepper);
+    const uint32_t nowMs = millis();
+    if (nowMs - lastToggleMs >= TOGGLE_INTERVAL_MS) {
+        lastToggleMs += TOGGLE_INTERVAL_MS;
 
-    bool allIdle = !stepper_is_moving(&habitatZStepper) &&
-                    !stepper_is_moving(&habitatXStepper) &&
-                    !stepper_is_moving(&towerZStepper) &&
-                    !stepper_is_moving(&towerXStepper);
+        currentTestPosition = (currentTestPosition == SERVO_POSITION_A)
+            ? SERVO_POSITION_B
+            : SERVO_POSITION_A;
 
-    if (allIdle) {
-        movingOutward = !movingOutward;
-        start_full_range_move(movingOutward);
+        for (size_t index = 0; index < SERVO_COUNT; ++index) {
+            servo_set_position(&servos[index], currentTestPosition);
+        }
     }
 }

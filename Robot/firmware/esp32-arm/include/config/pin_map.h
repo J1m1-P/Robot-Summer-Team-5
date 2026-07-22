@@ -2,12 +2,13 @@
 #pragma once
 
 // Servos
-#define PIN_SERVO1_PWM      1
-#define PIN_SERVO2_PWM      2
-#define PIN_SERVO3_PWM      3
-#define PIN_SERVO4_PWM      4
-#define PIN_SERVO5_PWM      5
-#define PIN_SERVO6_PWM      6
+#define PIN_SERVO_HABITAT_LEFT_PWM      1
+#define PIN_SERVO_HABITAT_RIGHT_PWM     2
+#define PIN_SERVO_TOWER_ROTATE_PWM      3
+#define PIN_SERVO_TOWER_LEFT_PWM        4
+#define PIN_SERVO_TOWER_MIDDLE_PWM      5
+#define PIN_SERVO_TOWER_RIGHT_PWM       6
+#define PIN_SERVO_SOLAR_PANEL_PWM       45
 
 // Locating Motor
 #define PIN_LOC_EN          13      // Power on the locating motor

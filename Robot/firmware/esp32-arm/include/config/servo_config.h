@@ -1,22 +1,37 @@
-/* Defines stepper timing settings and the arm's four stepper configurations. */
+/* Defines the servo pin assignments and the two named positions for each servo. */
 #pragma once
 
 #include <Arduino.h>
+#include <config/pin_map.h>
 
-// Defines the pins and pulse timing for one stepper motor.
+typedef enum {
+    SERVO_POSITION_A = 0,
+    SERVO_POSITION_B = 1
+} ServoPosition;
+
 struct ServoConfig {
-    uint8_t servoPin;
-
-    // minAngle and maxAngle define the range of motion for the servo in degrees. 
-    uint16_t minAngle; 
-    uint16_t maxAngle;
+    uint8_t pin;
+    uint8_t anglePositionA;
+    uint8_t anglePositionB;
+    const char *positionNameA;
+    const char *positionNameB;
+    uint16_t minPulseWidthUs;
+    uint16_t maxPulseWidthUs;
+    uint16_t frequencyHz;
 };
 
-// Ready-to-use configurations for the six servos.
-// Field order is stepPin, dirPin, stepPulseUs, stepDelayUs, and motionlimitMM.
-inline ServoConfig habitatLeftConfig {16, 15, 3};
-inline ServoConfig habitatRightConfig {42, 41, 3};
-inline ServoConfig towerRotateConfig {18, 17, 90};
-inline ServoConfig towerLeftConfig {21, 40, 90};
-inline ServoConfig towerMiddleConfig {21, 40, 90};
-inline ServoConfig towerRightConfig {21, 40, 90};
+// Both the MG996R and MG90S use a 20 ms frame and standard 1-2 ms pulses.
+// Keep these conservative limits unless an individual servo has been calibrated
+// with its mechanism disconnected or clear of hard stops.
+constexpr uint16_t SERVO_FREQUENCY_HZ = 50;
+constexpr uint16_t SERVO_MIN_PULSE_WIDTH_US = 1000;
+constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2000;
+
+static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 44, 46, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig solarPanelServoConfig {PIN_SERVO_SOLAR_PANEL_PWM, 44, 46, "retract", "extend", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+
