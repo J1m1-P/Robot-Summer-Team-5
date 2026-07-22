@@ -65,7 +65,7 @@ from uart_link import (RobotLink, PACKET_TYPE_STATUS,           # the ESP32 seri
 # CONFIGURATION — everything you tune lives here
 # ══════════════════════════════════════════════════════════════════════════════
 # ── camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 1          # ADJUST: 0 if one camera, 1 for built-in + USB
+CAMERA_INDEX = "/dev/video0"          # ADJUST: 0 if one camera, 1 for built-in + USB
 
 # ── model / detection ─────────────────────────────────────────────────────────
 MODEL_PATH  = r"E:\runs\detect\train-9\weights\best_ncnn_model"  # ADJUST: .pt or ncnn folder
@@ -89,7 +89,7 @@ FLASH_COUNT      = 3      # ADJUST: how many flashes once settled
 TARGETS_TO_FIND  = 2      # only two tubbies exist and we need both — leave at 2
 
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
-SERIAL_PORT = None        # ADJUST: None = DEV MODE (commands just print). "COM5" /
+SERIAL_PORT = "/dev/serial0"        # ADJUST: None = DEV MODE (commands just print). "COM5" /
                           #         "/dev/serial0" / "/dev/ttyUSB0" to transmit.
 SERIAL_BAUD = 115200      # ADJUST: must match the ESP's baud rate
 link = RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None

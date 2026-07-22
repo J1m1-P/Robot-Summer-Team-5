@@ -69,7 +69,7 @@ def sanity_check(ncnn_dir, image_paths):
     import cv2
     # Reuse the detector's own IoU + the confidence it actually runs at, so this
     # test mirrors real CONFIRM conditions rather than some arbitrary settings.
-    from Robot.firmware.Rpi.computerVision.teletubby_detector_with_HSV import iou, CONFIRM_CONF
+    from Robot.firmware.Rpi.Extra.teletubby_detector_with_HSV import iou, CONFIRM_CONF
 
     IOU_SAME_OBJECT = 0.8   # below this, the two boxes point at different things
 

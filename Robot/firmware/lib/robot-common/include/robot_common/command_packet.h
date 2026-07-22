@@ -32,7 +32,14 @@ typedef enum {
 // Represents one decoded command: an opcode plus its (optional) steering value.
 typedef struct {
     CommandOpcode opcode;
-    float value;   // TURN: steering error, roughly -1.0..1.0. Unused (0) otherwise.
+    // TURN: meaning depends on which link this travels over -- the bridge
+    // between them (esp32-arm/src/comms/pi_bridge.c) converts one to the
+    // other, it isn't the same number on both hops:
+    //   Pi -> arm:         normalized visual steering error, roughly -1.0..1.0.
+    //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
+    //                       matching DrivetrainBodyVelocity.omega).
+    // Unused (0) for every other opcode.
+    float value;
 } CommandPacket;
 
 // Validates, encodes, and sends a command packet over a UART link.
