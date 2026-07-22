@@ -6,11 +6,13 @@
 
 #include "drivers/motor/motor_driver.h"
 #include "config/drivetrain/motor_config.h"
+#include "task/robot_task_manager.h"
 
 // Runtime state for the single-motor bench test.
 static MotorDriver motor1 = {0};
 static MotorDriver motor2 = {0};
 static bool motor_ready = false;
+static RobotTaskManager task_manager = {};
 
 // Initializes logging and enables the front-left motor for bench testing.
 void setup()
@@ -22,6 +24,8 @@ void setup()
 
     app_log_init();
     Serial.println("2. App log initialized");
+
+    robot_task_manager_init(&task_manager);
 
     esp_err_t err; 
 
@@ -54,6 +58,8 @@ void setup()
 // Repeatedly commands a fixed duty until a motor error occurs.
 void loop()
 {
+    robot_task_manager_update(&task_manager);
+
     if (!motor_ready) {
         delay(100);
         return;
