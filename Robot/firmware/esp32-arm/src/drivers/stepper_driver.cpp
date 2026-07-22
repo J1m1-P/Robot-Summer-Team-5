@@ -15,7 +15,8 @@ const float leadscrewPitchMM = 8.0;
 // Set the current direction pin state and record the chosen direction.
 static void stepper_set_direction(StepperDriver *driver, bool direction) {
     driver->direction = direction;
-    digitalWrite(driver->config.dirPin, direction ? HIGH : LOW);
+    const bool physicalDirection = direction != driver->config.directionInverted;
+    digitalWrite(driver->config.dirPin, physicalDirection ? HIGH : LOW);
 }
 
 // Internal stop helper: clear motion state and lower the step pin.
@@ -59,7 +60,7 @@ esp_err_t stepper_init(StepperDriver *driver, StepperConfig config) {
     pinMode(driver->config.dirPin, OUTPUT);
 
     digitalWrite(driver->config.stepPin, LOW);
-    digitalWrite(driver->config.dirPin, LOW);
+    stepper_set_direction(driver, true);
 
     return ESP_OK;
 }

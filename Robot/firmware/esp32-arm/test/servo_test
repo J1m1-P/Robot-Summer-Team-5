@@ -4,8 +4,8 @@
 // Add or remove entries here to test one servo or any group of servos.
 static const ServoConfig *const servoConfigs[] = {
     // &habitatLeftServoConfig,
-    // &habitatRightServoConfig,
-    // &towerRotateServoConfig,
+    &habitatRightServoConfig,
+    &towerRotateServoConfig,
     // &towerLeftServoConfig,
     // &towerMiddleServoConfig,
     // &towerRightServoConfig,

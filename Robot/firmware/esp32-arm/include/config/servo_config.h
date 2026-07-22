@@ -24,14 +24,16 @@ struct ServoConfig {
 // Keep these conservative limits unless an individual servo has been calibrated
 // with its mechanism disconnected or clear of hard stops.
 constexpr uint16_t SERVO_FREQUENCY_HZ = 50;
-constexpr uint16_t SERVO_MIN_PULSE_WIDTH_US = 1000;
-constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2000;
+constexpr uint16_t SERVO_MIN_PULSE_WIDTH_US = 500;
+constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2500;
 
-static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 44, 46, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 44, 46, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 46, 116, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 87, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 89, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+
+// Needs calibration: 
 static const ServoConfig solarPanelServoConfig {PIN_SERVO_SOLAR_PANEL_PWM, 44, 46, "retract", "extend", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 
