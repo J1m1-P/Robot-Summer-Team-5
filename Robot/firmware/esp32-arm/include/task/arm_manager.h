@@ -12,15 +12,12 @@ extern "C" {
 #endif
 
 typedef struct {
-    TaskStepCommand command;
     TaskStepStatus status;
     TaskFailure failure;
-    bool active;
 } ArmManager;
 
 void arm_manager_init(ArmManager *manager);
 bool arm_manager_start(ArmManager *manager, const TaskStepCommand *command);
-void arm_manager_update(ArmManager *manager);
 bool arm_manager_cancel(ArmManager *manager);
 bool arm_manager_report_succeeded(ArmManager *manager);
 bool arm_manager_report_failed(ArmManager *manager, TaskFailure failure);

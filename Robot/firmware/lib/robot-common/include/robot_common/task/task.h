@@ -58,7 +58,6 @@ typedef enum {
 /** Stable reason codes used for task behavior and wire status. */
 typedef enum {
     TASK_FAILURE_NONE = 0,
-    TASK_FAILURE_INVALID_REQUEST,
     TASK_FAILURE_BUSY,
     TASK_FAILURE_INVALID_STEP,
     TASK_FAILURE_STEP_REJECTED,
@@ -68,7 +67,7 @@ typedef enum {
     TASK_FAILURE_PEER_RESET,
     TASK_FAILURE_STALE_MESSAGE,
     TASK_FAILURE_PROTOCOL,
-    TASK_FAILURE_UNAVAILABLE,
+    TASK_FAILURE_COUNT,
 } TaskFailure;
 
 /** Direction of travel during tape following. */
@@ -102,23 +101,12 @@ typedef struct {
     TaskParams params;
 } TaskRequest;
 
-/** One immutable entry in a workflow definition. */
-typedef struct {
-    TaskAction action;
-    TaskOwner owner;
-} TaskStepDefinition;
-
-/** Parameters delivered to the manager executing the selected action. */
-typedef union {
-    TapeFollowingTaskParams tape_following;
-} TaskActionParams;
-
 /** Command passed from the coordinator to a local or remote manager. */
 typedef struct {
     uint32_t execution_id;
     uint8_t step;
     TaskAction action;
-    TaskActionParams params;
+    TapeFollowingTaskParams tape_following;
 } TaskStepCommand;
 
 /** The coordinator's single authoritative mutable task record. */
@@ -132,12 +120,6 @@ typedef struct {
 } TaskRuntime;
 
 bool task_request_is_valid(const TaskRequest *request);
-bool task_get_step_count(TaskType type, uint8_t *count_out);
-bool task_get_step_definition(TaskType type, uint8_t step,
-                              TaskStepDefinition *definition_out);
-bool task_build_step_command(const TaskRuntime *runtime,
-                             TaskStepCommand *command_out);
-bool task_owner_is_valid(TaskOwner owner);
 bool task_action_is_valid(TaskAction action);
 bool task_step_status_is_terminal(TaskStepStatus status);
 

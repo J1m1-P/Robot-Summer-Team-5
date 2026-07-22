@@ -118,13 +118,13 @@ void setup() {
     }
 }
 
-void send_status() {
-    const uint8_t status_payload[] = {1U, 2U, 3U};
+void send_application_packet() {
+    const uint8_t application_payload[] = {1U, 2U, 3U};
     esp_err_t error = uart_link_send(
         &uart_link,
-        PACKET_TYPE_STATUS,
-        status_payload,
-        (uint8_t)sizeof(status_payload)
+        PACKET_TYPE_ODOMETRY, // Normally use odometry_packet_send() for this type.
+        application_payload,
+        (uint8_t)sizeof(application_payload)
     );
     if (error != ESP_OK) {
         // The packet was not fully queued or transmitted.
@@ -132,48 +132,39 @@ void send_status() {
 }
 ```
 
-Call `uart_link_update()` regularly to drain the hardware RX buffer and feed
-the frame parser. A complete valid frame becomes available through
-`uart_link_take_packet()`:
+On a dedicated UART, a caller can use `uart_link_update()` and
+`uart_link_take_packet()` directly. The ESP32-to-ESP32 UART is shared by task,
+odometry, and future command/data protocols, so its composition root instead
+owns one `PacketRouter`. Each protocol registers only the message types it owns:
 
 ```cpp
-void receive_packets() {
-    if (uart_link_update(&uart_link) != ESP_OK) {
-        return;
+#include <robot_common/packet_router.h>
+
+static PacketRouter packet_router = {0};
+
+static void receive_odometry(void *, const PacketFrame *packet,
+                             uint32_t) {
+    OdometryPacket odometry;
+    if (odometry_packet_decode(packet, &odometry) == ESP_OK) {
+        // Consume cumulative pose and inspect odometry.valid.
     }
+}
 
-    PacketFrame packet;
-    if (uart_link_take_packet(&uart_link, &packet) != ESP_OK) {
-        return;
-    }
+void setup_packet_routing() {
+    packet_router_init(&packet_router, &uart_link);
+    packet_router_set_handler(&packet_router, PACKET_TYPE_ODOMETRY,
+                              receive_odometry, nullptr);
+}
 
-    switch ((PacketMessageType)packet.message_type) {
-        case PACKET_TYPE_ODOMETRY: {
-            OdometryPacket odometry;
-            if (odometry_packet_decode(&packet, &odometry) == ESP_OK) {
-                // Consume cumulative pose and inspect odometry.valid.
-            }
-            break;
-        }
-
-        case PACKET_TYPE_COMMAND:
-            // Decode with the command packet module.
-            break;
-
-        case PACKET_TYPE_STATUS:
-            // Decode with the status packet module.
-            break;
-
-        default:
-            break;
-    }
+void receive_packets(uint32_t now_ms) {
+    (void)packet_router_update(&packet_router, now_ms);
 }
 ```
 
-The link stores only the latest complete packet. If another packet arrives
-before the current one is taken, `packets_overwritten` increments. The other
-runtime counters are `packets_sent`, `packets_received`, `checksum_errors`, and
-`parse_errors`.
+The link queues up to `UART_LINK_PACKET_QUEUE_SIZE` complete packets. Queue
+overflow increments `packets_dropped`; the other transport counters are
+`packets_sent`, `packets_received`, `checksum_errors`, and `parse_errors`.
+The router separately counts routed and unhandled valid packets.
 
 ### Complete fused-data example
 

@@ -161,9 +161,11 @@ firmware/
 |   |-- include/robot_common/task/task.h
 |   |-- include/robot_common/task/task_protocol.h
 |   |-- include/robot_common/packet_protocol.h
+|   |-- include/robot_common/packet_router.h
 |   |-- include/robot_common/uart_link.h
 |   |-- src/task/task.c
 |   |-- src/task/task_protocol.c
+|   |-- src/packet_router.c
 |   `-- src/uart_link.c
 |-- esp32-drivetrain/
 |   |-- include/task/task_action_executor.h
@@ -171,7 +173,6 @@ firmware/
 |   |-- include/task/drivetrain_manager.h
 |   |-- include/communication/arm_task_client.h
 |   |-- include/config/communication/task_link_config.h
-|   |-- src/task/task_action_executor.c
 |   |-- src/task/task_coordinator.c
 |   |-- src/task/drivetrain_manager.c
 |   |-- src/communication/arm_task_client.c
@@ -189,10 +190,10 @@ firmware/
 
 ### Shared task model
 
-`task.h` defines stable cross-controller types. `task.c` owns request validation,
-the immutable step arrays, step lookup, and construction of a manager command.
-They must not own a UART, hardware object, clock, active manager, or transition
-policy.
+`task.h` defines stable cross-controller types. `task.c` owns only request and
+shared-enum validation. Workflow arrays, lookup, and command construction are
+private to the coordinator rather than exported as unused shared APIs. The
+shared model must not own UART, hardware, clock, manager, or transition policy.
 
 ### Shared task protocol
 
@@ -208,16 +209,18 @@ packets in FIFO order. A full queue drops the newly decoded packet and increment
 
 ### Task Coordinator
 
-`task_coordinator.h/.c` own the authoritative `TaskRuntime`, executor selection,
-step start, polling, deadline, advancement, cancellation, and failure. The
-public API is `init`, `start`, `update`, `cancel`, `fail`, runtime access, and
-derived-owner access. It must not contain motor, tape-sensor, stepper, claw, or
-UART operations.
+`task_coordinator.h/.c` own the private workflow arrays, authoritative
+`TaskRuntime`, executor selection, step start, polling, deadline, advancement,
+cancellation, and failure. The public API is only `init`, `start`, `update`,
+`cancel`, and `fail`; callers that own the coordinator can read its runtime
+directly. It must not contain motor, tape-sensor, stepper, claw, or UART
+operations.
 
 ### Task action executor
 
-`task_action_executor.h/.c` define and validate the small callback interface.
-It owns no state and performs no transitions itself.
+`task_action_executor.h` defines the small callback interface. Callback-table
+validation is private to the coordinator, its sole caller, so no implementation
+file or public validation function is needed.
 
 ### Drivetrain Manager
 
@@ -228,11 +231,13 @@ or send arm messages.
 
 ### Arm task client
 
-`arm_task_client.h/.c` own the drivetrain-side UART synchronization state,
+`arm_task_client.h/.c` own the drivetrain-side task synchronization state,
 outstanding remote command, retry schedule, arm session, link deadline, and
 diagnostic counters. It implements `TaskActionExecutor` for arm-owned actions.
 It must not modify `TaskRuntime` directly; peer failures are pulled by the
-composition root and submitted to `task_coordinator_fail()`.
+composition root and submitted to `task_coordinator_fail()`. It receives only
+task status and heartbeat frames selected by the shared `PacketRouter`; it does
+not poll or drain the physical UART.
 
 ### Arm Manager
 
@@ -246,7 +251,7 @@ be stopped when those drivers are integrated.
 `task_server.h/.c` own arm-side session recognition, duplicate/stale command
 handling, heartbeat/status scheduling, communication timeout, and the cached
 last command. It delegates physical action state to `ArmManager`. It cannot
-advance a workflow.
+advance a workflow or consume packets belonging to other link protocols.
 
 ### Configuration and composition roots
 
@@ -296,8 +301,9 @@ written only in the constant workflow arrays and read by the coordinator.
 ### `TaskStepCommand`
 
 `execution_id` and `step` identify the coordinator selection. `action` tells the
-manager what to execute. `params` contains only action-specific inputs. A remote
-copy is synchronization state, not another task runtime.
+manager what to execute. `tape_following` contains the only currently defined
+action parameters without an extra one-member union. A remote copy is
+synchronization state, not another task runtime.
 
 ### `TaskCoordinator`
 
@@ -307,21 +313,22 @@ only to enforce the active-step deadline.
 
 ### `DrivetrainManager` and `ArmManager`
 
-Each stores its accepted `command`, current result/status, failure, and an
-`active` flag that prevents overlapping physical actions. The drivetrain manager
+Each stores only its current result/status and failure. `RUNNING` itself prevents
+overlapping physical actions, so a duplicate `active` flag is unnecessary. The
+placeholder managers do not retain an unused command. The drivetrain manager
 also stores the drivetrain pointer required for safe braking.
 
 ### `ArmTaskClient`
 
 - `link`, `config`: transport and fixed timing dependencies.
 - `coordinator_session_id`: this drivetrain boot identity.
-- `arm_session_id`, `previous_arm_session_id`, `peer_seen`: reset/stale-session
-  detection.
+- `arm_session_id`, `previous_arm_session_id`: current/reset/stale-session
+  detection; zero current session means disconnected.
 - `next_command_id`: generates nonzero remote command identities.
 - `last_receive_ms`, `last_heartbeat_ms`, `last_command_send_ms`: timeout,
   heartbeat, and retry scheduling.
-- `peer_failure_pending`, `peer_failure`: one safe failure event for the
-  coordinator.
+- `peer_failure`: one safe failure event for the coordinator; `NONE` means no
+  pending event.
 - `command_active`, `cancel_pending`, `command`, `result`: the one outstanding
   remote action and reliable cancellation state.
 - `diagnostics`: stale-status, protocol-error, and retry counters; never used for
@@ -331,8 +338,8 @@ also stores the drivetrain pointer required for safe braking.
 
 - `link`, `manager`, `config`: dependencies.
 - `arm_session_id`: this arm boot identity.
-- `coordinator_session_id`, `previous_coordinator_session_id`,
-  `coordinator_seen`: reset and old-session rejection.
+- `coordinator_session_id`, `previous_coordinator_session_id`: reset and
+  old-session rejection; zero current session means disconnected.
 - receive/heartbeat/status timestamps: communication scheduling.
 - `has_command`, `command`, `last_sent_status`: duplicate handling and periodic
   status reporting.
@@ -414,6 +421,9 @@ failure. Managers cannot request a step number or directly transition the task.
 
 The packet frame already supplies protocol version, payload length, and XOR
 checksum. Task payloads are explicitly serialized rather than copied from RAM.
+Each composition root polls one `PacketRouter`, which dispatches task packet
+types to the task endpoint while preserving the same physical `UartLink` for
+odometry and future command/data handlers.
 
 ### Acknowledgement and retry
 
@@ -493,8 +503,9 @@ advancing and cancels any still-running executor.
    otherwise add one and assign exactly one owner.
 4. Add the constant workflow array and return it from `get_workflow()` in
    `task.c`.
-5. If the action has parameters, populate them in `task_build_step_command()`
-   and extend the explicit protocol encoding only when the action is remote.
+5. If the action has parameters, populate them in the coordinator's private
+   `build_step_command()` and extend explicit protocol encoding only when the
+   action is remote.
 6. Implement the action in exactly one manager. Do not add sequencing logic to
    that manager.
 7. Add coordinator tests for action order, ownership, success, failure, and
@@ -536,3 +547,40 @@ not require drivetrain-manager sequencing code.
 Before moving hardware, verify UART wiring, safe brake/coast behavior, arm
 cancel behavior, action completion criteria, realistic timeouts, and the source
 of execution IDs.
+
+## 11. Developer reading order
+
+1. `firmware/esp32-drivetrain/src/main.cpp` — understand how the coordinator,
+   two executors, shared UART router, and update loop are composed.
+2. `firmware/lib/robot-common/include/robot_common/task/task.h` — learn the
+   authoritative task vocabulary, request/runtime structs, actions, and owners.
+3. `firmware/lib/robot-common/src/task/task.c` — read the request validation
+   rules shared by both controllers.
+4. `firmware/esp32-drivetrain/include/task/task_coordinator.h` followed by
+   `firmware/esp32-drivetrain/src/task/task_coordinator.c` — trace the only
+   module allowed to define, advance, or terminate a workflow.
+5. `firmware/esp32-drivetrain/include/task/task_action_executor.h` — understand
+   the header-only boundary that keeps the coordinator independent of physical
+   hardware and UART.
+6. `firmware/esp32-drivetrain/src/task/drivetrain_manager.c` — see how locally
+   owned actions expose completion/failure and enforce fail-safe braking.
+7. `firmware/lib/robot-common/include/robot_common/task/task_protocol.h` then
+   `firmware/lib/robot-common/src/task/task_protocol.c` — understand explicit
+   cross-board command, status, heartbeat, and session serialization.
+8. `firmware/lib/robot-common/include/robot_common/packet_router.h` then
+   `firmware/lib/robot-common/src/packet_router.c` — see why task messages can
+   share one physical UART with odometry and other commands without stealing
+   their packets.
+9. `firmware/esp32-drivetrain/src/communication/arm_task_client.c` — trace
+   retries, link timeouts, arm reset detection, and the remote executor adapter.
+10. `firmware/esp32-arm/src/communication/task_server.c` — trace duplicate and
+    stale command handling plus delegation to `ArmManager`.
+11. `firmware/esp32-arm/src/task/arm_manager.c` — see the arm-side physical
+    action boundary and the hooks still awaiting mechanism integration.
+12. `firmware/esp32-arm/src/main.cpp` — verify the peer initialization and
+    runtime order on the top ESP32.
+13. Both `task_link_config.c` files — finish with timing values after knowing
+    which timers consume them.
+14. `firmware/esp32-drivetrain/test/test_task_coordinator/test_task_coordinator.cpp`
+    — use the failure, retry/session, and packet-routing tests as executable
+    examples of the intended behavior.

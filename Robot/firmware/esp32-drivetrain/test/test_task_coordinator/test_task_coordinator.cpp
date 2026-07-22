@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include <robot_common/task/task_protocol.h>
+#include <robot_common/packet_router.h>
 
 #include "communication/task_server.h"
 #include "communication/arm_task_client.h"
@@ -57,16 +58,37 @@ static TaskCommandMessage arm_command(uint32_t command_id) {
     return command;
 }
 
+static void deliver_command(ArmTaskServer *server,
+                            const TaskCommandMessage *command,
+                            uint32_t now_ms) {
+    PacketFrame frame{};
+    TEST_ASSERT_TRUE(task_protocol_encode_command(command, &frame));
+    arm_task_server_process_packet(server, &frame, now_ms);
+}
+
+static bool arm_action_is_running(const ArmManager *manager) {
+    return arm_manager_get_status(manager, nullptr) == TASK_STEP_RUNNING;
+}
+
+static PacketFrame mock_rx_frames[2]{};
+static size_t mock_rx_count = 0U;
+static size_t mock_rx_index = 0U;
+
 extern "C" esp_err_t uart_link_update(UartLink *) { return ESP_OK; }
-extern "C" esp_err_t uart_link_take_packet(UartLink *, PacketFrame *) {
-    return ESP_ERR_NOT_FOUND;
+extern "C" esp_err_t uart_link_take_packet(UartLink *, PacketFrame *frame) {
+    if (mock_rx_index >= mock_rx_count) return ESP_ERR_NOT_FOUND;
+    *frame = mock_rx_frames[mock_rx_index++];
+    return ESP_OK;
 }
 extern "C" esp_err_t uart_link_send(UartLink *, PacketMessageType,
                                      const uint8_t *, uint8_t) {
     return ESP_OK;
 }
 
-void setUp() {}
+void setUp() {
+    mock_rx_count = 0U;
+    mock_rx_index = 0U;
+}
 void tearDown() {}
 
 void test_successful_multi_step_task_has_one_authoritative_runtime() {
@@ -80,7 +102,7 @@ void test_successful_multi_step_task_has_one_authoritative_runtime() {
                                            &drivetrain_executor,
                                            &arm_executor));
     const TaskRequest request = picking_request();
-    TEST_ASSERT_TRUE(task_coordinator_start(&coordinator, &request, 42U, 0U));
+    TEST_ASSERT_TRUE(task_coordinator_start(&coordinator, &request, 42U));
 
     task_coordinator_update(&coordinator, 1U);
     TEST_ASSERT_EQUAL(TASK_ACTION_ALIGN_TO_PIECES, drivetrain.command.action);
@@ -109,7 +131,7 @@ void test_subsystem_failure_faults_task_without_advancing() {
     TaskCoordinator coordinator{};
     task_coordinator_init(&coordinator, &config, &d, &a);
     const TaskRequest request = picking_request();
-    task_coordinator_start(&coordinator, &request, 1U, 0U);
+    task_coordinator_start(&coordinator, &request, 1U);
     task_coordinator_update(&coordinator, 1U);
     drivetrain.result = {TASK_STEP_FAILED, TASK_FAILURE_STEP_FAILED};
     task_coordinator_update(&coordinator, 2U);
@@ -127,7 +149,7 @@ void test_step_timeout_cancels_executor_and_faults_task() {
     TaskCoordinator coordinator{};
     task_coordinator_init(&coordinator, &config, &d, &a);
     const TaskRequest request = picking_request();
-    task_coordinator_start(&coordinator, &request, 1U, 0U);
+    task_coordinator_start(&coordinator, &request, 1U);
     task_coordinator_update(&coordinator, 10U);
     task_coordinator_update(&coordinator, 60U);
     TEST_ASSERT_EQUAL(TASK_STATUS_FAILED, coordinator.runtime.status);
@@ -144,7 +166,7 @@ void test_peer_reset_during_task_is_deterministic_failure() {
     TaskCoordinator coordinator{};
     task_coordinator_init(&coordinator, &config, &d, &a);
     const TaskRequest request = picking_request();
-    task_coordinator_start(&coordinator, &request, 1U, 0U);
+    task_coordinator_start(&coordinator, &request, 1U);
     task_coordinator_update(&coordinator, 1U);
     TEST_ASSERT_TRUE(task_coordinator_fail(&coordinator,
                                            TASK_FAILURE_PEER_RESET, 2U));
@@ -161,10 +183,10 @@ void test_duplicate_arm_command_does_not_restart_action() {
     TEST_ASSERT_TRUE(arm_task_server_init(&server, &link, &manager, 30U,
                                           &config));
     const TaskCommandMessage command = arm_command(1U);
-    arm_task_server_process_command(&server, &command, 1U);
-    TEST_ASSERT_TRUE(manager.active);
-    arm_task_server_process_command(&server, &command, 2U);
-    TEST_ASSERT_TRUE(manager.active);
+    deliver_command(&server, &command, 1U);
+    TEST_ASSERT_TRUE(arm_action_is_running(&manager));
+    deliver_command(&server, &command, 2U);
+    TEST_ASSERT_TRUE(arm_action_is_running(&manager));
     TEST_ASSERT_EQUAL_UINT32(1U,
         server.diagnostics.duplicate_command_count);
 }
@@ -177,10 +199,10 @@ void test_stale_command_and_status_are_rejected() {
     ArmTaskServer server{};
     arm_task_server_init(&server, &link, &manager, 30U, &config);
     const TaskCommandMessage newer = arm_command(5U);
-    arm_task_server_process_command(&server, &newer, 1U);
+    deliver_command(&server, &newer, 1U);
     arm_manager_report_succeeded(&manager);
     const TaskCommandMessage stale = arm_command(4U);
-    arm_task_server_process_command(&server, &stale, 2U);
+    deliver_command(&server, &stale, 2U);
     TEST_ASSERT_EQUAL_UINT32(1U, server.diagnostics.stale_command_count);
 
     TaskStatusMessage status{10U, 30U, 20U, 5U,
@@ -201,15 +223,52 @@ void test_client_rejects_stale_status_and_detects_link_timeout() {
 
     TaskStatusMessage unsolicited{10U, 30U, 99U, 8U,
                                   TASK_STEP_SUCCEEDED, TASK_FAILURE_NONE};
-    arm_task_client_process_status(&client, &unsolicited, 1U);
+    PacketFrame status_frame{};
+    TEST_ASSERT_TRUE(task_protocol_encode_status(&unsolicited, &status_frame));
+    arm_task_client_process_packet(&client, &status_frame, 1U);
     TEST_ASSERT_EQUAL_UINT32(1U, client.diagnostics.stale_status_count);
-    TEST_ASSERT_TRUE(arm_task_client_is_connected(&client));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, client.arm_session_id);
 
-    arm_task_client_update_link(&client, 501U);
+    arm_task_client_update(&client, 501U);
     TaskFailure failure = TASK_FAILURE_NONE;
     TEST_ASSERT_TRUE(arm_task_client_take_peer_failure(&client, &failure));
     TEST_ASSERT_EQUAL(TASK_FAILURE_LINK_TIMEOUT, failure);
-    TEST_ASSERT_FALSE(arm_task_client_is_connected(&client));
+    TEST_ASSERT_EQUAL_UINT32(0U, client.arm_session_id);
+}
+
+struct RouteCapture {
+    uint32_t calls = 0U;
+    uint8_t last_type = PACKET_TYPE_INVALID;
+};
+
+static void capture_packet(void *context, const PacketFrame *frame, uint32_t) {
+    auto *capture = static_cast<RouteCapture *>(context);
+    capture->calls++;
+    capture->last_type = frame->message_type;
+}
+
+void test_packet_router_keeps_task_and_other_uart_traffic_separate() {
+    UartLink link{};
+    PacketRouter router{};
+    RouteCapture task_capture{};
+    RouteCapture data_capture{};
+    TEST_ASSERT_TRUE(packet_router_init(&router, &link));
+    TEST_ASSERT_TRUE(packet_router_set_handler(
+        &router, PACKET_TYPE_TASK_STATUS, capture_packet, &task_capture));
+    TEST_ASSERT_TRUE(packet_router_set_handler(
+        &router, PACKET_TYPE_ODOMETRY, capture_packet, &data_capture));
+
+    mock_rx_frames[0].message_type = PACKET_TYPE_ODOMETRY;
+    mock_rx_frames[1].message_type = PACKET_TYPE_TASK_STATUS;
+    mock_rx_count = 2U;
+    TEST_ASSERT_EQUAL(ESP_OK, packet_router_update(&router, 10U));
+
+    TEST_ASSERT_EQUAL_UINT32(1U, task_capture.calls);
+    TEST_ASSERT_EQUAL_UINT8(PACKET_TYPE_TASK_STATUS, task_capture.last_type);
+    TEST_ASSERT_EQUAL_UINT32(1U, data_capture.calls);
+    TEST_ASSERT_EQUAL_UINT8(PACKET_TYPE_ODOMETRY, data_capture.last_type);
+    TEST_ASSERT_EQUAL_UINT32(2U, router.packets_routed);
+    TEST_ASSERT_EQUAL_UINT32(0U, router.packets_unhandled);
 }
 
 void test_session_change_cancels_old_arm_work_and_rejects_old_session() {
@@ -221,18 +280,18 @@ void test_session_change_cancels_old_arm_work_and_rejects_old_session() {
     arm_task_server_init(&server, &link, &manager, 30U, &config);
 
     const TaskCommandMessage old_command = arm_command(1U);
-    arm_task_server_process_command(&server, &old_command, 1U);
-    TEST_ASSERT_TRUE(manager.active);
+    deliver_command(&server, &old_command, 1U);
+    TEST_ASSERT_TRUE(arm_action_is_running(&manager));
 
     TaskCommandMessage reset_command = arm_command(1U);
     reset_command.coordinator_session_id = 11U;
     reset_command.step.execution_id = 21U;
-    arm_task_server_process_command(&server, &reset_command, 2U);
-    TEST_ASSERT_TRUE(manager.active);
+    deliver_command(&server, &reset_command, 2U);
+    TEST_ASSERT_TRUE(arm_action_is_running(&manager));
     TEST_ASSERT_EQUAL_UINT32(10U, server.previous_coordinator_session_id);
 
-    arm_task_server_process_command(&server, &old_command, 3U);
-    TEST_ASSERT_TRUE(manager.active);
+    deliver_command(&server, &old_command, 3U);
+    TEST_ASSERT_TRUE(arm_action_is_running(&manager));
     TEST_ASSERT_EQUAL_UINT32(1U, server.diagnostics.stale_command_count);
     TEST_ASSERT_EQUAL_UINT32(11U, server.coordinator_session_id);
 }
@@ -246,13 +305,13 @@ void test_rejects_overlapping_task_and_invalid_request() {
     TaskCoordinator coordinator{};
     task_coordinator_init(&coordinator, &config, &d, &a);
     const TaskRequest request = picking_request();
-    TEST_ASSERT_TRUE(task_coordinator_start(&coordinator, &request, 1U, 0U));
-    TEST_ASSERT_FALSE(task_coordinator_start(&coordinator, &request, 2U, 0U));
+    TEST_ASSERT_TRUE(task_coordinator_start(&coordinator, &request, 1U));
+    TEST_ASSERT_FALSE(task_coordinator_start(&coordinator, &request, 2U));
     TaskRequest invalid{};
     invalid.type = TASK_TYPE_COUNT;
     TaskCoordinator idle{};
     task_coordinator_init(&idle, &config, &d, &a);
-    TEST_ASSERT_FALSE(task_coordinator_start(&idle, &invalid, 1U, 0U));
+    TEST_ASSERT_FALSE(task_coordinator_start(&idle, &invalid, 1U));
 }
 
 int main(int, char **) {
@@ -264,6 +323,7 @@ int main(int, char **) {
     RUN_TEST(test_duplicate_arm_command_does_not_restart_action);
     RUN_TEST(test_stale_command_and_status_are_rejected);
     RUN_TEST(test_client_rejects_stale_status_and_detects_link_timeout);
+    RUN_TEST(test_packet_router_keeps_task_and_other_uart_traffic_separate);
     RUN_TEST(test_session_change_cancels_old_arm_work_and_rejects_old_session);
     RUN_TEST(test_rejects_overlapping_task_and_invalid_request);
     return UNITY_END();

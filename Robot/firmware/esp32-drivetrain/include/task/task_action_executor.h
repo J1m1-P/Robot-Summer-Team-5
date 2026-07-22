@@ -30,8 +30,6 @@ typedef struct {
     TaskActionCancel cancel;
 } TaskActionExecutor;
 
-bool task_action_executor_is_valid(const TaskActionExecutor *executor);
-
 #ifdef __cplusplus
 }
 #endif

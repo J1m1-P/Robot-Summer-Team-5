@@ -5,6 +5,7 @@
 #include "esp_timer.h"
 
 #include <robot_common/app_log.h>
+#include <robot_common/packet_router.h>
 #include <robot_common/uart_link.h>
 
 #include "communication/arm_task_client.h"
@@ -18,6 +19,7 @@
 static Drivetrain drivetrain = {};
 static DrivetrainManager drivetrain_manager = {};
 static UartLink arm_uart = {};
+static PacketRouter arm_packet_router = {};
 static ArmTaskClient arm_client = {};
 static TaskCoordinator task_coordinator = {};
 static bool application_ready = false;
@@ -51,6 +53,14 @@ void setup() {
         APP_LOGE(LOG_TAG_UART, "Arm task client initialization failed");
         return;
     }
+    if (!packet_router_init(&arm_packet_router, &arm_uart) ||
+        !packet_router_set_handler(&arm_packet_router, PACKET_TYPE_TASK_STATUS,
+                                   arm_task_client_process_packet, &arm_client) ||
+        !packet_router_set_handler(&arm_packet_router, PACKET_TYPE_HEARTBEAT,
+                                   arm_task_client_process_packet, &arm_client)) {
+        APP_LOGE(LOG_TAG_UART, "Arm UART packet routing initialization failed");
+        return;
+    }
 
     const TaskActionExecutor drivetrain_executor =
         drivetrain_manager_executor(&drivetrain_manager);
@@ -74,7 +84,10 @@ void loop() {
     }
 
     const uint32_t now_ms = millis();
-    arm_task_client_update_link(&arm_client, now_ms);
+    if (packet_router_update(&arm_packet_router, now_ms) != ESP_OK) {
+        arm_task_client_handle_link_error(&arm_client);
+    }
+    arm_task_client_update(&arm_client, now_ms);
 
     TaskFailure peer_failure = TASK_FAILURE_NONE;
     if (arm_task_client_take_peer_failure(&arm_client, &peer_failure)) {
