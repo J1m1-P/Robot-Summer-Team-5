@@ -1,0 +1,20 @@
+{
+  "name": "st-vl53l5cx-uld",
+  "version": "2.0.1",
+  "description": "ST VL53L5CX Ultra Lite Driver with a robot-common I2C platform port",
+  "license": "BSD-3-Clause",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": "vl53l5cx_api.h",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src/core/inc",
+    "flags": [
+      "-I src/platform"
+    ],
+    "srcFilter": [
+      "+<core/src/*.c>",
+      "+<platform/*.c>"
+    ]
+  }
+}

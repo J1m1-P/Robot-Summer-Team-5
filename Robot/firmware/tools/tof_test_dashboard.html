@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robot ToF Test</title>
+<style>
+:root{color-scheme:dark;--bg:#090d14;--card:#111824;--inner:#0c121c;--line:#253044;--text:#e6edf7;--muted:#8794a8;--blue:#58a6ff;--green:#56d364;--red:#ff6b6b;--amber:#e3b341}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",sans-serif}header{padding:22px clamp(18px,4vw,54px);border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px}h1{margin:0;font-size:21px}header span,.hint{color:var(--muted)}main{padding:24px clamp(18px,4vw,54px);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.board{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}.head{display:flex;align-items:center;gap:10px;margin-bottom:16px}.head h2{font-size:17px;margin:0;text-transform:capitalize}.led{width:10px;height:10px;border-radius:50%;background:#4b5565}.led.on{background:var(--green);box-shadow:0 0 10px var(--green)}.led.err{background:var(--red)}button{border:1px solid #34445e;background:#1a2638;color:var(--text);border-radius:8px;padding:9px 13px;font-weight:650;cursor:pointer}button.primary{background:#2368be;border-color:var(--blue)}button:disabled{opacity:.35;cursor:not-allowed}.actions{margin-left:auto;display:flex;gap:7px}.status{font:12px ui-monospace,Consolas,monospace;color:var(--muted);margin:-8px 0 16px}.section-title{font:700 11px ui-monospace,Consolas,monospace;letter-spacing:1.3px;color:var(--muted);margin:18px 0 9px}.steps{display:flex;flex-direction:column;gap:7px}.step{display:grid;grid-template-columns:22px 1fr auto;gap:9px;align-items:center;padding:9px 10px;background:var(--inner);border:1px solid var(--line);border-radius:8px}.mark{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#273246;color:var(--muted);font-size:11px}.step.active{border-color:var(--amber)}.step.active .mark{background:var(--amber);color:#111}.step.ok{border-color:#275d35}.step.ok .mark{background:#275d35;color:var(--green)}.step.fail{border-color:#803c3c}.step.fail .mark{background:#803c3c;color:#fff}.step small{font:11px ui-monospace,Consolas,monospace;color:var(--muted)}.readings{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.reading{background:var(--inner);border:1px solid var(--line);border-radius:10px;padding:12px}.reading .name{text-transform:capitalize;color:var(--muted);font-size:12px}.reading .value{font:700 27px ui-monospace,Consolas,monospace;margin:8px 0 2px}.reading .unit,.reading .meta{font:11px ui-monospace,Consolas,monospace;color:var(--muted)}.reading.invalid .value{color:var(--amber)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:9px}.zone{aspect-ratio:1.35;display:grid;place-items:center;background:#101c2a;border:1px solid var(--line);border-radius:7px;font:700 13px ui-monospace,Consolas,monospace}.zone.bad{color:var(--muted)}.message{padding:10px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:12px}.error{color:var(--red)}@media(max-width:900px){main{grid-template-columns:1fr}.readings{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:520px){header span{display:none}.readings{grid-template-columns:1fr}.head{flex-wrap:wrap}.actions{width:100%;margin:0}.actions button{flex:1}}
+</style>
+<style>
+.checks{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.check{padding:5px 8px;border:1px solid var(--line);border-radius:15px;color:var(--muted);font:11px ui-monospace,Consolas,monospace}.check.ok{border-color:#2e7540;color:var(--green);background:#102519}.check.fail{border-color:#803c3c;color:var(--red)}details{margin-top:12px;border:1px solid var(--line);border-radius:8px}summary{padding:9px 11px;cursor:pointer;color:var(--muted);font-size:12px}.log{max-height:170px;overflow:auto;margin:0;padding:10px;border-top:1px solid var(--line);background:#080c12;color:#aebbd0;font:11px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap}
+.sensor-states{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 15px}.sensor-state{background:var(--inner);border:1px solid var(--line);border-radius:8px;padding:9px}.sensor-state .sensor-name{color:var(--muted);font-size:11px;text-transform:uppercase}.sensor-state .sensor-address{font:700 20px ui-monospace,Consolas,monospace;margin:5px 0}.sensor-state .sensor-phase{font:11px ui-monospace,Consolas,monospace;color:var(--amber)}.sensor-state.ok{border-color:#2e7540}.sensor-state.ok .sensor-phase{color:var(--green)}.sensor-state.fail{border-color:#803c3c}.sensor-state.fail .sensor-phase{color:var(--red)}
+</style>
+</head>
+<body>
+<header><h1>Time-of-Flight Hardware Test</h1><span>v8 · live state + stop-on-disconnect</span></header>
+<main id="boards"></main>
+<script>
+const configs={
+  drivetrain:{sensors:[['right','VL53L0X','0x29','0x32'],['left','VL53L0X','0x29','0x30'],['center','VL53L5CX','0x29','0x33']],grid:true},
+  arm:{sensors:[['middle','VL53L0X','0x29','0x31'],['left','VL53L0X','0x29','0x30'],['right','VL53L0X','0x29','0x32']],grid:false}
+};
+const sessions={};
+const boardContainer=document.getElementById('boards');
+
+function boardHtml(role){
+  const cfg=configs[role];
+  return `<section class="board" id="${role}"><div class="head"><span class="led"></span><h2>${role}</h2><div class="actions"><button class="primary connect">Connect USB</button><button class="primary next" disabled>Next step</button><button class="reset" disabled>Reset</button><button class="disconnect" disabled>Disconnect</button></div></div><div class="status">Not connected · flash the tof-test environment first</div><div class="section-title">ADDRESS CHANGE PROCESS</div><div class="steps"><div class="step" data-step="shutdown"><span class="mark">1</span><span>Hold controllable sensors in shutdown</span><small>XSHUT / LPn low</small></div><div class="step" data-step="bus"><span class="mark">2</span><span>Start shared I²C bus</span><small>boot address 0x29</small></div>${cfg.sensors.map((s,i)=>`<div class="step" data-sensor="${s[0]}"><span class="mark">${i+3}</span><span>${cap(s[0])} ${s[1]}</span><small>${s[2]} → ${s[3]}</small></div>`).join('')}<div class="step" data-step="ranging"><span class="mark">${cfg.sensors.length+3}</span><span>Continuous ranging started</span><small>live data</small></div></div><div class="section-title">DISTANCE DATA</div><div class="readings">${cfg.sensors.filter(s=>s[1]==='VL53L0X').map(s=>readingHtml(s)).join('')}</div>${cfg.grid?`<div class="section-title">CENTER 4 × 4 DISTANCE GRID · MM</div><div class="grid">${Array.from({length:16},(_,i)=>`<div class="zone bad" data-zone="${i}">—</div>`).join('')}</div>`:''}<p class="message">Waiting for the test firmware.</p></section>`;
+}
+function readingHtml(s){return `<div class="reading" data-reading="${s[0]}"><div class="name">${s[0]}</div><div><span class="value">—</span> <span class="unit">mm</span></div><div class="meta">${s[3]} · waiting</div></div>`}
+function cap(s){return s[0].toUpperCase()+s.slice(1)}
+boardContainer.innerHTML=boardHtml('drivetrain')+boardHtml('arm');
+
+for(const role of Object.keys(configs)){
+  const root=document.getElementById(role);
+  const checks=`<div class="checks"><span class="check" data-check="usb">USB: closed</span><span class="check" data-check="firmware">Firmware: unknown</span><span class="check" data-check="i2c">I2C 0x29: unchecked</span>${configs[role].sensors.map(s=>`<span class="check" data-check="${s[0]}">${cap(s[0])}: unchecked</span>`).join('')}</div>`;
+  root.querySelector('.status').insertAdjacentHTML('afterend',checks);
+  root.querySelector('.checks').insertAdjacentHTML('afterend',`<div class="section-title">REAL-TIME SENSOR ADDRESS / STATE</div><div class="sensor-states">${configs[role].sensors.map(s=>`<div class="sensor-state" data-sensor-state="${s[0]}"><div class="sensor-name">${s[0]} · ${s[1]}</div><div class="sensor-address">unknown</div><div class="sensor-phase">not observed</div></div>`).join('')}</div>`);
+  root.querySelector('.message').insertAdjacentHTML('afterend','<details><summary>Serial diagnostics</summary><pre class="log">No serial data yet.</pre></details>');
+  sessions[role]={role,root,port:null,reader:null,writer:null,reading:false,buffer:'',commandTimer:null,progressTimer:null,expectedStep:0};
+  root.querySelector('.connect').onclick=()=>connect(role);
+  root.querySelector('.next').onclick=()=>nextStep(role);
+  root.querySelector('.reset').onclick=()=>reset(role);
+  root.querySelector('.disconnect').onclick=()=>disconnect(role);
+}
+
+function setConnected(s,on){
+  s.root.querySelector('.connect').disabled=on;s.root.querySelector('.next').disabled=!on;s.root.querySelector('.reset').disabled=!on;s.root.querySelector('.disconnect').disabled=!on;
+  setCheck(s,'usb',on?'USB: open':'USB: closed',on?'ok':'');
+  s.root.querySelector('.led').className='led'+(on?' on':'');
+  s.root.querySelector('.status').textContent=on?'Connected at 115200 baud':'Not connected · flash the tof-test environment first';
+}
+function resetDisplay(s){
+  s.expectedStep=0;
+  s.root.querySelectorAll('.step').forEach(x=>x.className='step');
+  s.root.querySelectorAll('.value').forEach(x=>x.textContent='—');
+  s.root.querySelectorAll('.reading').forEach(x=>x.classList.remove('invalid'));
+  s.root.querySelectorAll('.zone').forEach(x=>{x.textContent='—';x.classList.add('bad')});
+  setCheck(s,'i2c','I2C 0x29: unchecked','');
+  for(const sensor of configs[s.role].sensors)setCheck(s,sensor[0],`${cap(sensor[0])}: unchecked`,'');
+  message(s,'Reset complete. Click Next step to perform the first hardware action.');
+}
+async function connect(role){
+  const s=sessions[role];
+  if(!('serial' in navigator)){message(s,'Web Serial requires desktop Chrome or Edge.',true);return}
+  try{
+    s.port=await navigator.serial.requestPort();await s.port.open({baudRate:115200});
+    s.reader=s.port.readable.getReader();s.writer=s.port.writable.getWriter();s.reading=true;s.awaitingIdentify=true;setConnected(s,true);readLoop(s);
+    message(s,'USB is open. Next step is available; checking test firmware identity...');
+    await send(s,'identify');
+  }catch(e){message(s,`Connection failed: ${e.message}`,true);await disconnect(role)}
+}
+async function disconnect(role){
+  const s=sessions[role];s.reading=false;
+  try{if(s.writer){await send(s,'stop');await new Promise(resolve=>setTimeout(resolve,100))}}catch{}
+  try{await s.reader?.cancel()}catch{}try{s.reader?.releaseLock()}catch{}try{s.writer?.releaseLock()}catch{}try{await s.port?.close()}catch{}
+  s.reader=s.writer=s.port=null;setConnected(s,false);
+}
+async function send(s,text){if(s.writer)await s.writer.write(new TextEncoder().encode(text+'\n'))}
+function commandTimeout(s,label,timeoutMs=45000){clearTimeout(s.commandTimer);s.commandTimer=setTimeout(()=>{clearInterval(s.progressTimer);s.progressTimer=null;s.root.querySelector('.next').disabled=false;message(s,`No firmware reply to ${label} after ${Math.round(timeoutMs/1000)} seconds.`,true)},timeoutMs)}
+function commandDone(s){clearTimeout(s.commandTimer);clearInterval(s.progressTimer);s.commandTimer=null;s.progressTimer=null}
+async function reset(role){const s=sessions[role];s.root.querySelector('.next').disabled=true;commandTimeout(s,'reset');await send(s,'reset')}
+async function nextStep(role){const s=sessions[role];s.root.querySelector('.next').disabled=true;commandTimeout(s,`step ${s.expectedStep}`);await send(s,`step ${s.expectedStep}`)}
+async function readLoop(s){
+  const decoder=new TextDecoder();
+  try{while(s.reading){const {value,done}=await s.reader.read();if(done)break;s.buffer+=decoder.decode(value,{stream:true});const lines=s.buffer.split(/\r?\n/);s.buffer=lines.pop();for(const line of lines){const clean=line.trim();if(clean&&!clean.startsWith('TOF,DIST')&&!clean.startsWith('TOF,GRID'))appendLog(s,clean);parse(s,clean)}}}
+  catch(e){if(s.reading)message(s,`Serial read failed: ${e.message}`,true)}
+}
+function parse(s,line){
+  if(!line.startsWith('TOF,'))return;
+  const p=line.split(','),kind=p[1];
+  if(kind==='READY'&&p[2]!==s.role){s.awaitingIdentify=false;setCheck(s,'firmware',`Firmware: ${p[2]} (wrong port)`,'fail');message(s,`Wrong port: this is the ${p[2]} board.`,true);s.root.querySelector('.led').className='led err'}
+  else if(kind==='READY'){
+    const synchronize=s.awaitingIdentify;s.awaitingIdentify=false;
+    setCheck(s,'firmware',`Firmware: ${p[2]} tof-test`,'ok');s.root.querySelector('.status').textContent=`${cap(p[2])} tof-test firmware connected`;
+    if(synchronize){message(s,'Connection verified. Resetting firmware step state...');reset(s.role)}
+  }
+  else if(kind==='RESET'){commandDone(s);resetDisplay(s);s.root.querySelector('.next').disabled=false}
+  else if(kind==='STEP_BEGIN'){stepBegin(s,p[2])}
+  else if(kind==='EVENT')eventLine(s,p)
+  else if(kind==='RANGING'){mark(s.root.querySelector('[data-step="ranging"]'),'ok');message(s,'Address assignment passed. Receiving live distances.')}
+  else if(kind==='NEXT'){commandDone(s);s.expectedStep=Number(p[2]);const complete=s.expectedStep>=6;s.root.querySelector('.next').disabled=complete;message(s,complete?'All steps passed. Live ranging is active.':`Step passed. Next requested stage: ${s.expectedStep}.`)}
+  else if(kind==='STATE'){s.expectedStep=Number(p[3]);appendLog(s,`Page synchronized to firmware stage ${s.expectedStep}`)}
+  else if(kind==='SENSOR'){sensorStateLine(s,p)}
+  else if(kind==='VERIFY'){setCheck(s,p[2],`${cap(p[2])}: ${p[3]} connected`,'ok')}
+  else if(kind==='DIST')distanceLine(s,p)
+  else if(kind==='GRID')gridLine(s,p)
+  else if(kind==='ERROR'){commandDone(s);if(s.currentStep){mark(s.currentStep,'fail');if(s.currentStep.dataset.step==='bus')setCheck(s,'i2c','I2C 0x29: not found','fail');if(s.currentStep.dataset.sensor)setCheck(s,s.currentStep.dataset.sensor,`${cap(s.currentStep.dataset.sensor)}: failed`,'fail')}s.root.querySelector('.next').disabled=false;message(s,`${p[2]} failed: ${p.slice(4).join(',')} (code ${p[3]}). Check wiring, then Reset.`,true);s.root.querySelector('.led').className='led err'}
+}
+function stepBegin(s,key){const el=s.root.querySelector(`[data-step="${key}"]`);if(el){s.currentStep=el;mark(el,'active')}message(s,`Running ${key} step…`)}
+function eventLine(s,p){
+  const event=p[2],name=p[4];let el=null;
+  if(event==='shutdown_ok')el=s.root.querySelector('[data-step="shutdown"]');
+  else if(event==='bus_ok'){el=s.root.querySelector('[data-step="bus"]');setCheck(s,'i2c',`I2C ${p[5]}: sensor found`,'ok')}
+  else if(event.startsWith('address_'))el=s.root.querySelector(`[data-sensor="${name}"]`);
+  if(!el)return;s.currentStep=el;mark(el,event==='address_begin'?'active':event==='address_error'?'fail':'ok');
+  if(event==='address_begin'){
+    clearInterval(s.progressTimer);
+    const started=Date.now(),isCenter=name==='center';
+    if(isCenter)commandTimeout(s,'center VL53L5CX initialization',120000);
+    const update=()=>message(s,`Initializing ${name} and changing ${p[5]} to ${p[6]}... ${Math.floor((Date.now()-started)/1000)} s elapsed${isCenter?' (allow up to 120 s)':''}.`);
+    update();s.progressTimer=setInterval(update,1000);
+  }
+  if(event==='address_error')message(s,`${cap(name)} address change ${p[5]} → ${p[6]} failed (code ${p[7]}).`,true);
+}
+function distanceLine(s,p){
+  const el=s.root.querySelector(`[data-reading="${p[2]}"]`);if(!el)return;
+  el.querySelector('.value').textContent=p[4];const valid=p[5]==='1';el.classList.toggle('invalid',!valid);el.querySelector('.meta').textContent=`${p[3]} · ${valid?'valid':`range status ${p[6]}`}`;
+}
+function gridLine(s,p){
+  const count=Number(p[4]);for(let i=0;i<count;i++){const el=s.root.querySelector(`[data-zone="${i}"]`);if(!el)continue;const d=Number(p[5+i]);el.textContent=d>=0?d:'—';el.classList.toggle('bad',d<0)}
+}
+function sensorStateLine(s,p){
+  const el=s.root.querySelector(`[data-sensor-state="${p[2]}"]`);if(!el)return;
+  const phase=p[3],failed=phase==='failed'||p[5]!=='0',ok=phase==='ready'||phase==='ranging'||phase==='address_assigned';
+  el.querySelector('.sensor-address').textContent=p[4];el.querySelector('.sensor-phase').textContent=phase.replaceAll('_',' ')+(failed?` · error ${p[5]}`:'');
+  el.className='sensor-state'+(failed?' fail':ok?' ok':'');
+}
+function mark(el,state){if(el)el.className='step '+state}
+function message(s,text,error=false){const el=s.root.querySelector('.message');el.textContent=text;el.className='message'+(error?' error':'')}
+function setCheck(s,key,text,state){const el=s.root.querySelector(`[data-check="${key}"]`);if(el){el.textContent=text;el.className='check'+(state?' '+state:'')}}
+function appendLog(s,line){const el=s.root.querySelector('.log');if(el.textContent==='No serial data yet.')el.textContent='';const lines=(el.textContent+line+'\n').split('\n');el.textContent=lines.slice(-120).join('\n');el.scrollTop=el.scrollHeight}
+navigator.serial?.addEventListener('disconnect',e=>{for(const [role,s] of Object.entries(sessions))if(e.target===s.port)disconnect(role)});
+</script>
+</body>
+</html>

@@ -29,6 +29,10 @@
 // Time of Flight (I2C)
 #define PIN_I2C_SDA         7
 #define PIN_I2C_SCL         8
+// Temporary bench wiring. GPIO45/46 are ESP32-S3 strapping pins and will be
+// replaced by externally controlled lines in the final hardware.
+#define PIN_TOF_LEFT_XSHUT  46
+#define PIN_TOF_RIGHT_XSHUT 45
 
 // Optical Sensors (SPI)
 #define PIN_PMW_SDIO        9       // Shared bus -- both sensors tied together
