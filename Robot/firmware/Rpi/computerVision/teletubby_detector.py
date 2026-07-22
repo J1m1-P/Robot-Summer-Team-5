@@ -65,11 +65,12 @@ from uart_link import (RobotLink, PACKET_TYPE_STATUS,           # the ESP32 seri
 # CONFIGURATION — everything you tune lives here
 # ══════════════════════════════════════════════════════════════════════════════
 # ── camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX = "/dev/video0"          # ADJUST: 0 if one camera, 1 for built-in + USB
+CAMERA_INDEX = 0         # ADJUST: 0 if one camera, 1 for built-in + USB
 
 # ── model / detection ─────────────────────────────────────────────────────────
-MODEL_PATH  = r"E:\runs\detect\train-9\weights\best_ncnn_model"  # ADJUST: .pt or ncnn folder
-IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — smaller = faster, less accurate
+MODEL_PATH  = r"/home/admin5/robotSummer/teamRepo/Robot-Summer-Team-5/Robot/firmware/Rpi/best_ncnn_model"  # !!! SET TO YOUR PI PATH
+                          #     e.g. "/home/admin5/robotSummer/.../best_ncnn_model"
+IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — must match the ncnn export size
 DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── how often YOLO runs while LOOKing ─────────────────────────────────────────
@@ -88,11 +89,17 @@ SETTLE_FRAMES    = 3      # ADJUST: consecutive centered frames required before 
 FLASH_COUNT      = 3      # ADJUST: how many flashes once settled
 TARGETS_TO_FIND  = 2      # only two tubbies exist and we need both — leave at 2
 
+# ── standalone vision test ────────────────────────────────────────────────────
+DEV_FORCE_LOOK = True     # ADJUST: True = standalone test — boot into LOOK and ignore
+                          #         the ESP entirely (no serial). False = normal
+                          #         reactive mode (boot WAIT, wait for ESP LOOK_START).
+                          #         !!! SET BACK TO False BEFORE THE COMPETITION !!!
+
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
 SERIAL_PORT = "/dev/serial0"        # ADJUST: None = DEV MODE (commands just print). "COM5" /
                           #         "/dev/serial0" / "/dev/ttyUSB0" to transmit.
 SERIAL_BAUD = 115200      # ADJUST: must match the ESP's baud rate
-link = RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None
+link = None if DEV_FORCE_LOOK else (RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None)
 
 # ── browser view ──────────────────────────────────────────────────────────────
 ENABLE_STREAM = True      # ADJUST: True to watch stream
@@ -103,7 +110,7 @@ FLASH_PIN = None          # ADJUST: BCM GPIO pin driving the flash (e.g. 18). No
 FLASH_ON_SECONDS = 0.15   # ADJUST: how long the pin stays high per flash
 
 if FLASH_PIN is not None:
-    import RPi.GPIO as GPIO   
+    import RPi.GPIO as GPIO
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(FLASH_PIN, GPIO.OUT)
     GPIO.output(FLASH_PIN, GPIO.LOW)
@@ -155,7 +162,7 @@ def yolo_detect(frame, frame_w, exclude=None, want_id=None):
 # ══════════════════════════════════════════════════════════════════════════════
 # TALKING TO THE ROBOT
 # ══════════════════════════════════════════════════════════════════════════════
-#   Command set for the reactive Pi. 
+#   Command set for the reactive Pi.
 #   STOP    freeze to inspect/align        TURN:x  steer (ALIGN only)
 #   RESUME  continue your sweep/drive      DONE    finished teletubby task— stop everything
 
@@ -262,7 +269,7 @@ stop_event = threading.Event()
 WAIT, LOOK, CONFIRM, ALIGN, FLASH, DONE = "WAIT", "LOOK", "CONFIRM", "ALIGN", "FLASH", "DONE"
 
 cap             = cv2.VideoCapture(CAMERA_INDEX)
-state           = WAIT     # boot idle; ESP's first LOOK_START -> LOOK
+state           = LOOK if DEV_FORCE_LOOK else WAIT   # DEV_FORCE_LOOK skips the ESP wait
 target_id       = None
 confirm_votes   = []
 confirmed_ids   = set()
@@ -330,7 +337,9 @@ def control_loop():
         # If the ESP needs an explicit go-ahead instead, send it here once, guarded
         # by a one-shot flag.
         elif state == WAIT:
-            if consume("esp_look_start"):
+            if DEV_FORCE_LOOK:
+                state = LOOK              # test mode: never idle, re-open the window ourselves
+            elif consume("esp_look_start"):
                 # Discard any stale esp_look_end left over from the PREVIOUS look
                 # window. handle_incoming() runs every tick regardless of state, so
                 # if the ESP's LOOK_END for that old window arrived while we were
