@@ -6,6 +6,7 @@
 #include <robot_common/uart_link.h>
 #include "config/task_link_config.h"
 #include "config/uart_link_config.h"
+#include "task/arm_manager.h"
 
 #ifdef SYSTEM_TEST_BUILD
 #include "harnesses/system_test_mode.h"
@@ -17,7 +18,7 @@ namespace {
 UartLink drive_uart = {};
 PacketRouter router = {};
 TaskLinkServer server = {};
-TaskActionResult action_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
+ArmManager arm_manager = {};
 String input_line;
 bool ready = false;
 bool stream_enabled = true;
@@ -25,16 +26,6 @@ uint32_t last_stream_ms = 0;
 uint32_t auto_complete_ms = 0;
 uint32_t action_started_ms = 0;
 TaskStepStatus previous_status = TASK_STEP_NOT_STARTED;
-
-bool action_start(void *, const TaskStepCommand *command, uint32_t) {
-    if (command == nullptr || action_result.status == TASK_STEP_RUNNING) return false;
-    action_result = {TASK_STEP_RUNNING, TASK_FAILURE_NONE};
-    return true;
-}
-TaskActionResult action_update(void *, uint32_t) { return action_result; }
-void action_cancel(void *, uint32_t) {
-    action_result = {TASK_STEP_CANCELLED, TASK_FAILURE_NONE};
-}
 
 const char *step_name(TaskStepStatus v) {
     static const char *names[] = {"not_started", "running", "succeeded", "cancelled", "failed"};
@@ -79,7 +70,7 @@ void print_state(const char *event) {
         server.command.step.parameters.amount,
         server.command.step.parameters.speed,
         (unsigned long)server.command.step.parameters.settle_ms,
-        step_name(action_result.status),
+        step_name(server.result.status),
         (unsigned long)auto_complete_ms, (unsigned long)drive_uart.packets_sent,
         (unsigned long)drive_uart.packets_received, (unsigned long)drive_uart.checksum_errors,
         (unsigned long)drive_uart.parse_errors, (unsigned long)drive_uart.packets_dropped,
@@ -108,14 +99,8 @@ void clear_link_runtime() {
 
 bool initialize_task_runtime() {
     clear_link_runtime();
-    action_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
     previous_status = TASK_STEP_NOT_STARTED;
-    const TaskActionExecutor executor = {
-        .context = nullptr,
-        .start = action_start,
-        .update = action_update,
-        .cancel = action_cancel,
-    };
+    const TaskActionExecutor executor = arm_manager_executor(&arm_manager);
     const uint32_t session = esp_random() ?: 1U;
     if (!task_link_server_init(&server, &drive_uart, &executor, session,
                                &TOP_TASK_SERVER_CONFIG)) return false;
@@ -127,8 +112,8 @@ bool initialize_task_runtime() {
 }
 
 void reset_harness() {
-    if (action_result.status == TASK_STEP_RUNNING) {
-        action_cancel(nullptr, millis());
+    if (server.has_command && server.result.status == TASK_STEP_RUNNING) {
+        server.executor.cancel(server.executor.context, millis());
     }
     ready = false;
     ready = initialize_task_runtime();
@@ -144,13 +129,18 @@ void handle_command(String line) {
     if (system_test_handle_mode_command(line)) return;
 #endif
     if (line == "status") print_state("state");
+    else if (line == "stop") {
+        const bool active =
+            server.has_command && server.result.status == TASK_STEP_RUNNING;
+        if (active) server.executor.cancel(server.executor.context, millis());
+        reply("ok", "LIVE TEST arm stop requested");
+    }
     else if (line == "arm succeed") {
-        const bool accepted = action_result.status == TASK_STEP_RUNNING;
-        if (accepted) action_result = {TASK_STEP_SUCCEEDED, TASK_FAILURE_NONE};
+        const bool accepted = arm_manager_report_succeeded(&arm_manager);
         reply(accepted ? "ok" : "error", "top step success requested");
     } else if (line == "arm fail") {
-        const bool accepted = action_result.status == TASK_STEP_RUNNING;
-        if (accepted) action_result = {TASK_STEP_FAILED, TASK_FAILURE_STEP_FAILED};
+        const bool accepted = arm_manager_report_failed(
+            &arm_manager, TASK_FAILURE_STEP_FAILED);
         reply(accepted ? "ok" : "error", "top step failure requested");
     }
     else if (line.startsWith("auto ")) {
@@ -175,9 +165,15 @@ void read_usb() {
 void setup() {
     Serial.begin(115200); delay(300);
     if (uart_link_init(&drive_uart, &DRIVETRAIN_UART_LINK_CONFIG) != ESP_OK) return;
+    arm_manager_init(&arm_manager);
+    if (!arm_manager.pick_up_block.hardware_ready) {
+        reply("error", "live arm hardware initialization failed");
+        return;
+    }
     ready = initialize_task_runtime();
     if (!ready) return;
-    reply("ok", "arm UART harness ready"); print_state("boot");
+    reply("ok", "LIVE TEST/TUNING arm executor ready; commands move hardware");
+    print_state("boot");
 }
 
 void loop() {
@@ -188,12 +184,12 @@ void loop() {
         task_link_server_handle_link_error(&server, now);
     }
     task_link_server_update(&server, now);
-    if (action_result.status == TASK_STEP_RUNNING &&
+    if (server.result.status == TASK_STEP_RUNNING &&
         previous_status != TASK_STEP_RUNNING) action_started_ms = now;
-    previous_status = action_result.status;
-    if (auto_complete_ms && action_result.status == TASK_STEP_RUNNING &&
+    previous_status = server.result.status;
+    if (auto_complete_ms && server.result.status == TASK_STEP_RUNNING &&
         (uint32_t)(now - action_started_ms) >= auto_complete_ms) {
-        action_result = {TASK_STEP_SUCCEEDED, TASK_FAILURE_NONE};
+        (void)arm_manager_report_succeeded(&arm_manager);
         print_state("auto_completed");
     }
     if (stream_enabled && (uint32_t)(now - last_stream_ms) >= 250U) {

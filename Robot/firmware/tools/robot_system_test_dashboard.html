@@ -71,23 +71,17 @@ details{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}summary{
 
   <main class="content">
     <section class="page active" id="page-coordination">
-      <div class="warning">This view merges coordinator and top-controller JSON into one live model. It highlights who owns the current action, what crossed the controller link, and where a task stopped. The Pi node becomes authoritative when scan telemetry is exposed by the task harness.</div>
+      <div class="warning"><strong>LIVE HARDWARE TEST / TUNING MODE.</strong> Starting a task here directly moves the drivetrain, steppers, and servos using the entered parameters. Lift and secure the robot, clear every mechanism, and keep the emergency stop accessible. This dashboard is for supervised testing; the final competition version will start and run autonomously.</div>
 
       <section class="panel">
         <div class="phead"><span class="ptitle">TASK REQUEST</span><span class="tag" id="taskHarnessStatus">waiting for coordinator</span><span class="right"></span><button class="sm" data-send="coordDrive:status">Refresh both</button><button class="sm warn" id="resetCoordination">Recover link</button></div>
         <div class="g2" style="align-items:end">
-          <label>Top-level task<select id="taskType"><option value="tape">Tape following</option><option value="picking">Tower picking</option><option value="building">Tower building</option><option value="scan">Teletubby scan</option></select></label>
-          <div class="row"><button id="startTask" class="primary">Start task</button><button data-send="coordDrive:cancel" class="danger-button">Cancel</button></div>
+          <label>Top-level task<select id="taskType"><option value="tape">Tape following</option><option value="picking">Tower picking</option><option value="building" disabled>Tower building (not implemented)</option><option value="scan" disabled>Teletubby scan (not connected)</option></select></label>
+          <div class="row"><button id="startTask" class="primary" disabled>START LIVE TEST</button><button data-send="coordDrive:cancel" class="danger-button">CANCEL / BRAKE</button></div>
         </div>
         <div class="step-parameters" id="stepParameterEditor"></div>
         <div class="row" style="margin-top:10px">
-          <span class="ptitle">SIMULATE RESULT</span>
-          <button class="sm" data-send="coordDrive:drive succeed">Drivetrain succeeds</button>
-          <button class="sm" data-send="coordDrive:drive fail">Drivetrain fails</button>
-          <button class="sm" data-send="coordTop:arm succeed">Top succeeds</button>
-          <button class="sm" data-send="coordTop:arm fail">Top fails</button>
-          <label style="display:flex;align-items:center;gap:6px;margin-left:auto">Top auto complete (ms)<input id="autoComplete" type="number" min="0" max="60000" step="100" value="0" style="width:100px;margin:0"></label>
-          <button class="sm" id="applyAutoComplete">Apply</button>
+          <label style="display:flex;align-items:center;gap:7px"><input id="armLiveTask" type="checkbox" style="width:auto;margin:0">I have secured the robot and cleared the arm mechanism; enable live task motion.</label>
         </div>
       </section>
 
@@ -775,14 +769,25 @@ function stepParameterValue(index,field,fallback = 0) {
 }
 
 async function startConfiguredTask() {
+  if (!endpointMap.drive.writer || !endpointMap.top.writer) {
+    throw new Error("Connect both controllers before starting live motion");
+  }
+  if (endpointMap.drive.activeMode !== "coordination" ||
+      endpointMap.top.activeMode !== "coordination") {
+    throw new Error("Activate coordination mode on both controllers first");
+  }
   const type = $("#taskType").value;
   const definition = workflowDefinitions[type] || [];
   if (type === "tape") {
     const speed = stepParameterValue(0,"speed",.2);
     const distance = stepParameterValue(0,"amount",1);
-    await send("coordDrive",`start tape ${speed} ${distance}`);
+    if (!await send("coordDrive",`start tape ${speed} ${distance}`)) {
+      throw new Error("Could not send live tape-following request");
+    }
   } else {
-    await send("coordDrive","params clear");
+    if (!await send("coordDrive","params clear")) {
+      throw new Error("Could not clear live task parameters");
+    }
     for (let index = 0; index < definition.length; index++) {
       const item = definition[index];
       let amount = stepParameterValue(index,"amount",item.amount || 0);
@@ -790,9 +795,14 @@ async function startConfiguredTask() {
       const speed = stepParameterValue(index,"speed",item.speed || 0);
       const settle = Math.max(0,Math.round(
         stepParameterValue(index,"settle",item.settle || 0)));
-      await send("coordDrive",`param ${index} ${amount} ${speed} ${settle}`);
+      if (!await send("coordDrive",
+                      `param ${index} ${amount} ${speed} ${settle}`)) {
+        throw new Error(`Could not send parameters for step ${index + 1}`);
+      }
     }
-    await send("coordDrive",`start ${type}`);
+    if (!await send("coordDrive",`start ${type}`)) {
+      throw new Error(`Could not start live ${type} task`);
+    }
   }
   renderWorkflow(type,0,"pending","pending");
 }
@@ -1222,9 +1232,17 @@ function bindEvents() {
     await send("coordDrive","reset");
     await send("coordTop","reset");
   };
-  $("#startTask").onclick = () =>
+  $("#armLiveTask").onchange = () => {
+    $("#startTask").disabled = !$("#armLiveTask").checked;
+  };
+  $("#startTask").onclick = () => {
+    if (!$("#armLiveTask").checked) {
+      addLog("drive","# live task motion is not armed");
+      return;
+    }
     startConfiguredTask().catch(error =>
       addLog("drive",`# ${error.message}`));
+  };
   $("#taskType").onchange = () => {
     renderStepParameterEditor($("#taskType").value);
     const status = normalizedStatus(
@@ -1234,7 +1252,6 @@ function bindEvents() {
       $("#mTask").textContent = `${$("#taskType").value} (preview)`;
     }
   };
-  $("#applyAutoComplete").onclick = () => send("coordTop",`auto ${Math.max(0,Math.round(Number($("#autoComplete").value) || 0))}`);
   $$("[data-drive-motion]").forEach(button => button.onclick = () => driveMotion(button.dataset.driveMotion));
   $$("[data-pair-wheel]").forEach(button => button.onclick = () => {
     try {

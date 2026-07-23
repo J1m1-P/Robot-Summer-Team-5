@@ -2,6 +2,7 @@
 #include <Arduino.h>
 
 #include "esp_random.h"
+#include "esp_timer.h"
 
 #include <robot_common/packet_router.h>
 #include <robot_common/task/task_link_client.h>
@@ -9,6 +10,10 @@
 
 #include "config/communication/task_link_config.h"
 #include "config/communication/uart_link_config.h"
+#include "config/drivetrain/drivetrain_config.h"
+#include "config/tape_following/tape_following_config.h"
+#include "control/drivetrain/drivetrain.h"
+#include "task/drivetrain_manager.h"
 #include "task/task_coordinator.h"
 
 #ifdef SYSTEM_TEST_BUILD
@@ -22,7 +27,9 @@ namespace {
 UartLink arm_uart = {};
 PacketRouter router = {};
 TaskLinkClient top_client = {};
-TaskActionResult drive_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
+Drivetrain drivetrain = {};
+DrivetrainManager drivetrain_manager = {};
+TaskActionExecutor live_drive_executor = {};
 TaskStepCommand drive_command = {};
 TaskCoordinator coordinator = {};
 String input_line;
@@ -33,21 +40,20 @@ uint32_t next_execution_id = 1;
 TaskStepParameters step_parameters[TASK_MAX_STEPS] = {};
 bool step_parameter_overrides[TASK_MAX_STEPS] = {};
 
-bool drive_start(void *, const TaskStepCommand *command, uint32_t) {
-    if (command == nullptr || drive_result.status == TASK_STEP_RUNNING ||
-        (command->action != TASK_ACTION_FOLLOW_TAPE &&
-         command->action != TASK_ACTION_ALIGN_TO_PIECES &&
-         command->action != TASK_ACTION_FOLLOW_PIECES_TAPE &&
-         command->action != TASK_ACTION_FOLLOW_TASK_TAPE &&
-         command->action != TASK_ACTION_BACK_OFF_PIECES &&
-         command->action != TASK_ACTION_ALIGN_TO_TAPE)) return false;
+bool drive_start(void *, const TaskStepCommand *command, uint32_t now_ms) {
+    if (command == nullptr ||
+        !live_drive_executor.start(live_drive_executor.context, command,
+                                   now_ms)) {
+        return false;
+    }
     drive_command = *command;
-    drive_result = {TASK_STEP_RUNNING, TASK_FAILURE_NONE};
     return true;
 }
-TaskActionResult drive_update(void *, uint32_t) { return drive_result; }
-void drive_cancel(void *, uint32_t) {
-    drive_result = {TASK_STEP_CANCELLED, TASK_FAILURE_NONE};
+TaskActionResult drive_update(void *, uint32_t now_ms) {
+    return live_drive_executor.update(live_drive_executor.context, now_ms);
+}
+void drive_cancel(void *, uint32_t now_ms) {
+    live_drive_executor.cancel(live_drive_executor.context, now_ms);
 }
 
 const char *task_name(TaskType value) {
@@ -139,7 +145,9 @@ bool parse_task(const String &name, TaskType &type) {
     return true;
 }
 
-bool enter_test_safe_state(void *) { return true; }
+bool enter_test_safe_state(void *) {
+    return drivetrain_brake(&drivetrain) == ESP_OK;
+}
 
 void clear_link_runtime() {
     if (arm_uart.config != nullptr) {
@@ -168,7 +176,6 @@ bool initialize_task_runtime() {
                                    task_link_client_process_packet, &top_client)) {
         return false;
     }
-    drive_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
     drive_command = {};
     const TaskActionExecutor drive = {
         .context = nullptr,
@@ -235,6 +242,13 @@ void handle_command(String line) {
     if (system_test_handle_mode_command(line)) return;
 #endif
     if (line == "status") print_state("state");
+    else if (line == "stop") {
+        if (coordinator.runtime.status == TASK_STATUS_RUNNING) {
+            (void)task_coordinator_cancel(&coordinator, millis());
+        }
+        const bool stopped = drivetrain_brake(&drivetrain) == ESP_OK;
+        reply(stopped ? "ok" : "error", "LIVE TEST emergency brake requested");
+    }
     else if (line.startsWith("param ")) {
         int step = -1;
         float amount = 0.0f;
@@ -260,12 +274,12 @@ void handle_command(String line) {
     }
     else if (line.startsWith("start ")) start_task(line.substring(6));
     else if (line == "drive succeed") {
-        const bool accepted = drive_result.status == TASK_STEP_RUNNING;
-        if (accepted) drive_result = {TASK_STEP_SUCCEEDED, TASK_FAILURE_NONE};
+        const bool accepted =
+            drivetrain_manager_report_succeeded(&drivetrain_manager);
         reply(accepted ? "ok" : "error", "drivetrain step success requested");
     } else if (line.startsWith("drive fail")) {
-        const bool accepted = drive_result.status == TASK_STEP_RUNNING;
-        if (accepted) drive_result = {TASK_STEP_FAILED, TASK_FAILURE_STEP_FAILED};
+        const bool accepted = drivetrain_manager_report_failed(
+            &drivetrain_manager, TASK_FAILURE_STEP_FAILED);
         reply(accepted ? "ok" : "error", "drivetrain step failure requested");
     } else if (line == "cancel") {
         reply(task_coordinator_cancel(&coordinator, millis()) ? "ok" : "error",
@@ -293,10 +307,19 @@ void read_usb() {
 void setup() {
     Serial.begin(115200);
     delay(300);
+    if (drivetrain_init(&drivetrain, &DRIVETRAIN_CONFIG) != ESP_OK ||
+        drivetrain_manager_init(
+            &drivetrain_manager, &drivetrain, &TAPE_SENSOR_MUX_CONFIG,
+            &FRONT_TAPE_SENSOR_CONFIG, &BACK_TAPE_SENSOR_CONFIG,
+            &LEFT_TAPE_SENSOR_CONFIG, &TAPE_FOLLOWER_CONFIG) != ESP_OK) {
+        reply("error", "live drivetrain hardware initialization failed");
+        return;
+    }
+    live_drive_executor = drivetrain_manager_executor(&drivetrain_manager);
     if (uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG) != ESP_OK) return;
     ready = initialize_task_runtime();
     if (!ready) return;
-    reply("ok", "task coordinator harness ready");
+    reply("ok", "LIVE TEST/TUNING coordinator ready; commands move hardware");
     print_state("boot");
 }
 
@@ -314,6 +337,11 @@ void loop() {
         print_state("peer_failure");
     }
     task_coordinator_update(&coordinator, now);
+    if (drivetrain.status.enabled &&
+        drivetrain_update(&drivetrain, esp_timer_get_time()) != ESP_OK) {
+        (void)drivetrain_manager_report_failed(
+            &drivetrain_manager, TASK_FAILURE_STEP_FAILED);
+    }
     if (stream_enabled && (uint32_t)(now - last_stream_ms) >= 250U) {
         last_stream_ms = now;
         print_state("state");
