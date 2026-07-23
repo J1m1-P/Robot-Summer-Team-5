@@ -161,6 +161,15 @@ Pmw3610OdometryLink arm_odometry_link = {};
 Pmw3610OdometrySource pmw3610_source = {};
 bool arm_link_ready = false;
 const char *last_fusion_source = "";
+// The world-frame pose as of the last CONSUMED optical sample -- the trusted
+// anchor. Optical is corrective, not additive: a new optical sample replaces
+// whatever encoder dead-reckoning accumulated since this anchor rather than
+// stacking on top of it, so encoder drift never survives past the next
+// optical sample (now arriving every ~2ms; see FUSION_SESSION_HANDOFF.md).
+// Encoder-only ticks still dead-reckon forward from the *current* pose (not
+// the anchor) so closed-loop moves get fresh feedback every cycle, not just
+// once per optical sample.
+DrivetrainPose optical_anchor_pose = {};
 // Cumulative counts, unlike last_fusion_source: the control loop runs far
 // faster than optical packets arrive over UART, so on the vast majority of
 // cycles optical_ok is simply false (no *new* packet yet, correctly falling
@@ -1015,7 +1024,9 @@ void loop() {
         odometry_link_poll(&arm_odometry_link, &arm_uart);
     }
 
-    // PMW3610 fusion: optical-preferred, encoder-fallback.
+    // PMW3610 fusion: optical is ground truth (corrective anchor), encoder
+    // dead-reckons the gap between optical samples -- see
+    // optical_anchor_pose's comment above.
     const DrivetrainWheelCounts counts = {
         .fl = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_FL),
         .fr = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_FR),
@@ -1035,17 +1046,23 @@ void loop() {
         pmw3610_odometry_source_update(&pmw3610_source, &arm_odometry_link.latest,
                                        &optical_delta);
 
-    if (optical_ok || encoder_has_delta) {
-        const DrivetrainOdometryDelta *chosen =
-            optical_ok ? &optical_delta : &encoder_delta;
-        const bool valid = optical_ok || encoder_valid;
-        drivetrain_odometry_update(&odometry, chosen, valid);
-        last_fusion_source = optical_ok ? "optical" : "encoder";
-        if (optical_ok) {
-            optical_update_count++;
-        } else {
-            encoder_update_count++;
-        }
+    if (optical_ok) {
+        // Correct, not add: integrate the optical delta starting from the
+        // last trusted anchor (discarding whatever encoder dead-reckoning
+        // happened since then), then move the anchor to match.
+        DrivetrainOdometry anchored = odometry;
+        anchored.pose = optical_anchor_pose;
+        drivetrain_odometry_update(&anchored, &optical_delta, true);
+        (void)drivetrain_odometry_set_pose(&odometry, &anchored.pose);
+        optical_anchor_pose = anchored.pose;
+        last_fusion_source = "optical";
+        optical_update_count++;
+    } else if (encoder_has_delta) {
+        // Dead-reckon forward from wherever we currently are -- fills the
+        // gap until the next optical sample corrects it.
+        drivetrain_odometry_update(&odometry, &encoder_delta, encoder_valid);
+        last_fusion_source = "encoder";
+        encoder_update_count++;
     }
 
     const unsigned long now_ms = millis();
