@@ -28,6 +28,13 @@ static bool dispatcher_start(void *context, const TaskStepCommand *command,
         return false;
     }
     if (command->action == TASK_ACTION_PICK_UP_BLOCK ||
+        command->action == TASK_ACTION_POSITION_TOWER_X ||
+        command->action == TASK_ACTION_OPEN_TOWER_CLAWS ||
+        command->action == TASK_ACTION_TOWER_FACE_DOWN ||
+        command->action == TASK_ACTION_LOWER_TOWER ||
+        command->action == TASK_ACTION_CLOSE_TOWER_CLAWS ||
+        command->action == TASK_ACTION_RAISE_TOWER ||
+        command->action == TASK_ACTION_TOWER_FACE_FRONT ||
         command->action == TASK_ACTION_BUILD_TOWER) {
         dispatcher->active = &dispatcher->arm;
     } else if (command->action == TASK_ACTION_SCAN_TELETUBBIES) {

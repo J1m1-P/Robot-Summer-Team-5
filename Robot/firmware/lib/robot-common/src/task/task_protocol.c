@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#define TASK_COMMAND_PAYLOAD_SIZE 24U
+#define TASK_COMMAND_PAYLOAD_SIZE 36U
 #define TASK_STATUS_PAYLOAD_SIZE 18U
 #define TASK_HEARTBEAT_PAYLOAD_SIZE 5U
 
@@ -93,6 +93,9 @@ bool task_protocol_encode_command(const TaskCommandMessage *message,
                  message->step.tape_following.speed_mps);
     encode_float(&frame_out->payload[20],
                  message->step.tape_following.distance_m);
+    encode_float(&frame_out->payload[24], message->step.parameters.amount);
+    encode_float(&frame_out->payload[28], message->step.parameters.speed);
+    encode_u32(&frame_out->payload[32], message->step.parameters.settle_ms);
     return true;
 }
 
@@ -118,6 +121,9 @@ bool task_protocol_decode_command(const PacketFrame *frame,
         decode_float(&frame->payload[16]);
     decoded.step.tape_following.distance_m =
         decode_float(&frame->payload[20]);
+    decoded.step.parameters.amount = decode_float(&frame->payload[24]);
+    decoded.step.parameters.speed = decode_float(&frame->payload[28]);
+    decoded.step.parameters.settle_ms = decode_u32(&frame->payload[32]);
 
     if (!command_is_valid(&decoded)) return false;
     *message_out = decoded;

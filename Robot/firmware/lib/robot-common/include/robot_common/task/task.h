@@ -34,10 +34,21 @@ typedef enum {
     TASK_ACTION_ALIGN_TO_TAPE = 3,
     TASK_ACTION_BUILD_TOWER = 5,
     TASK_ACTION_SCAN_TELETUBBIES = 6,
-    TASK_ACTION_COUNT = 7,
+    TASK_ACTION_FOLLOW_PIECES_TAPE = 7,
+    TASK_ACTION_FOLLOW_TASK_TAPE = 8,
+    TASK_ACTION_POSITION_TOWER_X = 9,
+    TASK_ACTION_OPEN_TOWER_CLAWS = 10,
+    TASK_ACTION_TOWER_FACE_DOWN = 11,
+    TASK_ACTION_LOWER_TOWER = 12,
+    TASK_ACTION_CLOSE_TOWER_CLAWS = 13,
+    TASK_ACTION_RAISE_TOWER = 14,
+    TASK_ACTION_TOWER_FACE_FRONT = 15,
+    TASK_ACTION_BACK_OFF_PIECES = 16,
+    TASK_ACTION_COUNT = 17,
 } TaskAction;
 
 #define TASK_ACTION_BIT(action) (UINT32_C(1) << (uint32_t)(action))
+#define TASK_MAX_STEPS 16U
 
 /** Authoritative lifecycle state of one task execution. */
 typedef enum {
@@ -94,10 +105,21 @@ typedef union {
     TapeFollowingTaskParams tape_following;
 } TaskParams;
 
+/** Tuneable values attached to one workflow step.
+ *  amount is radians or metres according to the action; speed is rad/s or
+ *  m/s; settle_ms is the post-command mechanism settling time. */
+typedef struct {
+    float amount;
+    float speed;
+    uint32_t settle_ms;
+} TaskStepParameters;
+
 /** Minimal immutable request submitted to the coordinator. */
 typedef struct {
     TaskType type;
     TaskParams params;
+    TaskStepParameters step_parameters[TASK_MAX_STEPS];
+    bool step_parameter_overrides[TASK_MAX_STEPS];
 } TaskRequest;
 
 /** Command passed from the coordinator to a local or remote manager. */
@@ -106,6 +128,7 @@ typedef struct {
     uint8_t step;
     TaskAction action;
     TapeFollowingTaskParams tape_following;
+    TaskStepParameters parameters;
 } TaskStepCommand;
 
 /** The coordinator's single authoritative mutable task record. */

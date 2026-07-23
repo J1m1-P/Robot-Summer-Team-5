@@ -33,6 +33,7 @@ label{display:block;font-size:11px;color:var(--muted);font-weight:600}input,sele
 .node-head{display:flex;align-items:center;gap:8px}.node-index{display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--raised2);color:var(--blueb);font:700 11px var(--mono)}.node h3{font-size:13px;margin:0}.node p{font:500 10px/1.5 var(--mono);color:var(--muted);margin:10px 0 0}.node-state{position:absolute;bottom:12px;left:13px;right:13px;color:var(--dim);font:600 10px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .link{display:grid;place-content:center;color:var(--dim);font:600 9px var(--mono);text-align:center;line-height:1.5}.link-arrow{font-size:24px;line-height:1;color:var(--line2)}.link.active{color:var(--blueb)}.link.active .link-arrow{color:var(--blueb);text-shadow:0 0 8px rgba(68,147,248,.6)}
 .workflow{display:flex;align-items:center;gap:6px;overflow-x:auto;padding-bottom:4px}.step{min-width:150px;background:var(--deep);border:1px solid var(--line2);border-radius:8px;padding:9px}.step.current{border-color:var(--blueb)}.step.done{border-color:var(--green)}.step.failed{border-color:var(--redl)}.step .owner{font:600 9px var(--mono);color:var(--muted);text-transform:uppercase}.step b{display:block;font-size:11px;margin-top:5px}.step-link{color:var(--dim)}
+.step-parameters{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px;margin-top:10px}.step-parameter{background:var(--deep);border:1px solid var(--line2);border-radius:8px;padding:10px}.step-parameter h3{font-size:11px;margin:0 0 8px}.step-parameter .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .console{height:230px;overflow:auto;margin:0;padding:10px 12px;background:var(--deep);border:1px solid var(--line2);border-radius:8px;color:#c9d1d9;font:10px/1.55 var(--mono);white-space:pre-wrap}.console.tall{height:330px}
 .timeline{max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--deep)}.event{display:grid;grid-template-columns:72px 70px 1fr;gap:9px;padding:7px 10px;border-bottom:1px solid #1c2330;font:10px/1.4 var(--mono)}.event:last-child{border:0}.event time{color:var(--dim)}.event .source{color:var(--blueb)}.event.error .message{color:var(--redl)}.event.success .message{color:var(--greenl)}
 .pad-layout{display:grid;grid-template-columns:290px 1fr;gap:14px}.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.pad button{min-height:58px}.pad .stop{background:var(--red);border-color:var(--redl);color:#fff;font-weight:800}.drive-readouts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.wheel{background:var(--inner);border:1px solid var(--line2);border-radius:9px;padding:10px}.wheel-head{display:flex;align-items:center;gap:7px}.swatch{width:8px;height:8px;border-radius:2px}.wheel b{font-size:11px}.wheel .velocity{font:600 15px var(--mono);color:var(--greenl);margin:9px 0 3px}.wheel small{font:500 9px var(--mono);color:var(--muted)}
@@ -74,12 +75,11 @@ details{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}summary{
 
       <section class="panel">
         <div class="phead"><span class="ptitle">TASK REQUEST</span><span class="tag" id="taskHarnessStatus">waiting for coordinator</span><span class="right"></span><button class="sm" data-send="coordDrive:status">Refresh both</button><button class="sm warn" id="resetCoordination">Recover link</button></div>
-        <div class="g4" style="align-items:end">
+        <div class="g2" style="align-items:end">
           <label>Top-level task<select id="taskType"><option value="tape">Tape following</option><option value="picking">Tower picking</option><option value="building">Tower building</option><option value="scan">Teletubby scan</option></select></label>
-          <label>Tape speed (m/s)<input id="taskSpeed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
-          <label>Tape distance (m)<input id="taskDistance" type="number" min="0" max="100" step="0.1" value="1.0"></label>
           <div class="row"><button id="startTask" class="primary">Start task</button><button data-send="coordDrive:cancel" class="danger-button">Cancel</button></div>
         </div>
+        <div class="step-parameters" id="stepParameterEditor"></div>
         <div class="row" style="margin-top:10px">
           <span class="ptitle">SIMULATE RESULT</span>
           <button class="sm" data-send="coordDrive:drive succeed">Drivetrain succeeds</button>
@@ -310,8 +310,21 @@ const wheels = [
   {key:"BR",name:"Back right",color:"#f85149"}
 ];
 const workflowDefinitions = {
-  tape:[{action:"Follow tape",owner:"drivetrain"}],
-  picking:[{action:"Align to task tape",owner:"drivetrain"},{action:"Pick up block",owner:"top / arm",placeholder:true},{action:"Align to main route",owner:"drivetrain"}],
+  tape:[{action:"Follow tape",owner:"drivetrain",amount:1.0,amountLabel:"Distance (m)",speed:.20,speedLabel:"Speed (m/s)"}],
+  picking:[
+    {action:"Turn, find and align pieces tape",owner:"drivetrain",amount:70,amountLabel:"Clockwise turn (deg)",amountScale:-Math.PI/180,speed:.50,speedLabel:"Turn speed (rad/s)"},
+    {action:"Follow left sensor to task tape",owner:"drivetrain",speed:.10,speedLabel:"Speed (m/s)"},
+    {action:"Follow back sensor along task tape",owner:"drivetrain",amount:.30,amountLabel:"Distance (m)",speed:.10,speedLabel:"Speed (m/s)"},
+    {action:"Adjust tower X",owner:"top / arm",amount:0,amountLabel:"Signed distance (m)"},
+    {action:"Open tower claws",owner:"top / arm",settle:500},
+    {action:"Face tower claw down",owner:"top / arm",settle:500},
+    {action:"Lower tower Z",owner:"top / arm",amount:.20,amountLabel:"Distance (m)"},
+    {action:"Close tower claws",owner:"top / arm",settle:500},
+    {action:"Raise tower Z",owner:"top / arm",amount:.20,amountLabel:"Distance (m)"},
+    {action:"Face tower claw front",owner:"top / arm",settle:500},
+    {action:"Back off without tape following",owner:"drivetrain",amount:.30,amountLabel:"Distance (m)",speed:.10,speedLabel:"Speed (m/s)"},
+    {action:"Realign left sensor to main route",owner:"drivetrain",speed:.30,speedLabel:"Turn speed (rad/s)"}
+  ],
   building:[{action:"Build tower",owner:"top / arm",placeholder:true}],
   scan:[{action:"Scan Teletubbies",owner:"top → Pi"}],
   routine:[{action:"Follow tape",owner:"drivetrain"},{action:"Pick up block",owner:"top / arm"},{action:"Build tower",owner:"top / arm"}]
@@ -611,11 +624,14 @@ function normalizedStatus(raw) {
 }
 
 function currentAction(drive,top,task) {
+  const step = Math.max(0,Number(value(drive,"step","currentStep") || 0));
+  const workflowAction = workflowDefinitions[task]?.[step]?.action;
+  if (workflowAction) return workflowAction;
   const explicit = value(drive,"action","currentAction","taskAction");
   if (explicit !== undefined && explicit !== "none" && explicit !== 0) return String(explicit).replaceAll("_"," ");
   const topAction = value(top,"hasCommand") === false ? undefined : value(top,"action","command");
   if (topAction !== undefined && topAction !== "none" && topAction !== 0) return String(topAction).replaceAll("_"," ");
-  return workflowDefinitions[task]?.[Math.max(0,Number(value(drive,"step","currentStep") || 0))]?.action || "none";
+  return "none";
 }
 
 function ownerFor(action,task) {
@@ -677,6 +693,15 @@ function renderCoordination() {
   setNodeState($("#piNode"),owner.includes("Pi") && isRunning ? "active" : task === "scan" ? taskStatus : "idle");
   $("#driveNodeState").textContent = `task ${task} · ${taskStatus} · step ${step}`;
   $("#topNodeState").textContent = Object.keys(t).length ? `action ${value(t,"action","command") ?? action} · ${topStatus}` : "No top telemetry";
+  const activeData = owner.includes("top") ? t : d;
+  const parameterSummary =
+    `amount ${value(activeData,"amount") ?? "-"} · speed ${value(activeData,"speed") ?? "-"} · settle ${value(activeData,"settleMs") ?? "-"} ms`;
+  $("#driveNodeDetail").textContent = owner === "drivetrain"
+    ? parameterSummary
+    : "Owns the top-level runtime and dispatches the current action.";
+  $("#topNodeDetail").textContent = owner.includes("top")
+    ? parameterSummary
+    : "Executes tower and arm action steps received over the task link.";
   $("#piNodeState").textContent = owner.includes("Pi") ? `${action} · ${stepStatus}` : "Waiting for scan action";
   $("#taskLink").classList.toggle("active",owner.includes("top") && isRunning);
   $("#taskLinkState").textContent = owner.includes("top") ? `${dTx} TX / ${dRx} RX` : "idle";
@@ -716,6 +741,60 @@ function renderWorkflow(task,step,status,taskStatus) {
     if (/success|complete/.test(taskStatus)) state = "done";
     return `${index ? `<span class="step-link">→</span>` : ""}<article class="step ${state}"><span class="owner">${item.owner}</span><b>${index + 1}. ${item.action}</b>${item.placeholder ? `<span class="tag amber" style="display:inline-block;margin-top:6px">placeholder</span>` : ""}</article>`;
   }).join("");
+}
+
+function renderStepParameterEditor(task) {
+  const definition = workflowDefinitions[task] || [];
+  const editable = definition.filter(item =>
+    item.amount !== undefined || item.speed !== undefined ||
+    item.settle !== undefined);
+  if (!editable.length) {
+    $("#stepParameterEditor").innerHTML =
+      `<span class="note">This workflow currently has no tuneable step parameters.</span>`;
+    return;
+  }
+  $("#stepParameterEditor").innerHTML = definition.map((item,index) => {
+    if (item.amount === undefined && item.speed === undefined &&
+        item.settle === undefined) return "";
+    const amount = item.amount === undefined ? "" :
+      `<label>${item.amountLabel || "Amount"}<input data-step-param="${index}" data-field="amount" type="number" step="0.01" value="${item.amount}"></label>`;
+    const speed = item.speed === undefined ? "" :
+      `<label>${item.speedLabel || "Speed"}<input data-step-param="${index}" data-field="speed" type="number" min="0" step="0.01" value="${item.speed}"></label>`;
+    const settle = item.settle === undefined ? "" :
+      `<label>Settle time (ms)<input data-step-param="${index}" data-field="settle" type="number" min="0" step="50" value="${item.settle}"></label>`;
+    return `<article class="step-parameter"><h3>${index + 1}. ${item.action}</h3><div class="fields">${amount}${speed}${settle}</div></article>`;
+  }).join("");
+}
+
+function stepParameterValue(index,field,fallback = 0) {
+  const input = document.querySelector(
+    `[data-step-param="${index}"][data-field="${field}"]`);
+  const value = input ? Number(input.value) : fallback;
+  if (!Number.isFinite(value)) throw new Error(`Invalid ${field} for step ${index + 1}`);
+  return value;
+}
+
+async function startConfiguredTask() {
+  const type = $("#taskType").value;
+  const definition = workflowDefinitions[type] || [];
+  if (type === "tape") {
+    const speed = stepParameterValue(0,"speed",.2);
+    const distance = stepParameterValue(0,"amount",1);
+    await send("coordDrive",`start tape ${speed} ${distance}`);
+  } else {
+    await send("coordDrive","params clear");
+    for (let index = 0; index < definition.length; index++) {
+      const item = definition[index];
+      let amount = stepParameterValue(index,"amount",item.amount || 0);
+      amount *= item.amountScale || 1;
+      const speed = stepParameterValue(index,"speed",item.speed || 0);
+      const settle = Math.max(0,Math.round(
+        stepParameterValue(index,"settle",item.settle || 0)));
+      await send("coordDrive",`param ${index} ${amount} ${speed} ${settle}`);
+    }
+    await send("coordDrive",`start ${type}`);
+  }
+  renderWorkflow(type,0,"pending","pending");
 }
 
 function setNodeConnectionState() {
@@ -1143,13 +1222,11 @@ function bindEvents() {
     await send("coordDrive","reset");
     await send("coordTop","reset");
   };
-  $("#startTask").onclick = () => {
-    const type = $("#taskType").value;
-    const command = type === "tape" ? `start tape ${$("#taskSpeed").value} ${$("#taskDistance").value}` : `start ${type}`;
-    send("coordDrive",command);
-    renderWorkflow(type,0,"pending","pending");
-  };
+  $("#startTask").onclick = () =>
+    startConfiguredTask().catch(error =>
+      addLog("drive",`# ${error.message}`));
   $("#taskType").onchange = () => {
+    renderStepParameterEditor($("#taskType").value);
     const status = normalizedStatus(
       value(coordination.drive,"taskStatus","status"));
     if (status === "idle" || !Object.keys(coordination.drive).length) {
@@ -1240,6 +1317,7 @@ buildTofUi();
 buildArmUi();
 renderCoordination();
 renderWorkflow("none",0,"idle","idle");
+renderStepParameterEditor("tape");
 bindEvents();
 ENDPOINTS.forEach(item => setEndpointUi(item.id,"idle","not connected"));
 $("#serialSupport").textContent = "serial" in navigator ? "Web Serial ready" : "Web Serial unavailable";

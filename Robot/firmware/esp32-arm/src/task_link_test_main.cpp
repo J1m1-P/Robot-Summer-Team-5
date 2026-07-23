@@ -48,6 +48,16 @@ const char *action_name(TaskAction v) {
         case TASK_ACTION_ALIGN_TO_TAPE: return "align_to_tape";
         case TASK_ACTION_BUILD_TOWER: return "build_tower";
         case TASK_ACTION_SCAN_TELETUBBIES: return "scan_teletubbies";
+        case TASK_ACTION_FOLLOW_PIECES_TAPE: return "follow_pieces_tape";
+        case TASK_ACTION_FOLLOW_TASK_TAPE: return "follow_task_tape";
+        case TASK_ACTION_POSITION_TOWER_X: return "position_tower_x";
+        case TASK_ACTION_OPEN_TOWER_CLAWS: return "open_tower_claws";
+        case TASK_ACTION_TOWER_FACE_DOWN: return "tower_face_down";
+        case TASK_ACTION_LOWER_TOWER: return "lower_tower";
+        case TASK_ACTION_CLOSE_TOWER_CLAWS: return "close_tower_claws";
+        case TASK_ACTION_RAISE_TOWER: return "raise_tower";
+        case TASK_ACTION_TOWER_FACE_FRONT: return "tower_face_front";
+        case TASK_ACTION_BACK_OFF_PIECES: return "back_off_pieces";
         default: return "unknown";
     }
 }
@@ -56,6 +66,7 @@ void print_state(const char *event) {
         "{\"source\":\"arm\",\"event\":\"%s\",\"ms\":%lu,\"ready\":%s,"
         "\"armSession\":%lu,\"coordinatorSession\":%lu,\"hasCommand\":%s,"
         "\"execution\":%lu,\"command\":%lu,\"step\":%u,\"action\":\"%s\","
+        "\"amount\":%.5f,\"speed\":%.5f,\"settleMs\":%lu,"
         "\"stepStatus\":\"%s\",\"autoCompleteMs\":%lu,\"tx\":%lu,\"rx\":%lu,"
         "\"checksumErrors\":%lu,\"parseErrors\":%lu,\"dropped\":%lu,"
         "\"duplicates\":%lu,\"staleCommands\":%lu,\"protocolErrors\":%lu}\n",
@@ -64,7 +75,11 @@ void print_state(const char *event) {
         (unsigned long)server.requester_session_id,
         server.has_command ? "true" : "false", (unsigned long)server.command.step.execution_id,
         (unsigned long)server.command.command_id, server.command.step.step,
-        action_name(server.command.step.action), step_name(action_result.status),
+        action_name(server.command.step.action),
+        server.command.step.parameters.amount,
+        server.command.step.parameters.speed,
+        (unsigned long)server.command.step.parameters.settle_ms,
+        step_name(action_result.status),
         (unsigned long)auto_complete_ms, (unsigned long)drive_uart.packets_sent,
         (unsigned long)drive_uart.packets_received, (unsigned long)drive_uart.checksum_errors,
         (unsigned long)drive_uart.parse_errors, (unsigned long)drive_uart.packets_dropped,

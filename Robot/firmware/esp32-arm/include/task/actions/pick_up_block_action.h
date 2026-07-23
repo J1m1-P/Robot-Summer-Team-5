@@ -11,6 +11,10 @@ extern "C" {
 
 typedef struct {
     TaskActionResult result;
+    TaskAction active_action;
+    TaskStepParameters parameters;
+    uint32_t started_ms;
+    bool hardware_ready;
 } PickUpBlockAction;
 
 void pick_up_block_action_init(PickUpBlockAction *action);

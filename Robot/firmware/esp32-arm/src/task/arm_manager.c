@@ -6,19 +6,28 @@
 #include <stddef.h>
 #include <string.h>
 
+static bool is_pickup_action(TaskAction action) {
+    return action == TASK_ACTION_PICK_UP_BLOCK ||
+           action == TASK_ACTION_POSITION_TOWER_X ||
+           action == TASK_ACTION_OPEN_TOWER_CLAWS ||
+           action == TASK_ACTION_TOWER_FACE_DOWN ||
+           action == TASK_ACTION_LOWER_TOWER ||
+           action == TASK_ACTION_CLOSE_TOWER_CLAWS ||
+           action == TASK_ACTION_RAISE_TOWER ||
+           action == TASK_ACTION_TOWER_FACE_FRONT;
+}
+
 static TaskActionResult current_result(const ArmManager *manager) {
     if (manager == NULL) {
         return (TaskActionResult){TASK_STEP_FAILED, TASK_FAILURE_PROTOCOL};
     }
-    switch (manager->active_action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            return manager->pick_up_block.result;
-        case TASK_ACTION_BUILD_TOWER:
-            return manager->build_tower.result;
-        default:
-            return (TaskActionResult){TASK_STEP_NOT_STARTED,
-                                      TASK_FAILURE_NONE};
+    if (is_pickup_action(manager->active_action)) {
+        return manager->pick_up_block.result;
     }
+    if (manager->active_action == TASK_ACTION_BUILD_TOWER) {
+        return manager->build_tower.result;
+    }
+    return (TaskActionResult){TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
 }
 
 void arm_manager_init(ArmManager *manager) {
@@ -37,17 +46,14 @@ bool arm_manager_start(ArmManager *manager, const TaskStepCommand *command,
     }
 
     bool started = false;
-    switch (command->action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            started = pick_up_block_action_start(
-                &manager->pick_up_block, command, now_ms);
-            break;
-        case TASK_ACTION_BUILD_TOWER:
-            started =
-                build_tower_action_start(&manager->build_tower, command, now_ms);
-            break;
-        default:
-            return false;
+    if (is_pickup_action(command->action)) {
+        started = pick_up_block_action_start(
+            &manager->pick_up_block, command, now_ms);
+    } else if (command->action == TASK_ACTION_BUILD_TOWER) {
+        started =
+            build_tower_action_start(&manager->build_tower, command, now_ms);
+    } else {
+        return false;
     }
     if (started) manager->active_action = command->action;
     return started;
@@ -55,55 +61,44 @@ bool arm_manager_start(ArmManager *manager, const TaskStepCommand *command,
 
 void arm_manager_update(ArmManager *manager, uint32_t now_ms) {
     if (manager == NULL) return;
-    switch (manager->active_action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            pick_up_block_action_update(&manager->pick_up_block, now_ms);
-            break;
-        case TASK_ACTION_BUILD_TOWER:
-            build_tower_action_update(&manager->build_tower, now_ms);
-            break;
-        default:
-            break;
+    if (is_pickup_action(manager->active_action)) {
+        pick_up_block_action_update(&manager->pick_up_block, now_ms);
+    } else if (manager->active_action == TASK_ACTION_BUILD_TOWER) {
+        build_tower_action_update(&manager->build_tower, now_ms);
     }
 }
 
 bool arm_manager_cancel(ArmManager *manager) {
     if (manager == NULL) return false;
-    switch (manager->active_action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            return pick_up_block_action_cancel(&manager->pick_up_block);
-        case TASK_ACTION_BUILD_TOWER:
-            return build_tower_action_cancel(&manager->build_tower);
-        default:
-            return false;
+    if (is_pickup_action(manager->active_action)) {
+        return pick_up_block_action_cancel(&manager->pick_up_block);
     }
+    return manager->active_action == TASK_ACTION_BUILD_TOWER
+               ? build_tower_action_cancel(&manager->build_tower)
+               : false;
 }
 
 bool arm_manager_report_succeeded(ArmManager *manager) {
     if (manager == NULL) return false;
-    switch (manager->active_action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            return pick_up_block_action_report_succeeded(
-                &manager->pick_up_block);
-        case TASK_ACTION_BUILD_TOWER:
-            return build_tower_action_report_succeeded(&manager->build_tower);
-        default:
-            return false;
+    if (is_pickup_action(manager->active_action)) {
+        return pick_up_block_action_report_succeeded(
+            &manager->pick_up_block);
     }
+    return manager->active_action == TASK_ACTION_BUILD_TOWER
+               ? build_tower_action_report_succeeded(&manager->build_tower)
+               : false;
 }
 
 bool arm_manager_report_failed(ArmManager *manager, TaskFailure failure) {
     if (manager == NULL) return false;
-    switch (manager->active_action) {
-        case TASK_ACTION_PICK_UP_BLOCK:
-            return pick_up_block_action_report_failed(
-                &manager->pick_up_block, failure);
-        case TASK_ACTION_BUILD_TOWER:
-            return build_tower_action_report_failed(&manager->build_tower,
-                                                    failure);
-        default:
-            return false;
+    if (is_pickup_action(manager->active_action)) {
+        return pick_up_block_action_report_failed(
+            &manager->pick_up_block, failure);
     }
+    return manager->active_action == TASK_ACTION_BUILD_TOWER
+               ? build_tower_action_report_failed(&manager->build_tower,
+                                                   failure)
+               : false;
 }
 
 TaskStepStatus arm_manager_get_status(const ArmManager *manager,

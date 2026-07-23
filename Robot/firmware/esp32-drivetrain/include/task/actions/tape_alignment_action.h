@@ -4,6 +4,7 @@
 #pragma once
 
 #include "control/drivetrain/drivetrain.h"
+#include "control/drivetrain/drivetrain_odometry_source.h"
 #include "control/tape_following/tape_follower.h"
 #include "control/tape_following/tape_following_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
@@ -22,10 +23,16 @@ typedef struct {
     TapeSensor *left_sensor;
     TapeFollower *tape_follower;
     TaskActionResult result;
-    TapeFollowerSensor selected_sensor;
+    TaskAction active_action;
+    TaskStepParameters parameters;
     TapeLineEstimatorState estimator_state;
     TapeFollowingControllerState controller_state;
+    DrivetrainOdometrySource odometry_source;
+    DrivetrainOdometrySourceConfig odometry_source_config;
+    DrivetrainOdometry odometry;
     uint32_t last_update_ms;
+    float traveled_distance_m;
+    uint8_t phase;
     uint8_t stable_samples;
 } TapeAlignmentAction;
 

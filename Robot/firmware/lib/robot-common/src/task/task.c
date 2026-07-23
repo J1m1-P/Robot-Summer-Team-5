@@ -18,6 +18,12 @@ static bool tape_params_are_valid(const TapeFollowingTaskParams *params) {
 // Validates only the parameters used by the selected task type.
 bool task_request_is_valid(const TaskRequest *request) {
     if (request == NULL) return false;
+    for (uint8_t step = 0; step < TASK_MAX_STEPS; ++step) {
+        if (!isfinite(request->step_parameters[step].amount) ||
+            !isfinite(request->step_parameters[step].speed)) {
+            return false;
+        }
+    }
 
     switch (request->type) {
         case TASK_TYPE_TAPE_FOLLOWING:
@@ -38,7 +44,17 @@ bool task_action_is_valid(TaskAction action) {
            action == TASK_ACTION_PICK_UP_BLOCK ||
            action == TASK_ACTION_ALIGN_TO_TAPE ||
            action == TASK_ACTION_BUILD_TOWER ||
-           action == TASK_ACTION_SCAN_TELETUBBIES;
+           action == TASK_ACTION_SCAN_TELETUBBIES ||
+           action == TASK_ACTION_FOLLOW_PIECES_TAPE ||
+           action == TASK_ACTION_FOLLOW_TASK_TAPE ||
+           action == TASK_ACTION_POSITION_TOWER_X ||
+           action == TASK_ACTION_OPEN_TOWER_CLAWS ||
+           action == TASK_ACTION_TOWER_FACE_DOWN ||
+           action == TASK_ACTION_LOWER_TOWER ||
+           action == TASK_ACTION_CLOSE_TOWER_CLAWS ||
+           action == TASK_ACTION_RAISE_TOWER ||
+           action == TASK_ACTION_TOWER_FACE_FRONT ||
+           action == TASK_ACTION_BACK_OFF_PIECES;
 }
 
 // Identifies results that permanently close an individual workflow step.

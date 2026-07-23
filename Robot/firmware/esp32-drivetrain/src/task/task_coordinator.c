@@ -9,6 +9,7 @@
 typedef struct {
     TaskAction action;
     TaskOwner owner;
+    TaskStepParameters parameters;
 } TaskStepDefinition;
 
 typedef struct {
@@ -17,21 +18,54 @@ typedef struct {
 } WorkflowDefinition;
 
 static const TaskStepDefinition TAPE_WORKFLOW[] = {
-    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN, {0}},
 };
 
 static const TaskStepDefinition PICKING_WORKFLOW[] = {
-    {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_TOP},
-    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+    // Tower picking 1: turn 70 degrees clockwise, find the left tape, align.
+    {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN,
+     {-1.2217305f, 0.50f, 0U}},
+    // Tower picking 2: follow with the left module until back sees task tape.
+    {TASK_ACTION_FOLLOW_PIECES_TAPE, TASK_OWNER_DRIVETRAIN,
+     {0.0f, 0.10f, 0U}},
+    // Tower picking 3: follow the task tape with the back module for 0.3 m.
+    {TASK_ACTION_FOLLOW_TASK_TAPE, TASK_OWNER_DRIVETRAIN,
+     {0.30f, 0.10f, 0U}},
+    // Tower picking 4: adjust the tower claw X axis (initially 0 m).
+    {TASK_ACTION_POSITION_TOWER_X, TASK_OWNER_TOP,
+     {0.0f, 0.0f, 0U}},
+    // Tower picking 5: open all three small tower-claw servos.
+    {TASK_ACTION_OPEN_TOWER_CLAWS, TASK_OWNER_TOP,
+     {0.0f, 0.0f, 500U}},
+    // Tower picking 6: rotate the tower claw down/horizontal.
+    {TASK_ACTION_TOWER_FACE_DOWN, TASK_OWNER_TOP,
+     {0.0f, 0.0f, 500U}},
+    // Tower picking 7: lower the tower Z stepper by 0.2 m.
+    {TASK_ACTION_LOWER_TOWER, TASK_OWNER_TOP,
+     {0.20f, 0.0f, 0U}},
+    // Tower picking 8: close all three small tower-claw servos.
+    {TASK_ACTION_CLOSE_TOWER_CLAWS, TASK_OWNER_TOP,
+     {0.0f, 0.0f, 500U}},
+    // Tower picking 9: raise the tower Z stepper by 0.2 m.
+    {TASK_ACTION_RAISE_TOWER, TASK_OWNER_TOP,
+     {0.20f, 0.0f, 0U}},
+    // Tower picking 10: rotate the tower claw front/vertical.
+    {TASK_ACTION_TOWER_FACE_FRONT, TASK_OWNER_TOP,
+     {0.0f, 0.0f, 500U}},
+    // Tower picking 11: back away from the pieces without tape following.
+    {TASK_ACTION_BACK_OFF_PIECES, TASK_OWNER_DRIVETRAIN,
+     {0.30f, 0.10f, 0U}},
+    // Tower picking 12: reacquire and align the left module to the main route.
+    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN,
+     {0.0f, 0.30f, 0U}},
 };
 
 static const TaskStepDefinition BUILDING_WORKFLOW[] = {
-    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_TOP},
+    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_TOP, {0}},
 };
 
 static const TaskStepDefinition SCAN_WORKFLOW[] = {
-    {TASK_ACTION_SCAN_TELETUBBIES, TASK_OWNER_TOP},
+    {TASK_ACTION_SCAN_TELETUBBIES, TASK_OWNER_TOP, {0}},
 };
 
 // Keeps workflow lookup and representation private to the sole sequencing owner.
@@ -92,6 +126,10 @@ static bool build_step_command(const TaskRuntime *runtime,
     command_out->execution_id = runtime->execution_id;
     command_out->step = runtime->current_step;
     command_out->action = step.action;
+    command_out->parameters =
+        runtime->request.step_parameter_overrides[runtime->current_step]
+            ? runtime->request.step_parameters[runtime->current_step]
+            : step.parameters;
     if (step.action != TASK_ACTION_FOLLOW_TAPE) return true;
 
     if (runtime->request.type == TASK_TYPE_TAPE_FOLLOWING) {

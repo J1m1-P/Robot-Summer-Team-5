@@ -1,7 +1,7 @@
 #include "../../../lib/robot-common/src/task/task.c"
 #include "../../../lib/robot-common/src/task/task_protocol.c"
 #include "../../src/task/task_coordinator.c"
-#include "../../../esp32-arm/src/task/actions/pick_up_block_action.c"
+#include "../../../esp32-arm/src/task/actions/pick_up_block_action.cpp"
 #include "../../../esp32-arm/src/task/actions/build_tower_action.c"
 #include "../../../esp32-arm/src/task/arm_manager.c"
 #include "../../../esp32-arm/src/communication/task_server.c"
