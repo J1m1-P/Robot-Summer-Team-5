@@ -223,6 +223,7 @@ bool parse_duration(const String &token, uint32_t &duration_out,
 
 void report_error(const char *operation, esp_err_t error) {
     Serial.printf("# ERROR: %s failed: %s\n", operation, esp_err_to_name(error));
+    Serial.printf("DRIVE,ERROR,%s,%s\n", operation, esp_err_to_name(error));
     if (drivetrain.status.initialized) drivetrain_brake(&drivetrain);
     drivetrain_ready = false;
     mode = TestMode::IDLE;
@@ -608,6 +609,21 @@ void service_tape_center(float dt_s) {
 
 bool start_body(float vx, float vy, float omega, uint32_t duration_ms,
                 TestMode requested_mode, const char *name) {
+    // Keyboard driving renews its 10-second command lease while a key remains
+    // held. Update an active manual body command in place so each renewal (or
+    // WASD direction change) does not coast the motors and reset the velocity
+    // ramp to zero.
+    if (mode == TestMode::BODY && requested_mode == TestMode::BODY) {
+        command_vx = vx;
+        command_vy = vy;
+        command_omega = omega;
+        motion_end_ms = millis() + duration_ms;
+        Serial.printf("# UPDATE %s: vx=%.3f vy=%.3f omega=%.3f for %lu ms\n",
+                      name, vx, vy, omega,
+                      static_cast<unsigned long>(duration_ms));
+        return true;
+    }
+
     esp_err_t error = coast_all();
     if (error == ESP_OK) {
         error = drivetrain_set_body_velocity(&drivetrain, vx, vy, omega);
@@ -772,6 +788,9 @@ void process_command(String line) {
 #endif
     line.toLowerCase();
     if (line.length() == 0) return;
+    // Machine-readable acknowledgement lets the browser distinguish a command
+    // received by this runtime from text merely written to the serial port.
+    Serial.printf("DRIVE,RX,%s\n", line.c_str());
 
     String tokens[6];
     const int count = split_tokens(line, tokens, 6);
@@ -1152,11 +1171,13 @@ void setup() {
     if (error == ESP_OK) error = drivetrain_enable(&drivetrain);
     if (error != ESP_OK) {
         Serial.printf("# drivetrain initialization failed: %s\n", esp_err_to_name(error));
+        Serial.printf("DRIVE,READY,0,%s\n", esp_err_to_name(error));
         return;
     }
 
     drivetrain_ready = true;
     last_control_us = esp_timer_get_time();
+    Serial.println("DRIVE,READY,1");
     print_config();
     print_help();
     Serial.print("> ");

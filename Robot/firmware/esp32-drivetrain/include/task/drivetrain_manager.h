@@ -4,11 +4,11 @@
 #pragma once
 
 #include "control/drivetrain/drivetrain.h"
-#include "control/drivetrain/odometry.h"
 #include "control/tape_following/tape_follower.h"
-#include "control/tape_following/tape_following_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
-#include "sensing/tape_following/tape_line_estimator.h"
+#include "task/actions/follow_tape_action.h"
+#include "task/actions/tape_alignment_action.h"
+#include "task/drivetrain_action_dispatcher.h"
 #include <robot_common/task/task_action_executor.h>
 
 #ifdef __cplusplus
@@ -17,8 +17,7 @@ extern "C" {
 
 typedef struct {
     Drivetrain *drivetrain;
-    TaskActionResult result;
-    TaskAction active_action;
+    DrivetrainActionDispatcher action_dispatcher;
 
     // Shared tape hardware used for route following and the two tower-picking
     // alignment actions.
@@ -30,17 +29,8 @@ typedef struct {
     TapeSensor tape_sensor_left;
     bool tape_hardware_ready;
     TapeFollower tape_follower;
-
-    DrivetrainOdometry odometry;
-    int32_t last_encoder_counts[DRIVETRAIN_MOTOR_MAX];
-    uint32_t last_update_ms;
-    float signed_travel_speed_mps;
-    float target_distance_m;
-
-    TapeFollowerSensor align_sensor;
-    TapeLineEstimatorState align_estimator_state;
-    TapeFollowingControllerState align_controller_state;
-    uint8_t align_stable_samples;
+    FollowTapeAction follow_tape;
+    TapeAlignmentAction tape_alignment;
 } DrivetrainManager;
 
 // Initializes tape-following hardware once and prepares an idle manager.
