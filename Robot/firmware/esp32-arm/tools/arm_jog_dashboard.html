@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Arm Jog Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f9f9f7;
+    --text: #0b0b0b;
+    --secondary: #52514e;
+    --muted: #898781;
+    --border: rgba(11, 11, 11, 0.11);
+    --accent: #2a78d6;
+    --servo: #7356bf;
+    --stepper: #087f5b;
+    --danger: #d03b3b;
+    --warning-bg: #fff7d6;
+    --warning-border: #e6c85d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --text: #fff;
+      --secondary: #c3c2b7;
+      --muted: #898781;
+      --border: rgba(255, 255, 255, 0.12);
+      --accent: #3987e5;
+      --servo: #a993ed;
+      --stepper: #51cfaa;
+      --danger: #e66767;
+      --warning-bg: #302b16;
+      --warning-border: #6e6025;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text);
+  }
+  .root { max-width: 1240px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 4px; }
+  h3 { font-size: 15px; margin: 0; }
+  .subtitle, .hint { color: var(--secondary); font-size: 13px; }
+  .subtitle { margin: 0 0 16px; }
+  .hint { margin: 5px 0 0; }
+  code { font-size: 0.92em; }
+
+  .toolbar, .warning, .card, #log {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .warning {
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
+    padding: 10px 13px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(335px, 1fr));
+    gap: 14px;
+  }
+  .card { padding: 14px; min-width: 0; }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 11px;
+  }
+  .servo-card { border-top: 3px solid var(--servo); }
+  .stepper-card { border-top: 3px solid var(--stepper); }
+  .position {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 18px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .position small {
+    display: block;
+    color: var(--secondary);
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 2px;
+  }
+  .group { margin-top: 12px; }
+  .group-title {
+    color: var(--secondary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 6px 0; }
+  .row label { color: var(--secondary); font-size: 12px; font-weight: 650; }
+  .grow { flex: 1 1 100px; }
+  .fixed-jogs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+
+  button, input {
+    font: inherit;
+    font-size: 13px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+  }
+  button {
+    padding: 7px 11px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-weight: 650;
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button.stop { background: var(--danger); color: #fff; border-color: transparent; }
+  button.endpoint { border-color: color-mix(in srgb, var(--servo), transparent 45%); }
+  button.travel { border-color: color-mix(in srgb, var(--stepper), transparent 45%); }
+  button:disabled { opacity: 0.42; cursor: not-allowed; }
+  input {
+    padding: 6px 8px;
+    width: 88px;
+    background: var(--page);
+    color: var(--text);
+  }
+  input.wide { width: 132px; }
+  #status { color: var(--secondary); font-size: 13px; }
+  #status.connected { color: var(--stepper); font-weight: 700; }
+  #status.error { color: var(--danger); font-weight: 700; }
+  .offline { color: var(--danger) !important; }
+  .moving { color: var(--stepper) !important; }
+
+  #log {
+    height: 150px;
+    overflow-y: auto;
+    padding: 10px;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--secondary);
+  }
+  @media (max-width: 430px) {
+    .grid { grid-template-columns: 1fr; }
+    .fixed-jogs { grid-template-columns: repeat(3, 1fr); }
+    .position { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<main class="root">
+  <h1>Arm Jog Test</h1>
+  <p class="subtitle">Seven-servo and four-stepper test dashboard for
+    <code>src/harnesses/arm_jog_main.cpp</code>. Upload with
+    <code>pio run -e arm_jog -t upload</code>, then connect over USB in Chrome or Edge.</p>
+
+  <div class="toolbar">
+    <button id="connectBtn" class="primary">Connect (USB)</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <button id="refreshBtn" data-command disabled>Refresh state</button>
+    <button id="stopAllBtn" class="stop" data-command disabled>STOP ALL STEPPERS</button>
+    <span id="status">Not connected</span>
+  </div>
+
+  <div class="warning"><strong>Clear the mechanism before connecting.</strong> The firmware
+    attaches all servos and initially commands each configured position A. Servo “position” and
+    stepper position are commanded/open-loop estimates, not sensor feedback. A stepper starts at
+    logical 0 wherever it is when the board boots; “Set home” also changes only that logical
+    coordinate. STOP halts step pulses but servos continue holding their angles.</div>
+
+  <h2>Servos</h2>
+  <p class="subtitle">Position A and B are both targets and the inclusive motion limits. Neutral
+    is their midpoint. PWM edits are temporary and reset to <code>servo_config.h</code> after reboot.</p>
+  <section id="servoGrid" class="grid"></section>
+
+  <h2>Steppers</h2>
+  <p class="subtitle">Position is signed relative to the chosen logical home. The full range limits
+    the magnitude of each jog in either direction. Defaults come from <code>stepper_config.h</code>:
+    138, 220, 187, and 152 mm.</p>
+  <section id="stepperGrid" class="grid"></section>
+
+  <h2>Log</h2>
+  <div id="log" role="log" aria-live="polite"></div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const SERVOS = [
+    "Habitat Left", "Habitat Right", "Tower Rotate", "Tower Left",
+    "Tower Middle", "Tower Right", "Solar Panel"
+  ];
+  const STEPPERS = ["Tower X", "Tower Z", "Habitat X", "Habitat Z"];
+  const DEFAULT_RANGES = [138, 220, 187, 152];
+  const DEFAULT_STEPPER_DELAYS_US = [3000, 1500, 3000, 1500];
+
+  const state = {
+    port: null,
+    reader: null,
+    writer: null,
+    readableClosed: null,
+    keepReading: false,
+    rxBuffer: "",
+    connected: false
+  };
+
+  const statusEl = document.getElementById("status");
+  const connectBtn = document.getElementById("connectBtn");
+  const disconnectBtn = document.getElementById("disconnectBtn");
+  const logEl = document.getElementById("log");
+
+  function servoCard(name, index) {
+    const id = index + 1;
+    return `
+      <article class="card servo-card" id="servo-card-${id}">
+        <div class="card-head">
+          <div><h3>Servo ${id} · ${name}</h3><p class="hint">Awaiting telemetry</p></div>
+          <div class="position" id="servo-position-${id}">--°<small>commanded angle</small></div>
+        </div>
+        <div class="group">
+          <div class="group-title">Move</div>
+          <div class="row">
+            <label for="servo-angle-${id}">Angle (deg)</label>
+            <input id="servo-angle-${id}" type="number" min="0" max="180" step="1" value="45" />
+            <button data-command data-action="servo-angle" data-id="${id}">Move</button>
+            <button data-command data-action="servo-neutral" data-id="${id}">Neutral</button>
+          </div>
+          <div class="row">
+            <button class="endpoint grow" data-command data-action="servo-goto" data-endpoint="a" data-id="${id}">Move to A</button>
+            <button class="endpoint grow" data-command data-action="servo-goto" data-endpoint="b" data-id="${id}">Move to B</button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-title">Positions and angle limits</div>
+          <div class="row">
+            <label for="servo-a-${id}">A (deg)</label>
+            <input id="servo-a-${id}" type="number" min="0" max="180" step="1" value="44" />
+            <button data-command data-action="servo-endpoint" data-endpoint="a" data-id="${id}">Set A</button>
+            <label for="servo-b-${id}">B (deg)</label>
+            <input id="servo-b-${id}" type="number" min="0" max="180" step="1" value="46" />
+            <button data-command data-action="servo-endpoint" data-endpoint="b" data-id="${id}">Set B</button>
+          </div>
+          <p class="hint" id="servo-limits-${id}">Allowed motion: 44° to 46°</p>
+        </div>
+        <div class="group">
+          <div class="group-title">PWM configuration (RAM only)</div>
+          <div class="row">
+            <label for="servo-freq-${id}">Hz</label>
+            <input id="servo-freq-${id}" type="number" min="1" max="1000" step="1" value="50" />
+            <label for="servo-min-${id}">Min µs</label>
+            <input id="servo-min-${id}" type="number" min="500" max="2500" step="1" value="1000" />
+            <label for="servo-max-${id}">Max µs</label>
+            <input id="servo-max-${id}" type="number" min="500" max="2500" step="1" value="2000" />
+            <button data-command data-action="servo-pwm" data-id="${id}">Apply</button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  function stepperCard(name, index) {
+    const id = index + 1;
+    const range = DEFAULT_RANGES[index];
+    const delayUs = DEFAULT_STEPPER_DELAYS_US[index];
+    return `
+      <article class="card stepper-card" id="stepper-card-${id}">
+        <div class="card-head">
+          <div><h3>Stepper ${id} · ${name}</h3><p class="hint" id="stepper-state-${id}">Awaiting telemetry</p></div>
+          <div class="position" id="stepper-position-${id}">-- mm<small>-- steps</small></div>
+        </div>
+        <div class="group">
+          <div class="group-title">Fixed distance jog (mm)</div>
+          <div class="fixed-jogs">
+            ${[-50, -10, -1, 1, 10, 50].map(value =>
+              `<button data-command data-action="stepper-mm-fixed" data-value="${value}" data-id="${id}">${value > 0 ? "+" : ""}${value}</button>`
+            ).join("")}
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-title">Custom jog</div>
+          <div class="row">
+            <label for="stepper-mm-${id}">Distance (mm)</label>
+            <input class="wide" id="stepper-mm-${id}" type="number" min="-${range}" max="${range}" step="0.1" value="1" />
+            <button data-command data-action="stepper-mm" data-id="${id}">Jog distance</button>
+          </div>
+          <div class="row">
+            <label for="stepper-steps-${id}">Steps (signed)</label>
+            <input class="wide" id="stepper-steps-${id}" type="number" step="1" value="1" />
+            <button data-command data-action="stepper-steps" data-id="${id}">Jog steps</button>
+          </div>
+          <p class="hint">Use a negative value for the opposite direction. Firmware limits each command to ± full range.</p>
+        </div>
+        <div class="group">
+          <div class="group-title">Step pulse timing (RAM only)</div>
+          <div class="row">
+            <label for="stepper-pulse-${id}">Pulse high (µs)</label>
+            <input class="wide" id="stepper-pulse-${id}" type="number" min="1" max="10000000" step="1" value="3" />
+            <label for="stepper-delay-${id}">Between steps (µs)</label>
+            <input class="wide" id="stepper-delay-${id}" type="number" min="1" max="10000000" step="1" value="${delayUs}" />
+            <button data-command data-action="stepper-timing" data-id="${id}">Apply timing</button>
+          </div>
+          <p class="hint">The delay controls speed; smaller values step faster. Changes reset after reboot.</p>
+        </div>
+        <div class="group">
+          <div class="group-title">Home and full range</div>
+          <div class="row">
+            <label for="stepper-range-${id}">Full range (mm)</label>
+            <input class="wide" id="stepper-range-${id}" type="number" min="0.1" max="10000" step="0.1" value="${range}" />
+            <button data-command data-action="stepper-range" data-id="${id}">Set range</button>
+          </div>
+          <div class="row">
+            <button class="travel grow" data-command data-action="stepper-full" data-direction="negative" data-id="${id}">Jog − full range</button>
+            <button class="travel grow" data-command data-action="stepper-full" data-direction="positive" data-id="${id}">Jog + full range</button>
+          </div>
+          <div class="row">
+            <button data-command data-action="stepper-home" data-id="${id}">Set current as home (0)</button>
+            <button class="stop grow" data-command data-action="stepper-stop" data-id="${id}">STOP STEPPER ${id}</button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  document.getElementById("servoGrid").innerHTML = SERVOS.map(servoCard).join("");
+  document.getElementById("stepperGrid").innerHTML = STEPPERS.map(stepperCard).join("");
+
+  function log(message) {
+    const lines = (logEl.textContent + message + "\n").split("\n");
+    if (lines.length > 400) lines.splice(0, lines.length - 400);
+    logEl.textContent = lines.join("\n");
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnected(connected, mode = "", isError = false) {
+    state.connected = connected;
+    statusEl.textContent = connected ? `Connected (${mode})` : (isError ? "Connection error" : "Not connected");
+    statusEl.className = connected ? "connected" : (isError ? "error" : "");
+    connectBtn.disabled = connected;
+    disconnectBtn.disabled = !connected;
+    document.querySelectorAll("[data-command]").forEach(element => { element.disabled = !connected; });
+  }
+
+  async function connectSerial() {
+    if (!("serial" in navigator)) {
+      setConnected(false, "", true);
+      log("# Web Serial is unavailable. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      state.port = await navigator.serial.requestPort();
+      await state.port.open({ baudRate: 115200 });
+      const decoder = new TextDecoderStream();
+      state.readableClosed = state.port.readable.pipeTo(decoder.writable).catch(() => {});
+      state.reader = decoder.readable.getReader();
+      state.writer = state.port.writable.getWriter();
+      state.keepReading = true;
+      setConnected(true, "USB");
+      log("# connected over USB");
+      readLoop();
+      send("state");
+    } catch (error) {
+      log("# USB connection error: " + error.message);
+      setConnected(false, "", true);
+    }
+  }
+
+  async function readLoop() {
+    try {
+      while (state.keepReading && state.reader) {
+        const { value, done } = await state.reader.read();
+        if (done) break;
+        state.rxBuffer += value;
+        let newline;
+        while ((newline = state.rxBuffer.indexOf("\n")) >= 0) {
+          const line = state.rxBuffer.slice(0, newline).trim();
+          state.rxBuffer = state.rxBuffer.slice(newline + 1);
+          if (line) handleLine(line);
+        }
+      }
+    } catch (error) {
+      if (state.keepReading) log("# USB read error: " + error.message);
+    }
+  }
+
+  async function disconnect() {
+    state.keepReading = false;
+    try {
+      if (state.reader) {
+        await state.reader.cancel();
+        state.reader.releaseLock();
+        state.reader = null;
+      }
+      if (state.readableClosed) {
+        await state.readableClosed;
+        state.readableClosed = null;
+      }
+      if (state.writer) {
+        state.writer.releaseLock();
+        state.writer = null;
+      }
+      if (state.port) {
+        await state.port.close();
+        state.port = null;
+      }
+    } catch (error) {
+      log("# disconnect error: " + error.message);
+    }
+    state.rxBuffer = "";
+    setConnected(false);
+    log("# disconnected");
+  }
+
+  async function send(command) {
+    try {
+      if (state.writer) {
+        await state.writer.write(new TextEncoder().encode(command + "\n"));
+      } else {
+        log("# not connected");
+      }
+    } catch (error) {
+      log("# send error: " + error.message);
+    }
+  }
+
+  function updateInput(id, value) {
+    const input = document.getElementById(id);
+    if (input && document.activeElement !== input) input.value = value;
+  }
+
+  function handleServo(parts) {
+    if (parts.length !== 9) return false;
+    const [id, current, angleA, angleB, frequency, minUs, maxUs, ready] = parts.slice(1).map(Number);
+    if ([id, current, angleA, angleB, frequency, minUs, maxUs, ready].some(Number.isNaN) || id < 1 || id > SERVOS.length) return false;
+    const position = document.getElementById(`servo-position-${id}`);
+    position.innerHTML = `${current}°<small>commanded angle</small>`;
+    position.classList.toggle("offline", !ready);
+    const hint = document.querySelector(`#servo-card-${id} .card-head .hint`);
+    hint.textContent = ready ? `PWM ${frequency} Hz · ${minUs}–${maxUs} µs` : "Initialization failed";
+    updateInput(`servo-angle-${id}`, current);
+    updateInput(`servo-a-${id}`, angleA);
+    updateInput(`servo-b-${id}`, angleB);
+    updateInput(`servo-freq-${id}`, frequency);
+    updateInput(`servo-min-${id}`, minUs);
+    updateInput(`servo-max-${id}`, maxUs);
+    const low = Math.min(angleA, angleB);
+    const high = Math.max(angleA, angleB);
+    const angleInput = document.getElementById(`servo-angle-${id}`);
+    angleInput.min = low;
+    angleInput.max = high;
+    document.getElementById(`servo-limits-${id}`).textContent = `Allowed motion: ${low}° to ${high}° · neutral ${(angleA + angleB) / 2}°`;
+    return true;
+  }
+
+  function handleStepper(parts) {
+    if (parts.length !== 10) return false;
+    const [id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready] = parts.slice(1).map(Number);
+    if ([id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready].some(Number.isNaN) || id < 1 || id > STEPPERS.length) return false;
+    const position = document.getElementById(`stepper-position-${id}`);
+    position.innerHTML = `${mm.toFixed(3)} mm<small>${steps} steps</small>`;
+    position.classList.toggle("offline", !ready);
+    position.classList.toggle("moving", Boolean(moving && ready));
+    const stateText = document.getElementById(`stepper-state-${id}`);
+    stateText.textContent = !ready ? "Initialization failed" : (moving ? "Moving" : `Idle · max jog ±${rangeMm.toFixed(3)} mm`);
+    updateInput(`stepper-range-${id}`, rangeMm);
+    updateInput(`stepper-pulse-${id}`, pulseUs);
+    updateInput(`stepper-delay-${id}`, delayUs);
+    const mmInput = document.getElementById(`stepper-mm-${id}`);
+    mmInput.min = -rangeMm;
+    mmInput.max = rangeMm;
+    const stepsInput = document.getElementById(`stepper-steps-${id}`);
+    stepsInput.min = -rangeSteps;
+    stepsInput.max = rangeSteps;
+    return true;
+  }
+
+  function handleLine(rawLine) {
+    const line = rawLine.trim();
+    if (!line) return;
+    if (line.startsWith("#")) {
+      log(line);
+      return;
+    }
+    const parts = line.split(",");
+    if (parts[0] === "servo" && handleServo(parts)) return;
+    if (parts[0] === "stepper" && handleStepper(parts)) return;
+    log(line);
+  }
+
+  function validValue(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input.reportValidity()) return null;
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  document.addEventListener("click", event => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const id = Number(button.dataset.id);
+    const action = button.dataset.action;
+    let value;
+
+    if (action === "servo-angle") {
+      value = validValue(`servo-angle-${id}`);
+      if (value !== null) send(`servo angle ${id} ${value}`);
+    } else if (action === "servo-neutral") {
+      send(`servo neutral ${id}`);
+    } else if (action === "servo-goto") {
+      send(`servo goto ${id} ${button.dataset.endpoint}`);
+    } else if (action === "servo-endpoint") {
+      value = validValue(`servo-${button.dataset.endpoint}-${id}`);
+      if (value !== null) send(`servo ${button.dataset.endpoint} ${id} ${value}`);
+    } else if (action === "servo-pwm") {
+      const frequency = validValue(`servo-freq-${id}`);
+      const minUs = validValue(`servo-min-${id}`);
+      const maxUs = validValue(`servo-max-${id}`);
+      if ([frequency, minUs, maxUs].every(item => item !== null)) {
+        send(`servo pwm ${id} ${frequency} ${minUs} ${maxUs}`);
+      }
+    } else if (action === "stepper-mm-fixed") {
+      send(`stepper mm ${id} ${button.dataset.value}`);
+    } else if (action === "stepper-mm") {
+      value = validValue(`stepper-mm-${id}`);
+      if (value !== null) send(`stepper mm ${id} ${value}`);
+    } else if (action === "stepper-steps") {
+      value = validValue(`stepper-steps-${id}`);
+      if (value !== null) send(`stepper steps ${id} ${value}`);
+    } else if (action === "stepper-timing") {
+      const pulseUs = validValue(`stepper-pulse-${id}`);
+      const delayUs = validValue(`stepper-delay-${id}`);
+      if (pulseUs !== null && delayUs !== null) {
+        send(`stepper timing ${id} ${pulseUs} ${delayUs}`);
+      }
+    } else if (action === "stepper-range") {
+      value = validValue(`stepper-range-${id}`);
+      if (value !== null) send(`stepper range ${id} ${value}`);
+    } else if (action === "stepper-full") {
+      send(`stepper full ${id} ${button.dataset.direction}`);
+    } else if (action === "stepper-home") {
+      send(`stepper home ${id}`);
+    } else if (action === "stepper-stop") {
+      send(`stop stepper ${id}`);
+    }
+  });
+
+  connectBtn.addEventListener("click", connectSerial);
+  disconnectBtn.addEventListener("click", disconnect);
+  document.getElementById("refreshBtn").addEventListener("click", () => send("state"));
+  document.getElementById("stopAllBtn").addEventListener("click", () => send("stop"));
+  setConnected(false);
+})();
+</script>
+</body>
+</html>

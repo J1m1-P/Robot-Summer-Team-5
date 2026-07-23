@@ -1,0 +1,42 @@
+#include <Arduino.h>
+#include "drivers/servo_driver.h"
+
+// Add or remove entries here to test one servo or any group of servos.
+static const ServoConfig *const servoConfigs[] = {
+    // &habitatLeftServoConfig,
+    &habitatRightServoConfig,
+    &towerRotateServoConfig,
+    // &towerLeftServoConfig,
+    // &towerMiddleServoConfig,
+    // &towerRightServoConfig,
+    // &solarPanelServoConfig,
+};
+
+static constexpr size_t SERVO_COUNT = sizeof(servoConfigs) / sizeof(servoConfigs[0]);
+static constexpr uint32_t TOGGLE_INTERVAL_MS = 1000;
+
+static ServoDriver servos[SERVO_COUNT];
+static ServoPosition currentTestPosition = SERVO_POSITION_A;
+static uint32_t lastToggleMs = 0;
+
+void setup() {
+    for (size_t index = 0; index < SERVO_COUNT; ++index) {
+        servo_init(&servos[index], *servoConfigs[index]);
+    }
+    lastToggleMs = millis();
+}
+
+void loop() {
+    const uint32_t nowMs = millis();
+    if (nowMs - lastToggleMs >= TOGGLE_INTERVAL_MS) {
+        lastToggleMs += TOGGLE_INTERVAL_MS;
+
+        currentTestPosition = (currentTestPosition == SERVO_POSITION_A)
+            ? SERVO_POSITION_B
+            : SERVO_POSITION_A;
+
+        for (size_t index = 0; index < SERVO_COUNT; ++index) {
+            servo_set_position(&servos[index], currentTestPosition);
+        }
+    }
+}
