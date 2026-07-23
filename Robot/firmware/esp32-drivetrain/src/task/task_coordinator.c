@@ -22,25 +22,16 @@ static const TaskStepDefinition TAPE_WORKFLOW[] = {
 
 static const TaskStepDefinition PICKING_WORKFLOW[] = {
     {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_ARM},
+    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_TOP},
     {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
 };
 
 static const TaskStepDefinition BUILDING_WORKFLOW[] = {
-    {TASK_ACTION_ALIGN_TO_BASE, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_ARM},
-    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_TOP},
 };
 
-static const TaskStepDefinition ROUTINE_WORKFLOW[] = {
-    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_PICK_UP_BLOCK, TASK_OWNER_ARM},
-    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_ALIGN_TO_BASE, TASK_OWNER_DRIVETRAIN},
-    {TASK_ACTION_BUILD_TOWER, TASK_OWNER_ARM},
-    {TASK_ACTION_ALIGN_TO_TAPE, TASK_OWNER_DRIVETRAIN},
+static const TaskStepDefinition SCAN_WORKFLOW[] = {
+    {TASK_ACTION_SCAN_TELETUBBIES, TASK_OWNER_TOP},
 };
 
 // Keeps workflow lookup and representation private to the sole sequencing owner.
@@ -62,10 +53,10 @@ static bool get_workflow(TaskType type, WorkflowDefinition *workflow_out) {
                 BUILDING_WORKFLOW,
                 sizeof(BUILDING_WORKFLOW) / sizeof(BUILDING_WORKFLOW[0])};
             return true;
-        case TASK_TYPE_TOWER_ROUTINE:
+        case TASK_TYPE_TELETUBBY_SCAN:
             *workflow_out = (WorkflowDefinition){
-                ROUTINE_WORKFLOW,
-                sizeof(ROUTINE_WORKFLOW) / sizeof(ROUTINE_WORKFLOW[0])};
+                SCAN_WORKFLOW,
+                sizeof(SCAN_WORKFLOW) / sizeof(SCAN_WORKFLOW[0])};
             return true;
         default:
             return false;
@@ -105,13 +96,6 @@ static bool build_step_command(const TaskRuntime *runtime,
 
     if (runtime->request.type == TASK_TYPE_TAPE_FOLLOWING) {
         command_out->tape_following = runtime->request.params.tape_following;
-        return true;
-    }
-    if (runtime->request.type == TASK_TYPE_TOWER_ROUTINE) {
-        command_out->tape_following =
-            runtime->current_step == 0U
-                ? runtime->request.params.tower_routine.tape_to_pieces
-                : runtime->request.params.tower_routine.tape_to_base;
         return true;
     }
     return false;
@@ -162,23 +146,40 @@ static void finish_failed(TaskCoordinator *coordinator,
     coordinator->runtime.failure = failure == TASK_FAILURE_NONE
                                        ? TASK_FAILURE_STEP_FAILED
                                        : failure;
+    if (!coordinator->safe_state.enter(coordinator->safe_state.context)) {
+        coordinator->runtime.failure = TASK_FAILURE_SAFE_STATE_FAILED;
+    }
+}
+
+static void finish_succeeded(TaskCoordinator *coordinator) {
+    coordinator->runtime.step_status = TASK_STEP_SUCCEEDED;
+    if (!coordinator->safe_state.enter(coordinator->safe_state.context)) {
+        coordinator->runtime.status = TASK_STATUS_FAILED;
+        coordinator->runtime.failure = TASK_FAILURE_SAFE_STATE_FAILED;
+        return;
+    }
+    coordinator->runtime.status = TASK_STATUS_SUCCEEDED;
+    coordinator->runtime.failure = TASK_FAILURE_NONE;
 }
 
 // Validates dependencies and creates one idle authoritative task runtime.
 bool task_coordinator_init(TaskCoordinator *coordinator,
                            const TaskCoordinatorConfig *config,
                            const TaskActionExecutor *drivetrain_executor,
-                           const TaskActionExecutor *arm_executor) {
+                           const TaskActionExecutor *top_executor,
+                           const TaskSafeStateHandler *safe_state) {
     if (coordinator == NULL || config == NULL ||
         config->step_timeout_ms == 0U ||
         !executor_is_valid(drivetrain_executor) ||
-        !executor_is_valid(arm_executor)) {
+        !executor_is_valid(top_executor) || safe_state == NULL ||
+        safe_state->enter == NULL) {
         return false;
     }
     memset(coordinator, 0, sizeof(*coordinator));
     coordinator->config = *config;
     coordinator->executors[TASK_OWNER_DRIVETRAIN] = *drivetrain_executor;
-    coordinator->executors[TASK_OWNER_ARM] = *arm_executor;
+    coordinator->executors[TASK_OWNER_TOP] = *top_executor;
+    coordinator->safe_state = *safe_state;
     coordinator->runtime.status = TASK_STATUS_IDLE;
     coordinator->runtime.step_status = TASK_STEP_NOT_STARTED;
     return true;
@@ -246,8 +247,7 @@ void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms) {
             const uint8_t next_step =
                 (uint8_t)(coordinator->runtime.current_step + 1U);
             if (next_step >= workflow.count) {
-                coordinator->runtime.status = TASK_STATUS_SUCCEEDED;
-                coordinator->runtime.failure = TASK_FAILURE_NONE;
+                finish_succeeded(coordinator);
                 return;
             }
             coordinator->runtime.current_step = next_step;
@@ -261,6 +261,10 @@ void task_coordinator_update(TaskCoordinator *coordinator, uint32_t now_ms) {
             coordinator->runtime.step_status = TASK_STEP_CANCELLED;
             coordinator->runtime.status = TASK_STATUS_CANCELLED;
             coordinator->runtime.failure = TASK_FAILURE_NONE;
+            if (!coordinator->safe_state.enter(coordinator->safe_state.context)) {
+                coordinator->runtime.status = TASK_STATUS_FAILED;
+                coordinator->runtime.failure = TASK_FAILURE_SAFE_STATE_FAILED;
+            }
             return;
         default:
             finish_failed(coordinator, TASK_FAILURE_PROTOCOL, now_ms, true);
@@ -279,6 +283,10 @@ bool task_coordinator_cancel(TaskCoordinator *coordinator, uint32_t now_ms) {
     coordinator->runtime.step_status = TASK_STEP_CANCELLED;
     coordinator->runtime.status = TASK_STATUS_CANCELLED;
     coordinator->runtime.failure = TASK_FAILURE_NONE;
+    if (!coordinator->safe_state.enter(coordinator->safe_state.context)) {
+        coordinator->runtime.status = TASK_STATUS_FAILED;
+        coordinator->runtime.failure = TASK_FAILURE_SAFE_STATE_FAILED;
+    }
     return true;
 }
 

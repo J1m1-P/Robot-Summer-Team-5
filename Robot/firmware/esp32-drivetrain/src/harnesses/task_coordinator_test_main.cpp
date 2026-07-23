@@ -4,18 +4,24 @@
 #include "esp_random.h"
 
 #include <robot_common/packet_router.h>
+#include <robot_common/task/task_link_client.h>
 #include <robot_common/uart_link.h>
 
-#include "communication/arm_task_client.h"
 #include "config/communication/task_link_config.h"
 #include "config/communication/uart_link_config.h"
 #include "task/task_coordinator.h"
+
+#ifdef SYSTEM_TEST_BUILD
+#include "system_test_mode.h"
+#define setup task_coordinator_test_setup
+#define loop task_coordinator_test_loop
+#endif
 
 namespace {
 
 UartLink arm_uart = {};
 PacketRouter router = {};
-ArmTaskClient arm_client = {};
+TaskLinkClient top_client = {};
 TaskActionResult drive_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
 TaskCoordinator coordinator = {};
 String input_line;
@@ -26,8 +32,9 @@ uint32_t next_execution_id = 1;
 
 bool drive_start(void *, const TaskStepCommand *command, uint32_t) {
     if (command == nullptr || drive_result.status == TASK_STEP_RUNNING ||
-        command->action == TASK_ACTION_PICK_UP_BLOCK ||
-        command->action == TASK_ACTION_BUILD_TOWER) return false;
+        (command->action != TASK_ACTION_FOLLOW_TAPE &&
+         command->action != TASK_ACTION_ALIGN_TO_PIECES &&
+         command->action != TASK_ACTION_ALIGN_TO_TAPE)) return false;
     drive_result = {TASK_STEP_RUNNING, TASK_FAILURE_NONE};
     return true;
 }
@@ -37,7 +44,7 @@ void drive_cancel(void *, uint32_t) {
 }
 
 const char *task_name(TaskType value) {
-    static const char *names[] = {"tape", "picking", "building", "routine"};
+    static const char *names[] = {"tape", "picking", "building", "scan"};
     return value < TASK_TYPE_COUNT ? names[value] : "unknown";
 }
 
@@ -54,7 +61,9 @@ const char *step_status_name(TaskStepStatus value) {
 const char *failure_name(TaskFailure value) {
     static const char *names[] = {"none", "busy", "invalid_step", "step_rejected",
                                   "step_failed", "step_timeout", "link_timeout",
-                                  "peer_reset", "stale_message", "protocol"};
+                                  "peer_reset", "stale_message", "protocol",
+                                  "not_implemented", "safe_state_failed",
+                                  "executor_unavailable", "target_not_found"};
     return value < TASK_FAILURE_COUNT ? names[value] : "unknown";
 }
 
@@ -71,17 +80,17 @@ void print_state(const char *event) {
         event, (unsigned long)millis(), ready ? "true" : "false", task_name(r.request.type),
         (unsigned long)r.execution_id, r.current_step, task_status_name(r.status),
         step_status_name(r.step_status), failure_name(r.failure),
-        (unsigned long)arm_client.arm_session_id,
-        (unsigned long)arm_client.coordinator_session_id,
-        arm_client.command_active ? "true" : "false",
-        arm_client.cancel_pending ? "true" : "false",
+        (unsigned long)top_client.executor_session_id,
+        (unsigned long)top_client.requester_session_id,
+        top_client.command_active ? "true" : "false",
+        top_client.cancel_pending ? "true" : "false",
         (unsigned long)arm_uart.packets_sent, (unsigned long)arm_uart.packets_received,
         (unsigned long)arm_uart.checksum_errors, (unsigned long)arm_uart.parse_errors,
         (unsigned long)arm_uart.packets_dropped, (unsigned long)router.packets_routed,
         (unsigned long)router.packets_unhandled,
-        (unsigned long)arm_client.diagnostics.retry_count,
-        (unsigned long)arm_client.diagnostics.stale_status_count,
-        (unsigned long)arm_client.diagnostics.protocol_error_count);
+        (unsigned long)top_client.diagnostics.retry_count,
+        (unsigned long)top_client.diagnostics.stale_status_count,
+        (unsigned long)top_client.diagnostics.protocol_error_count);
 }
 
 void reply(const char *level, const String &message) {
@@ -93,9 +102,66 @@ bool parse_task(const String &name, TaskType &type) {
     if (name == "tape") type = TASK_TYPE_TAPE_FOLLOWING;
     else if (name == "picking") type = TASK_TYPE_TOWER_PICKING;
     else if (name == "building") type = TASK_TYPE_TOWER_BUILDING;
-    else if (name == "routine") type = TASK_TYPE_TOWER_ROUTINE;
+    else if (name == "scan") type = TASK_TYPE_TELETUBBY_SCAN;
     else return false;
     return true;
+}
+
+bool enter_test_safe_state(void *) { return true; }
+
+void clear_link_runtime() {
+    if (arm_uart.config != nullptr) {
+        (void)uart_flush_input(arm_uart.config->uart_num);
+    }
+    arm_uart.parser = {};
+    arm_uart.packet_queue_head = 0U;
+    arm_uart.packet_queue_tail = 0U;
+    arm_uart.packet_queue_count = 0U;
+    arm_uart.packets_sent = 0U;
+    arm_uart.packets_received = 0U;
+    arm_uart.packets_dropped = 0U;
+    arm_uart.checksum_errors = 0U;
+    arm_uart.parse_errors = 0U;
+}
+
+bool initialize_task_runtime() {
+    const uint32_t session = esp_random() ?: 1U;
+    clear_link_runtime();
+    if (!task_link_client_init(&top_client, &arm_uart, session,
+                               &TOP_TASK_CLIENT_CONFIG)) return false;
+    if (!packet_router_init(&router, &arm_uart) ||
+        !packet_router_set_handler(&router, PACKET_TYPE_TASK_STATUS,
+                                   task_link_client_process_packet, &top_client) ||
+        !packet_router_set_handler(&router, PACKET_TYPE_HEARTBEAT,
+                                   task_link_client_process_packet, &top_client)) {
+        return false;
+    }
+    drive_result = {TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
+    const TaskActionExecutor drive = {
+        .context = nullptr,
+        .start = drive_start,
+        .update = drive_update,
+        .cancel = drive_cancel,
+    };
+    const TaskActionExecutor top = task_link_client_executor(&top_client);
+    const TaskSafeStateHandler safe_state = {
+        .context = nullptr,
+        .enter = enter_test_safe_state,
+    };
+    return task_coordinator_init(&coordinator, &TASK_COORDINATOR_CONFIG, &drive,
+                                 &top, &safe_state);
+}
+
+void reset_harness() {
+    if (coordinator.runtime.status == TASK_STATUS_RUNNING) {
+        (void)task_coordinator_cancel(&coordinator, millis());
+    }
+    ready = false;
+    ready = initialize_task_runtime();
+    reply(ready ? "ok" : "error",
+          ready ? "coordinator and link state reset"
+                : "coordinator reset failed");
+    print_state("reset");
 }
 
 void start_task(String args) {
@@ -105,19 +171,14 @@ void start_task(String args) {
     String values = split < 0 ? "" : args.substring(split + 1);
     TaskType type;
     if (!parse_task(name, type)) {
-        reply("error", "usage: start tape|picking|building|routine [speed distance speed distance]");
+        reply("error", "usage: start tape|picking|building|scan [speed distance]");
         return;
     }
 
     TaskRequest request = {};
     request.type = type;
     request.params.tape_following = {TAPE_DIRECTION_FORWARD, 0.20f, 1.0f};
-    if (type == TASK_TYPE_TOWER_ROUTINE) {
-        float s1 = 0.20f, d1 = 1.0f, s2 = 0.20f, d2 = 1.0f;
-        if (values.length()) sscanf(values.c_str(), "%f %f %f %f", &s1, &d1, &s2, &d2);
-        request.params.tower_routine.tape_to_pieces = {TAPE_DIRECTION_FORWARD, s1, d1};
-        request.params.tower_routine.tape_to_base = {TAPE_DIRECTION_FORWARD, s2, d2};
-    } else if (type == TASK_TYPE_TAPE_FOLLOWING && values.length()) {
+    if (type == TASK_TYPE_TAPE_FOLLOWING && values.length()) {
         float speed = 0.20f, distance = 1.0f;
         sscanf(values.c_str(), "%f %f", &speed, &distance);
         request.params.tape_following = {TAPE_DIRECTION_FORWARD, speed, distance};
@@ -133,6 +194,9 @@ void start_task(String args) {
 void handle_command(String line) {
     line.trim();
     if (!line.length()) return;
+#ifdef SYSTEM_TEST_BUILD
+    if (system_test_handle_mode_command(line)) return;
+#endif
     if (line == "status") print_state("state");
     else if (line.startsWith("start ")) start_task(line.substring(6));
     else if (line == "drive succeed") {
@@ -146,11 +210,13 @@ void handle_command(String line) {
     } else if (line == "cancel") {
         reply(task_coordinator_cancel(&coordinator, millis()) ? "ok" : "error",
               "task cancel requested");
+    } else if (line == "reset" || line == "restart") {
+        reset_harness();
     } else if (line == "stream on" || line == "stream off") {
         stream_enabled = line.endsWith("on");
         reply("ok", stream_enabled ? "telemetry enabled" : "telemetry disabled");
     } else if (line == "help") {
-        reply("ok", "start <tape|picking|building|routine>, drive succeed, drive fail, cancel, status, stream on|off");
+        reply("ok", "start <tape|picking|building|scan>, drive succeed, drive fail, cancel, reset, status, stream on|off");
     } else reply("error", "unknown command; send help");
 }
 
@@ -167,16 +233,9 @@ void read_usb() {
 void setup() {
     Serial.begin(115200);
     delay(300);
-    const uint32_t session = esp_random() ?: 1U;
     if (uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG) != ESP_OK) return;
-    if (!arm_task_client_init(&arm_client, &arm_uart, session, &ARM_TASK_CLIENT_CONFIG)) return;
-    if (!packet_router_init(&router, &arm_uart) ||
-        !packet_router_set_handler(&router, PACKET_TYPE_TASK_STATUS, arm_task_client_process_packet, &arm_client) ||
-        !packet_router_set_handler(&router, PACKET_TYPE_HEARTBEAT, arm_task_client_process_packet, &arm_client)) return;
-    const TaskActionExecutor drive = {nullptr, drive_start, drive_update, drive_cancel};
-    const TaskActionExecutor arm = arm_task_client_executor(&arm_client);
-    if (!task_coordinator_init(&coordinator, &TASK_COORDINATOR_CONFIG, &drive, &arm)) return;
-    ready = true;
+    ready = initialize_task_runtime();
+    if (!ready) return;
     reply("ok", "task coordinator harness ready");
     print_state("boot");
 }
@@ -185,10 +244,12 @@ void loop() {
     read_usb();
     if (!ready) { delay(20); return; }
     const uint32_t now = millis();
-    if (packet_router_update(&router, now) != ESP_OK) arm_task_client_handle_link_error(&arm_client);
-    arm_task_client_update(&arm_client, now);
+    if (packet_router_update(&router, now) != ESP_OK) {
+        task_link_client_handle_link_error(&top_client);
+    }
+    task_link_client_update(&top_client, now);
     TaskFailure failure = TASK_FAILURE_NONE;
-    if (arm_task_client_take_peer_failure(&arm_client, &failure)) {
+    if (task_link_client_take_peer_failure(&top_client, &failure)) {
         (void)task_coordinator_fail(&coordinator, failure, now);
         print_state("peer_failure");
     }

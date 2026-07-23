@@ -6,9 +6,9 @@
 
 #include <robot_common/app_log.h>
 #include <robot_common/packet_router.h>
+#include <robot_common/task/task_link_client.h>
 #include <robot_common/uart_link.h>
 
-#include "communication/arm_task_client.h"
 #include "config/communication/task_link_config.h"
 #include "config/communication/uart_link_config.h"
 #include "config/drivetrain/drivetrain_config.h"
@@ -22,7 +22,7 @@ static Drivetrain drivetrain = {};
 static DrivetrainManager drivetrain_manager = {};
 static UartLink arm_uart = {};
 static PacketRouter arm_packet_router = {};
-static ArmTaskClient arm_client = {};
+static TaskLinkClient top_client = {};
 static TaskCoordinator task_coordinator = {};
 static bool application_ready = false;
 static bool production_task_started = false;
@@ -31,6 +31,13 @@ static uint32_t ready_since_ms = 0;
 static uint32_t new_session_id() {
     uint32_t value = esp_random();
     return value == 0U ? 1U : value;
+}
+
+static bool enter_safe_drivetrain_state(void *context) {
+    Drivetrain *safe_drivetrain = static_cast<Drivetrain *>(context);
+    if (drivetrain_brake(safe_drivetrain) != ESP_OK) return false;
+    return !safe_drivetrain->status.enabled &&
+           safe_drivetrain->status.brake_engaged;
 }
 
 void setup() {
@@ -59,26 +66,31 @@ void setup() {
                                   &BACK_TAPE_SENSOR_CONFIG,
                                   &LEFT_TAPE_SENSOR_CONFIG,
                                   &TAPE_FOLLOWER_CONFIG);
-    if (!arm_task_client_init(&arm_client, &arm_uart, new_session_id(),
-                              &ARM_TASK_CLIENT_CONFIG)) {
-        APP_LOGE(LOG_TAG_UART, "Arm task client initialization failed");
+    if (!task_link_client_init(&top_client, &arm_uart, new_session_id(),
+                               &TOP_TASK_CLIENT_CONFIG)) {
+        APP_LOGE(LOG_TAG_UART, "Top task client initialization failed");
         return;
     }
     if (!packet_router_init(&arm_packet_router, &arm_uart) ||
         !packet_router_set_handler(&arm_packet_router, PACKET_TYPE_TASK_STATUS,
-                                   arm_task_client_process_packet, &arm_client) ||
+                                   task_link_client_process_packet, &top_client) ||
         !packet_router_set_handler(&arm_packet_router, PACKET_TYPE_HEARTBEAT,
-                                   arm_task_client_process_packet, &arm_client)) {
+                                   task_link_client_process_packet, &top_client)) {
         APP_LOGE(LOG_TAG_UART, "Arm UART packet routing initialization failed");
         return;
     }
 
     const TaskActionExecutor drivetrain_executor =
         drivetrain_manager_executor(&drivetrain_manager);
-    const TaskActionExecutor arm_executor =
-        arm_task_client_executor(&arm_client);
+    const TaskActionExecutor top_executor =
+        task_link_client_executor(&top_client);
+    const TaskSafeStateHandler safe_state = {
+        .context = &drivetrain,
+        .enter = enter_safe_drivetrain_state,
+    };
     if (!task_coordinator_init(&task_coordinator, &TASK_COORDINATOR_CONFIG,
-                               &drivetrain_executor, &arm_executor)) {
+                               &drivetrain_executor, &top_executor,
+                               &safe_state)) {
         APP_LOGE(LOG_TAG_DRIVETRAIN, "Task coordinator initialization failed");
         return;
     }
@@ -107,12 +119,12 @@ void loop() {
     }
 
     if (packet_router_update(&arm_packet_router, now_ms) != ESP_OK) {
-        arm_task_client_handle_link_error(&arm_client);
+        task_link_client_handle_link_error(&top_client);
     }
-    arm_task_client_update(&arm_client, now_ms);
+    task_link_client_update(&top_client, now_ms);
 
     TaskFailure peer_failure = TASK_FAILURE_NONE;
-    if (arm_task_client_take_peer_failure(&arm_client, &peer_failure)) {
+    if (task_link_client_take_peer_failure(&top_client, &peer_failure)) {
         (void)task_coordinator_fail(&task_coordinator, peer_failure, now_ms);
     }
 

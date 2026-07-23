@@ -6,8 +6,10 @@
 #include "control/drivetrain/drivetrain.h"
 #include "control/drivetrain/odometry.h"
 #include "control/tape_following/tape_follower.h"
+#include "control/tape_following/tape_following_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
-#include "task/task_action_executor.h"
+#include "sensing/tape_following/tape_line_estimator.h"
+#include <robot_common/task/task_action_executor.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,10 +20,8 @@ typedef struct {
     TaskActionResult result;
     TaskAction active_action;
 
-    // Tape-following hardware and behavior state. TASK_ACTION_FOLLOW_TAPE is
-    // the only action currently driven end-to-end; ALIGN_* actions are
-    // accepted (so workflow sequencing doesn't stall) but still only flip
-    // logical status until their own physical behavior is implemented.
+    // Shared tape hardware used for route following and the two tower-picking
+    // alignment actions.
     TapeSensorMux tape_mux;
     TapeSensor tape_sensor_front;
     TapeSensor tape_sensor_back;
@@ -36,6 +36,11 @@ typedef struct {
     uint32_t last_update_ms;
     float signed_travel_speed_mps;
     float target_distance_m;
+
+    TapeFollowerSensor align_sensor;
+    TapeLineEstimatorState align_estimator_state;
+    TapeFollowingControllerState align_controller_state;
+    uint8_t align_stable_samples;
 } DrivetrainManager;
 
 // Initializes tape-following hardware once and prepares an idle manager.

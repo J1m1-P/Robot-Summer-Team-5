@@ -12,13 +12,13 @@ static const float kTwoPi = 6.283185307179586f;
 // Floors the control-loop dt so a scheduling stall or repeated now_ms cannot
 // produce a zero or negative dt into the tape follower.
 static const float kMinControlDtS = 0.0005f;
+static const uint8_t kAlignStableSamples = 3U;
 
 // Keeps physical drivetrain actions from being accepted by the arm-side executor.
 static bool action_is_drivetrain_owned(TaskAction action) {
     return action == TASK_ACTION_FOLLOW_TAPE ||
            action == TASK_ACTION_ALIGN_TO_PIECES ||
-           action == TASK_ACTION_ALIGN_TO_TAPE ||
-           action == TASK_ACTION_ALIGN_TO_BASE;
+           action == TASK_ACTION_ALIGN_TO_TAPE;
 }
 
 static void capture_encoder_counts(DrivetrainManager *manager,
@@ -70,7 +70,7 @@ static esp_err_t integrate_odometry_step(DrivetrainManager *manager) {
 
 static TaskActionResult fail_follow_tape(DrivetrainManager *manager,
                                          TaskFailure failure) {
-    (void)drivetrain_stop(manager->drivetrain);
+    (void)drivetrain_brake(manager->drivetrain);
     manager->result.status = TASK_STEP_FAILED;
     manager->result.failure = failure;
     return manager->result;
@@ -121,6 +121,60 @@ static TaskActionResult update_follow_tape(DrivetrainManager *manager,
     return manager->result;
 }
 
+// Strafes until the selected guidance module reports the centered 0110
+// pattern for several consecutive samples. The pieces alignment uses the
+// front module; returning to the main route uses the back module.
+static TaskActionResult update_tape_alignment(DrivetrainManager *manager,
+                                              uint32_t now_ms) {
+    const float dt_s = fmaxf(
+        kMinControlDtS, (float)(now_ms - manager->last_update_ms) / 1000.0f);
+    manager->last_update_ms = now_ms;
+
+    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT] = {
+        &manager->tape_sensor_front, &manager->tape_sensor_back,
+        &manager->tape_sensor_left,
+    };
+    if (tape_sensor_driver_read_all(sensors) != ESP_OK) {
+        return fail_follow_tape(manager, TASK_FAILURE_STEP_FAILED);
+    }
+
+    const TapeSensor *sensor =
+        manager->align_sensor == TAPE_FOLLOWER_FRONT
+            ? &manager->tape_sensor_front
+            : &manager->tape_sensor_back;
+    const bool centered = !sensor->channel_0 && sensor->channel_1 &&
+                          sensor->channel_2 && !sensor->channel_3;
+    if (centered) {
+        (void)drivetrain_set_body_velocity(manager->drivetrain, 0.0f, 0.0f,
+                                           0.0f);
+        manager->align_stable_samples++;
+        if (manager->align_stable_samples >= kAlignStableSamples) {
+            (void)drivetrain_stop(manager->drivetrain);
+            manager->result.status = TASK_STEP_SUCCEEDED;
+            manager->result.failure = TASK_FAILURE_NONE;
+        }
+        return manager->result;
+    }
+    manager->align_stable_samples = 0U;
+
+    const TapeLineEstimatorConfig *estimator =
+        manager->tape_follower.config->estimators[manager->align_sensor];
+    float line_error = 0.0f;
+    if (!tape_line_estimator_compute_error(
+            sensor, estimator, &manager->align_estimator_state, &line_error)) {
+        return fail_follow_tape(manager, TASK_FAILURE_STEP_FAILED);
+    }
+
+    const float correction = tape_following_controller_update(
+        &manager->align_controller_state,
+        &manager->tape_follower.config->controller, line_error, dt_s);
+    if (drivetrain_set_body_velocity(manager->drivetrain, 0.0f, correction,
+                                     0.0f) != ESP_OK) {
+        return fail_follow_tape(manager, TASK_FAILURE_STEP_FAILED);
+    }
+    return manager->result;
+}
+
 // Accepts one drivetrain-owned action when no action is already running.
 static bool manager_start(void *context, const TaskStepCommand *command,
                           uint32_t now_ms) {
@@ -132,9 +186,15 @@ static bool manager_start(void *context, const TaskStepCommand *command,
     }
 
     const bool is_follow_tape = command->action == TASK_ACTION_FOLLOW_TAPE;
+    const bool is_alignment =
+        command->action == TASK_ACTION_ALIGN_TO_PIECES ||
+        command->action == TASK_ACTION_ALIGN_TO_TAPE;
     const TapeFollowingTaskParams *params = &command->tape_following;
+    if ((is_follow_tape || is_alignment) && !manager->tape_hardware_ready) {
+        return false;
+    }
     if (is_follow_tape &&
-        (!manager->tape_hardware_ready || !isfinite(params->speed_mps) ||
+        (!isfinite(params->speed_mps) ||
          params->speed_mps <= 0.0f || !isfinite(params->distance_m) ||
          params->distance_m <= 0.0f)) {
         return false;
@@ -160,6 +220,16 @@ static bool manager_start(void *context, const TaskStepCommand *command,
         manager->signed_travel_speed_mps =
             params->direction == TAPE_DIRECTION_FORWARD ? params->speed_mps
                                                          : -params->speed_mps;
+    } else if (is_alignment) {
+        manager->align_sensor =
+            command->action == TASK_ACTION_ALIGN_TO_PIECES
+                ? TAPE_FOLLOWER_FRONT
+                : TAPE_FOLLOWER_BACK;
+        tape_line_estimator_reset(&manager->align_estimator_state);
+        (void)tape_following_controller_reset(
+            &manager->align_controller_state);
+        manager->align_stable_samples = 0U;
+        manager->last_update_ms = now_ms;
     }
 
     manager->result.status = TASK_STEP_RUNNING;
@@ -179,6 +249,11 @@ static TaskActionResult manager_update(void *context, uint32_t now_ms) {
     if (manager->result.status == TASK_STEP_RUNNING &&
         manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
         return update_follow_tape(manager, now_ms);
+    }
+    if (manager->result.status == TASK_STEP_RUNNING &&
+        (manager->active_action == TASK_ACTION_ALIGN_TO_PIECES ||
+         manager->active_action == TASK_ACTION_ALIGN_TO_TAPE)) {
+        return update_tape_alignment(manager, now_ms);
     }
     return manager->result;
 }

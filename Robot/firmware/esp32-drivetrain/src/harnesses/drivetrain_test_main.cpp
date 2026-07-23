@@ -11,6 +11,12 @@
 #include "control/tape_following/tape_following_controller.h"
 #include "sensing/tape_following/tape_line_estimator.h"
 
+#ifdef SYSTEM_TEST_BUILD
+#include "system_test_mode.h"
+#define setup drivetrain_test_setup
+#define loop drivetrain_test_loop
+#endif
+
 namespace {
 
 constexpr float kDefaultPairDuty = 0.25f;
@@ -761,6 +767,9 @@ void start_sequence(float speed, uint32_t duration_ms) {
 
 void process_command(String line) {
     line.trim();
+#ifdef SYSTEM_TEST_BUILD
+    if (system_test_handle_mode_command(line)) return;
+#endif
     line.toLowerCase();
     if (line.length() == 0) return;
 
