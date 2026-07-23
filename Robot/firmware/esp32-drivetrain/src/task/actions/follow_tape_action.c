@@ -48,7 +48,15 @@ static esp_err_t integrate_odometry_step(FollowTapeAction *action) {
         .lateral_mm = body_delta.vy * 1000.0f,
         .heading_delta_rad = body_delta.omega,
     };
-    return drivetrain_odometry_update(&action->odometry, &delta, true);
+    const esp_err_t odometry_error =
+        drivetrain_odometry_update(&action->odometry, &delta, true);
+    if (odometry_error != ESP_OK) return odometry_error;
+
+    // Accumulate path length rather than start-to-current displacement so
+    // bends in the tape count toward the requested travel distance.
+    action->traveled_distance_m +=
+        hypotf(delta.forward_mm, delta.lateral_mm) / 1000.0f;
+    return ESP_OK;
 }
 
 static TaskActionResult fail(FollowTapeAction *action, TaskFailure failure) {
@@ -98,6 +106,7 @@ bool follow_tape_action_start(FollowTapeAction *action,
     capture_encoder_counts(action, action->last_encoder_counts);
     action->last_update_ms = now_ms;
     action->target_distance_m = params->distance_m;
+    action->traveled_distance_m = 0.0f;
     action->signed_travel_speed_mps =
         params->direction == TAPE_DIRECTION_FORWARD ? params->speed_mps
                                                      : -params->speed_mps;
@@ -144,10 +153,7 @@ TaskActionResult follow_tape_action_update(FollowTapeAction *action,
         return fail(action, TASK_FAILURE_STEP_FAILED);
     }
 
-    const float traveled_m =
-        hypotf(action->odometry.pose.x_mm, action->odometry.pose.y_mm) /
-        1000.0f;
-    if (traveled_m >= action->target_distance_m) {
+    if (action->traveled_distance_m >= action->target_distance_m) {
         (void)drivetrain_stop(action->drivetrain);
         action->result =
             (TaskActionResult){TASK_STEP_SUCCEEDED, TASK_FAILURE_NONE};

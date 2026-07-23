@@ -9,6 +9,6 @@ const TaskRequest PRODUCTION_TASK_REQUEST = {
     .params.tape_following = {
         .direction = TAPE_DIRECTION_FORWARD,
         .speed_mps = 0.1f,
-        .distance_m = 3.0f,
+        .distance_m = PRODUCTION_TAPE_FOLLOW_DISTANCE_M,
     },
 };

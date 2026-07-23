@@ -26,6 +26,7 @@ typedef struct {
     uint32_t last_update_ms;
     float signed_travel_speed_mps;
     float target_distance_m;
+    float traveled_distance_m;
 } FollowTapeAction;
 
 void follow_tape_action_init(FollowTapeAction *action, Drivetrain *drivetrain,
