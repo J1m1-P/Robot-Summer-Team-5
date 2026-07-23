@@ -9,6 +9,12 @@
 #include "esp_err.h"
 #include <robot_common/i2c_bus.h>
 
+#ifdef SYSTEM_TEST_BUILD
+#include "system_test_mode.h"
+#define setup arm_tof_test_setup
+#define loop arm_tof_test_loop
+#endif
+
 static I2cBus bus = {};
 static VL53L0X sensors[ARM_TOF_COUNT] = {};
 static uint8_t next_step = 0U;
@@ -207,6 +213,9 @@ static void stop_ranging()
 
 static void handle_command(const String &line)
 {
+#ifdef SYSTEM_TEST_BUILD
+    if (system_test_handle_mode_command(line)) return;
+#endif
     if (line.startsWith("step ")) {
         const long requested_step = line.substring(5).toInt();
         if (requested_step < 0L || requested_step != next_step) {

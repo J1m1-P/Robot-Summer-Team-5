@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wheel PI Tuning Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --motor-1:        #2a78d6; /* M1 */
+    --motor-2:        #008300; /* M2 */
+    --motor-3:        #4a3aa7; /* M3 */
+    --motor-4:        #e34948; /* M4 */
+    --target-line:    #52514e; /* shared target setpoint, not motor-specific */
+    --danger:         #d03b3b;
+    --frozen:         #b8860b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --motor-1:        #3987e5;
+      --motor-2:        #008300;
+      --motor-3:        #9085e9;
+      --motor-4:        #e66767;
+      --target-line:    #c3c2b7;
+      --danger:         #e66767;
+      --frozen:         #e0b04a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --motor-1:        #3987e5;
+    --motor-2:        #008300;
+    --motor-3:        #9085e9;
+    --motor-4:        #e66767;
+    --target-line:    #c3c2b7;
+    --danger:         #e66767;
+    --frozen:         #e0b04a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  .viz-root { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
+
+  h1 { font-size: 17px; margin: 0 0 3px; }
+  .subtitle { color: var(--text-secondary); font-size: 12px; margin: 0 0 16px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+  }
+  button {
+    font: inherit; font-size: 13px; font-weight: 600;
+    padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); cursor: pointer;
+  }
+  button.primary { background: var(--motor-1); color: #fff; border-color: transparent; }
+  button.active { background: var(--danger); color: #fff; border-color: transparent; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #status { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
+  #status.connected { color: var(--motor-2); font-weight: 600; }
+  #status.error { color: var(--danger); font-weight: 600; }
+
+  .session-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+
+  .motor-toggles { display: flex; gap: 8px; }
+  .motor-toggle {
+    font: inherit; font-size: 13px; font-weight: 700;
+    padding: 6px 11px; border-radius: 7px; border: 2px solid var(--border);
+    background: var(--page); color: var(--text-secondary); cursor: pointer;
+  }
+  .motor-toggle.on { color: #fff; border-color: transparent; }
+  .motor-toggle[data-motor="1"].on { background: var(--motor-1); }
+  .motor-toggle[data-motor="2"].on { background: var(--motor-2); }
+  .motor-toggle[data-motor="3"].on { background: var(--motor-3); }
+  .motor-toggle[data-motor="4"].on { background: var(--motor-4); }
+
+  .controls {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; margin-bottom: 10px;
+  }
+  .gain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  .control label {
+    display: block; font-size: 11px; color: var(--text-secondary);
+    margin-bottom: 3px; font-weight: 600;
+  }
+  .control .row { display: flex; gap: 6px; }
+  .control input {
+    font: inherit; font-size: 13px; width: 100%; padding: 5px 7px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary);
+  }
+
+  .chart-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 12px 6px; margin-bottom: 12px;
+  }
+  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; gap: 10px; }
+  .chart-title { font-size: 12px; font-weight: 700; }
+  .legend { display: flex; gap: 12px; font-size: 11px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .frozen-badge {
+    font-size: 11px; font-weight: 700; color: var(--frozen); display: none;
+    white-space: nowrap;
+  }
+  .frozen-badge.showing { display: inline; }
+  canvas { display: block; width: 100%; height: 190px; cursor: crosshair; }
+  .tooltip {
+    position: absolute; pointer-events: none; font-size: 11px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; color: var(--text-primary);
+    box-shadow: 0 2px 8px var(--border); display: none; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-wrap { position: relative; }
+  .chart-wrap.frozen canvas { outline: 2px solid var(--frozen); outline-offset: -2px; border-radius: 4px; }
+
+  #log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 10px; height: 90px; overflow-y: auto;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <p style="background:rgba(210,153,34,.15);border:1px solid rgba(210,153,34,.5);border-radius:6px;padding:8px 12px;font-size:13px;margin:0 0 14px">Deprecated -- wheel-PI gains are tuned and locked into config (see docs/TUNING_ROADMAP.md); kept only for re-tuning after a mechanical change.</p>
+  <h1>Wheel PI Tuning Dashboard</h1>
+  <p class="subtitle">Live view of src/harnesses/tuning_main.cpp (platformio.ini's [env:tuning]). Nothing moves until you hit Start — set a mode/setpoint/duration/turn below, then Start runs it and auto-stops. Chrome or Edge only — uses the Web Serial API.</p>
+
+  <div class="toolbar">
+    <button id="connectBtn" class="primary">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <span id="status">Not connected</span>
+  </div>
+
+  <div class="controls">
+    <div class="motor-toggles" style="margin-bottom: 10px;">
+      <button class="motor-toggle on" data-motor="1">M1/E1 (FL)</button>
+      <button class="motor-toggle" data-motor="2">M2/E2 (BL)</button>
+      <button class="motor-toggle" data-motor="3">M3/E3 (FR)</button>
+      <button class="motor-toggle" data-motor="4">M4/E4 (BR)</button>
+    </div>
+    <div class="session-row">
+      <button id="showGainsBtn" title="Prints the board's actual current ff/ffo/kp/ki to the log below -- the fields never auto-sync, so use this to confirm what's really running before hitting Set on an untouched field.">Show current gains</button>
+      <button id="invertBtn" title="Flips the sign of the measured speed reading -- see 'invert' in tuning_main.cpp">Reverse measured direction</button>
+      <button id="modeBtn" title="Duty mode: commands a raw duty directly, bypassing the PI loop -- for characterizing duty->speed. PI mode: commands a target speed through the FF+PI loop -- for gain tuning.">Mode: PI</button>
+      <button id="turnBtn" title="On: FL/BL get the setpoint negated, FR/BR get it as-is, so the wheels drive an in-place rotation instead of a straight line -- and force-enables all four motors on Start.">Turn: off</button>
+    </div>
+    <div class="gain-grid">
+      <div class="control" id="dutyControl" style="display:none;">
+        <label for="duty">Duty (open-loop)</label>
+        <div class="row"><input id="duty" type="number" step="0.05" value="0" /><button data-cmd="duty">Set</button></div>
+      </div>
+      <div class="control" id="ffControl">
+        <label for="ff">Feedforward slope (ff)</label>
+        <div class="row"><input id="ff" type="number" step="0.01" value="1.14" /><button data-cmd="ff">Set</button></div>
+      </div>
+      <div class="control" id="ffoControl">
+        <label for="ffo">Feedforward offset (ffo)</label>
+        <div class="row"><input id="ffo" type="number" step="0.001" value="0.069" /><button data-cmd="ffo">Set</button></div>
+      </div>
+      <div class="control" id="kpControl">
+        <label for="kp">Proportional (kp)</label>
+        <div class="row"><input id="kp" type="number" step="0.01" value="0.4" /><button data-cmd="kp">Set</button></div>
+      </div>
+      <div class="control" id="kiControl">
+        <label for="ki">Integral (ki)</label>
+        <div class="row"><input id="ki" type="number" step="0.001" value="0.2" /><button data-cmd="ki">Set</button></div>
+      </div>
+      <div class="control" id="targetControl">
+        <label for="target">Target speed (m/s)</label>
+        <div class="row"><input id="target" type="number" step="0.05" value="1.0" /><button data-cmd="target">Set</button></div>
+      </div>
+      <div class="control">
+        <label for="duration">Run duration (ms)</label>
+        <div class="row"><input id="duration" type="number" step="100" value="3000" /><button data-cmd="duration">Set</button></div>
+      </div>
+      <div class="control" id="jerkControl">
+        <label for="jerk">Max jerk (m/s³)</label>
+        <div class="row"><input id="jerk" type="number" step="0.1" value="1.0" /><button data-cmd="jerk">Set</button></div>
+      </div>
+      <div class="control" id="accelControl">
+        <label for="accel">Max accel (m/s²)</label>
+        <div class="row"><input id="accel" type="number" step="0.1" value="0.5" /><button data-cmd="accel">Set</button></div>
+      </div>
+    </div>
+    <div class="session-row" style="margin-top: 10px;">
+      <button id="startBtn" class="primary">Start</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Velocity — measured per motor, target/duty (see legend)</span>
+      <span class="frozen-badge" id="veloFrozenBadge">⏸ run stopped — frozen</span>
+      <span class="legend" id="veloLegend"></span>
+    </div>
+    <div class="chart-wrap" id="veloChartWrap">
+      <canvas id="veloCanvas"></canvas>
+      <div class="tooltip" id="veloTooltip"></div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Duty cycle per motor</span>
+      <span class="legend" id="dutyLegend"></span>
+    </div>
+    <div class="chart-wrap" id="dutyChartWrap">
+      <canvas id="dutyCanvas"></canvas>
+      <div class="tooltip" id="dutyTooltip"></div>
+    </div>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+(() => {
+  const WINDOW_MS = 20000; // rolling time window shown on the charts
+
+  const state = {
+    port: null, reader: null, writer: null, keepReading: false,
+    // Per-motor sample arrays -- one CSV line per enabled motor per tick,
+    // "millis,motor,target_mps,measured_mps,duty". In Duty mode the
+    // "target_mps" column actually holds the commanded duty, not a speed
+    // (see tuning_main.cpp's header comment) -- same shared-per-run
+    // setpoint either way, just stored per-motor since it arrives on the
+    // same line.
+    samplesByMotor: { 1: [], 2: [], 3: [], 4: [] }, // motor -> [{t, target, measured, duty}]
+    motorEnabled: { 1: true, 2: false, 3: false, 4: false }, // mirrors the firmware's boot default (M1 only)
+    latestT: 0, // newest millis() seen across ALL motors -- drives the rolling-window cutoff
+    rxBuffer: "",
+    inverted: false,
+    dutyMode: false, // mirrors the firmware's "mode duty|pi" -- starts in PI mode
+    turnOn: false,
+    // Data keeps accumulating in the background while frozen -- freezing
+    // only pauses the chart redraw, so unfreezing shows the current state
+    // immediately rather than a stale snapshot. A run auto-stopping is the
+    // natural freeze point: no more CSV lines arrive until the next Start.
+    frozen: false,
+  };
+
+  const statusEl = document.getElementById("status");
+  const connectBtn = document.getElementById("connectBtn");
+  const disconnectBtn = document.getElementById("disconnectBtn");
+  const logEl = document.getElementById("log");
+  const veloChartWrap = document.getElementById("veloChartWrap");
+  const dutyChartWrap = document.getElementById("dutyChartWrap");
+  const veloFrozenBadge = document.getElementById("veloFrozenBadge");
+
+  function log(msg) {
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || "";
+  }
+
+  // --- Web Serial connection ---
+
+  async function connect() {
+    if (!("serial" in navigator)) {
+      setStatus("Web Serial not supported in this browser", "error");
+      log("# This browser doesn't support the Web Serial API. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      state.port = await navigator.serial.requestPort();
+      await state.port.open({ baudRate: 115200 });
+
+      const textDecoder = new TextDecoderStream();
+      state.port.readable.pipeTo(textDecoder.writable);
+      state.reader = textDecoder.readable.getReader();
+
+      const textEncoder = new TextEncoderStream();
+      textEncoder.readable.pipeTo(state.port.writable);
+      state.writer = textEncoder.writable.getWriter();
+
+      state.keepReading = true;
+      setFrozen(false);
+      connectBtn.disabled = true;
+      disconnectBtn.disabled = false;
+      setStatus("Connected", "connected");
+      log("# connected");
+      readLoop();
+    } catch (err) {
+      setStatus("Connection failed", "error");
+      log("# connect error: " + err.message);
+    }
+  }
+
+  async function disconnect() {
+    state.keepReading = false;
+    try {
+      if (state.reader) { await state.reader.cancel(); state.reader = null; }
+      if (state.writer) { await state.writer.close(); state.writer = null; }
+      if (state.port) { await state.port.close(); state.port = null; }
+    } catch (err) {
+      log("# disconnect error: " + err.message);
+    }
+    connectBtn.disabled = false;
+    disconnectBtn.disabled = true;
+    setStatus("Not connected", "");
+    log("# disconnected");
+  }
+
+  async function readLoop() {
+    while (state.keepReading) {
+      let chunk;
+      try {
+        const { value, done } = await state.reader.read();
+        if (done) break;
+        chunk = value;
+      } catch (err) {
+        log("# read error: " + err.message);
+        break;
+      }
+      state.rxBuffer += chunk;
+      let idx;
+      while ((idx = state.rxBuffer.indexOf("\n")) >= 0) {
+        const line = state.rxBuffer.slice(0, idx).trim();
+        state.rxBuffer = state.rxBuffer.slice(idx + 1);
+        if (line.length > 0) handleLine(line);
+      }
+    }
+  }
+
+  // Pauses chart redraws so the last run's settled values stay on screen
+  // instead of scrolling away before they can be read off. Toggled off the
+  // moment any command goes out (see writeLine below), since that's the
+  // natural "I'm done reading, testing something new now" signal.
+  function setFrozen(frozen) {
+    state.frozen = frozen;
+    veloChartWrap.classList.toggle("frozen", frozen);
+    dutyChartWrap.classList.toggle("frozen", frozen);
+    veloFrozenBadge.classList.toggle("showing", frozen);
+  }
+
+  function handleLine(line) {
+    if (line.startsWith("#")) {
+      log(line);
+      // A run auto-stopped or was stopped -- no more CSV lines are coming
+      // until the next Start, so freeze the chart on its last frame
+      // instead of leaving it looking like data just stopped arriving.
+      if (line.startsWith("# run stop")) setFrozen(true);
+      return;
+    }
+    if (line.startsWith("millis")) return; // CSV header
+
+    const parts = line.split(",");
+    if (parts.length !== 5) { log(line); return; }
+
+    const t = Number(parts[0]);
+    const motor = Number(parts[1]);
+    const target = Number(parts[2]);
+    const measured = Number(parts[3]);
+    const duty = Number(parts[4]);
+    if ([t, motor, target, measured, duty].some(Number.isNaN) || !state.samplesByMotor[motor]) {
+      log(line);
+      return;
+    }
+
+    // A large backward jump in millis() means the board rebooted/reflashed
+    // mid-session -- old timestamps are now bigger than anything the new
+    // clock will produce for a long time, so the normal cutoff-based trim
+    // below would never age them out. Start the rolling window over.
+    if (t < state.latestT - 1000) {
+      for (const m of Object.keys(state.samplesByMotor)) state.samplesByMotor[m] = [];
+      log("# board clock reset detected (reboot/reflash) -- charts cleared");
+    }
+    state.latestT = Math.max(state.latestT, t);
+
+    const arr = state.samplesByMotor[motor];
+    arr.push({ t, target, measured, duty });
+
+    // Trim EVERY motor's array against the shared clock, not just the one
+    // that just received a line -- otherwise a motor that stops sending
+    // data (disabled, or simply not the one that happened to arrive this
+    // tick) keeps its last few seconds of samples frozen on the chart
+    // forever instead of rolling out of the window like everything else.
+    const cutoff = state.latestT - WINDOW_MS;
+    for (const m of Object.keys(state.samplesByMotor)) {
+      const a = state.samplesByMotor[m];
+      while (a.length && a[0].t < cutoff) a.shift();
+    }
+
+    if (!state.frozen) drawAll();
+  }
+
+  async function writeLine(line) {
+    if (!state.writer) { log("# not connected"); return; }
+    if (state.frozen) {
+      setFrozen(false);
+      log("# resuming live chart");
+      drawAll(); // catch up to whatever accumulated in the background
+    }
+    await state.writer.write(line);
+  }
+
+  async function sendCommand(key, value) {
+    await writeLine(key + " " + value + "\n");
+  }
+
+  // --- Charts (hand-rolled canvas line charts, one axis each) ---
+
+  const veloCanvas = document.getElementById("veloCanvas");
+  const dutyCanvas = document.getElementById("dutyCanvas");
+  const veloTooltip = document.getElementById("veloTooltip");
+  const dutyTooltip = document.getElementById("dutyTooltip");
+
+  function cssVar(name) {
+    return getComputedStyle(document.querySelector(".viz-root")).getPropertyValue(name).trim();
+  }
+
+  function fitCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, width: rect.width, height: rect.height };
+  }
+
+  function niceRange(values, padFrac) {
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * padFrac;
+    return [lo - pad, hi + pad];
+  }
+
+  // Each series is { points: [{t, value}], color, label, dash? }. Unlike
+  // the single-motor version, series no longer share one samples array --
+  // different motors' points can have different counts/timestamps, so
+  // each series carries its own.
+  function drawChart(canvas, seriesList, opts) {
+    const { ctx, width, height } = fitCanvas(canvas);
+    ctx.clearRect(0, 0, width, height);
+
+    const margin = { top: 8, right: 10, bottom: 18, left: 40 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+
+    const nonEmpty = seriesList.filter(s => s.points.length > 0);
+    if (nonEmpty.length === 0) {
+      ctx.fillStyle = cssVar("--text-muted");
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText("Waiting for data…", margin.left, margin.top + plotH / 2);
+      return null;
+    }
+
+    let tMin = Infinity, tMax = -Infinity;
+    for (const s of nonEmpty) {
+      tMin = Math.min(tMin, s.points[0].t);
+      tMax = Math.max(tMax, s.points[s.points.length - 1].t);
+    }
+
+    const allValues = nonEmpty.flatMap(s => s.points.map(p => p.value));
+    const [yMin, yMax] = opts.fixedRange || niceRange(allValues, 0.15);
+
+    const xOf = t => margin.left + ((t - tMin) / Math.max(1, tMax - tMin)) * plotW;
+    const yOf = v => margin.top + plotH - ((v - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
+
+    // gridlines
+    ctx.strokeStyle = cssVar("--grid");
+    ctx.lineWidth = 1;
+    const gridLines = 4;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = margin.top + (plotH / gridLines) * i;
+      ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
+    }
+
+    // y-axis labels
+    ctx.fillStyle = cssVar("--text-muted");
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= gridLines; i++) {
+      const v = yMax - ((yMax - yMin) / gridLines) * i;
+      const y = margin.top + (plotH / gridLines) * i;
+      ctx.fillText(v.toFixed(2), margin.left - 6, y);
+    }
+
+    // baseline
+    ctx.strokeStyle = cssVar("--baseline");
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top + plotH);
+    ctx.lineTo(margin.left + plotW, margin.top + plotH);
+    ctx.stroke();
+
+    // series lines
+    for (const ser of nonEmpty) {
+      ctx.strokeStyle = ser.color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.setLineDash(ser.dash || []);
+      ctx.beginPath();
+      ser.points.forEach((p, i) => {
+        const x = xOf(p.t), y = yOf(p.value);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    return { margin, plotW, plotH, tMin, tMax, xOf, yOf, seriesList: nonEmpty };
+  }
+
+  function attachCrosshair(canvas, tooltip, getGeom) {
+    canvas.addEventListener("mousemove", (evt) => {
+      const geom = getGeom();
+      if (!geom) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = evt.clientX - rect.left;
+
+      const relX = (mouseX - geom.margin.left) / geom.plotW;
+      if (relX < 0 || relX > 1) { tooltip.style.display = "none"; return; }
+      const targetT = geom.tMin + relX * (geom.tMax - geom.tMin);
+
+      const lines = [];
+      for (const ser of geom.seriesList) {
+        let nearest = ser.points[0], bestDist = Infinity;
+        for (const p of ser.points) {
+          const d = Math.abs(p.t - targetT);
+          if (d < bestDist) { bestDist = d; nearest = p; }
+        }
+        lines.push(ser.label + ": " + nearest.value.toFixed(4));
+      }
+
+      tooltip.innerHTML = "t≈" + Math.round(targetT) + "ms<br>" + lines.join("<br>");
+      tooltip.style.display = "block";
+      tooltip.style.left = Math.min(mouseX + 10, canvas.clientWidth - 140) + "px";
+      tooltip.style.top = "4px";
+    });
+    canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+  }
+
+  let veloGeom = null, dutyGeom = null;
+
+  // Target is shared across all enabled motors (one step/continuous
+  // schedule) -- pull its series from whichever enabled motor has
+  // samples first rather than duplicating it per motor.
+  function buildTargetPoints() {
+    for (let m = 1; m <= 4; m++) {
+      const arr = state.samplesByMotor[m];
+      if (arr.length > 0) return arr.map(s => ({ t: s.t, value: s.target }));
+    }
+    return [];
+  }
+
+  function buildMotorSeries(getter) {
+    const list = [];
+    for (let m = 1; m <= 4; m++) {
+      const arr = state.samplesByMotor[m];
+      if (arr.length === 0) continue;
+      list.push({
+        points: arr.map(s => ({ t: s.t, value: getter(s) })),
+        color: cssVar("--motor-" + m),
+        label: "M" + m,
+      });
+    }
+    return list;
+  }
+
+  function renderLegends() {
+    const veloLegend = document.getElementById("veloLegend");
+    const dutyLegend = document.getElementById("dutyLegend");
+
+    let veloHtml = '<span><span class="swatch" style="background:var(--target-line)"></span>Target (dashed)</span>';
+    let dutyHtml = "";
+    for (let m = 1; m <= 4; m++) {
+      if (!state.motorEnabled[m]) continue;
+      const swatch = '<span class="swatch" style="background:var(--motor-' + m + ')"></span>';
+      veloHtml += "<span>" + swatch + "M" + m + " measured</span>";
+      dutyHtml += "<span>" + swatch + "M" + m + " duty</span>";
+    }
+    veloLegend.innerHTML = veloHtml;
+    dutyLegend.innerHTML = dutyHtml || "<span>No motor enabled</span>";
+  }
+
+  function drawAll() {
+    const veloSeries = [
+      { points: buildTargetPoints(), color: cssVar("--target-line"), label: "Target", dash: [6, 4] },
+      ...buildMotorSeries(s => s.measured),
+    ];
+    veloGeom = drawChart(veloCanvas, veloSeries, {});
+
+    const dutySeries = buildMotorSeries(s => s.duty);
+    dutyGeom = drawChart(dutyCanvas, dutySeries, { fixedRange: [-1, 1] });
+
+    renderLegends();
+  }
+
+  attachCrosshair(veloCanvas, veloTooltip, () => veloGeom);
+  attachCrosshair(dutyCanvas, dutyTooltip, () => dutyGeom);
+
+  window.addEventListener("resize", () => { if (!state.frozen) drawAll(); });
+
+  // --- Wire up UI ---
+
+  connectBtn.addEventListener("click", connect);
+  disconnectBtn.addEventListener("click", disconnect);
+
+  const showGainsBtn = document.getElementById("showGainsBtn");
+  showGainsBtn.addEventListener("click", () => writeLine("show\n"));
+
+  const invertBtn = document.getElementById("invertBtn");
+  invertBtn.addEventListener("click", () => {
+    state.inverted = !state.inverted;
+    invertBtn.classList.toggle("active", state.inverted);
+    invertBtn.textContent = state.inverted ? "Measured direction: reversed" : "Reverse measured direction";
+    sendCommand("invert", state.inverted ? 1 : 0);
+  });
+
+  // Duty mode's fields (raw duty) vs PI mode's fields (ff/ffo/kp/ki/target)
+  // are mutually exclusive -- only show the ones that apply.
+  const dutyControl = document.getElementById("dutyControl");
+  const piControls = [
+    document.getElementById("ffControl"),
+    document.getElementById("ffoControl"),
+    document.getElementById("kpControl"),
+    document.getElementById("kiControl"),
+    document.getElementById("targetControl"),
+    document.getElementById("jerkControl"),
+    document.getElementById("accelControl"),
+  ];
+
+  const modeBtn = document.getElementById("modeBtn");
+  modeBtn.addEventListener("click", () => {
+    state.dutyMode = !state.dutyMode;
+    modeBtn.classList.toggle("active", state.dutyMode);
+    modeBtn.textContent = state.dutyMode ? "Mode: Duty" : "Mode: PI";
+    dutyControl.style.display = state.dutyMode ? "" : "none";
+    piControls.forEach(el => { el.style.display = state.dutyMode ? "none" : ""; });
+    sendCommand("mode", state.dutyMode ? "duty" : "pi");
+  });
+
+  const turnBtn = document.getElementById("turnBtn");
+  turnBtn.addEventListener("click", () => {
+    state.turnOn = !state.turnOn;
+    turnBtn.classList.toggle("active", state.turnOn);
+    turnBtn.textContent = state.turnOn ? "Turn: on" : "Turn: off";
+    sendCommand("turn", state.turnOn ? 1 : 0);
+  });
+
+  const startBtn = document.getElementById("startBtn");
+  startBtn.addEventListener("click", () => writeLine("start\n"));
+
+  const stopBtn = document.getElementById("stopBtn");
+  stopBtn.addEventListener("click", () => writeLine("stop\n"));
+
+  document.querySelectorAll(".motor-toggle").forEach(btn => {
+    const m = Number(btn.getAttribute("data-motor"));
+    btn.addEventListener("click", () => {
+      const nowOn = !state.motorEnabled[m];
+      state.motorEnabled[m] = nowOn;
+      btn.classList.toggle("on", nowOn);
+      // Whether turning on or off, old samples for this motor belong to a
+      // different enable session -- clear them so its line doesn't show a
+      // misleading discontinuity next time it has data.
+      state.samplesByMotor[m] = [];
+      if (!state.frozen) drawAll();
+      sendCommand("motor", m + " " + (nowOn ? 1 : 0));
+    });
+  });
+
+  document.querySelectorAll("button[data-cmd]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-cmd");
+      const input = document.getElementById(key);
+      sendCommand(key, input.value);
+    });
+  });
+
+  drawAll();
+})();
+</script>
+</body>
+</html>

@@ -91,12 +91,12 @@ void test_pure_strafe_exact_values() {
 
     TEST_ASSERT_EQUAL(ESP_OK, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 
-    // sin(30)*1 = 0.5, sign pattern +,-,-,+
+    // sin(30)*1 = 0.5, +y is left: sign pattern -,+,+,-
     XDriveWheelVelocity expected = {};
-    expected.fl = 0.5f;
-    expected.fr = -0.5f;
-    expected.bl = -0.5f;
-    expected.br = 0.5f;
+    expected.fl = -0.5f;
+    expected.fr = 0.5f;
+    expected.bl = 0.5f;
+    expected.br = -0.5f;
     assert_wheels_equal(expected, wheels);
 }
 
@@ -125,10 +125,10 @@ void test_combined_motion_exact_values() {
 
     // cb*vx=0.8660254, sb*vy=0.25, arm*omega=0.01866025
     XDriveWheelVelocity expected = {};
-    expected.fl = 0.8660254f + 0.25f - 0.01866025f;
-    expected.fr = 0.8660254f - 0.25f + 0.01866025f;
-    expected.bl = 0.8660254f - 0.25f - 0.01866025f;
-    expected.br = 0.8660254f + 0.25f + 0.01866025f;
+    expected.fl = 0.8660254f - 0.25f - 0.01866025f;
+    expected.fr = 0.8660254f + 0.25f + 0.01866025f;
+    expected.bl = 0.8660254f + 0.25f - 0.01866025f;
+    expected.br = 0.8660254f - 0.25f + 0.01866025f;
     assert_wheels_equal(expected, wheels);
 }
 
@@ -203,7 +203,7 @@ void test_rejects_non_finite_body_velocity() {
         x_drive_kinematics_body_to_wheel_velocities(cfg, make_body(0.0f, 0.0f, -INFINITY), wheels));
 }
 
-void test_rejects_non_positive_wheel_radius() {
+void test_rejects_invalid_geometry() {
     const auto body = make_body(1.0f, 0.0f, 0.0f);
     XDriveWheelVelocity wheels = {};
 
@@ -211,24 +211,22 @@ void test_rejects_non_positive_wheel_radius() {
         x_drive_kinematics_body_to_wheel_velocities(make_config(0.0f, 0.1f, 0.05f, 30.0f), body, wheels));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
         x_drive_kinematics_body_to_wheel_velocities(make_config(-1.0f, 0.1f, 0.05f, 30.0f), body, wheels));
-}
 
-void test_rejects_non_finite_wheel_radius() {
     auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     cfg.wheel_radius_m = NAN;
-    const auto body = make_body(1.0f, 0.0f, 0.0f);
-    XDriveWheelVelocity wheels = {};
-
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
-}
 
-void test_rejects_non_finite_wheel_angle() {
-    auto cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
+    cfg = make_config(1.0f, 0.1f, 0.05f, 30.0f);
     cfg.wheel_angle_rad = NAN;
-    const auto body = make_body(1.0f, 0.0f, 0.0f);
-    XDriveWheelVelocity wheels = {};
-
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+
+    cfg = make_config(1.0f, -0.1f, 0.05f, 30.0f);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
+
+    cfg = make_config(1.0f, 0.1f, NAN, 30.0f);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
 }
 
 // Confirms the inverse Jacobian recovers a combined body command.
@@ -256,18 +254,6 @@ void test_inverse_rejects_singular_geometry() {
         x_drive_kinematics_wheel_to_body_velocities(&config, &wheels, &body));
 }
 
-void test_rejects_invalid_chassis_dimensions() {
-    const auto body = make_body(1.0f, 0.0f, 0.0f);
-    XDriveWheelVelocity wheels = {};
-    auto cfg = make_config(1.0f, -0.1f, 0.05f, 30.0f);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
-
-    cfg = make_config(1.0f, 0.1f, NAN, 30.0f);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
-        x_drive_kinematics_body_to_wheel_velocities(cfg, body, wheels));
-}
-
 int main(int argc, char **argv) {
     UNITY_BEGIN();
 
@@ -284,10 +270,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_linearity_superposition);
 
     RUN_TEST(test_rejects_non_finite_body_velocity);
-    RUN_TEST(test_rejects_non_positive_wheel_radius);
-    RUN_TEST(test_rejects_non_finite_wheel_radius);
-    RUN_TEST(test_rejects_non_finite_wheel_angle);
-    RUN_TEST(test_rejects_invalid_chassis_dimensions);
+    RUN_TEST(test_rejects_invalid_geometry);
 
     return UNITY_END();
 }

@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robot System Test Console</title>
+<style>
+:root{color-scheme:dark;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace;--bg:#0b0e14;--rail:#0d1119;--card:#141924;--inner:#12161f;--deep:#0b0e14;--raised:#1d2431;--raised2:#242c38;--line:#262e3a;--line2:#2b3444;--text:#e9eef7;--muted:#8b98ac;--dim:#5a6678;--blue:#2f6fdb;--blueb:#4493f8;--green:#3fb950;--greenl:#7ee787;--red:#da3633;--redl:#f85149;--amber:#d29922;--amberl:#e3b341;--purple:#a371f7}
+*{box-sizing:border-box}
+body{margin:0;height:100dvh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+button{min-height:40px;padding:7px 13px;border:1px solid var(--line2);border-radius:8px;background:var(--raised);color:var(--text);font:600 12px system-ui;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--blueb)}button:active:not(:disabled){transform:translateY(1px)}button:disabled{opacity:.35;cursor:not-allowed}
+.primary{background:var(--blue);border-color:var(--blueb);color:#fff}.danger-button{background:var(--red);border-color:var(--redl);color:#fff}.warn{background:rgba(210,153,34,.08);border-color:var(--amber);color:var(--amberl)}
+.sm{min-height:32px;padding:4px 10px;font-size:11px}.kbd{font:600 10px var(--mono);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 5px}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#10141c;border-bottom:1px solid var(--line);flex:none;overflow-x:auto}
+.brand{display:flex;align-items:center;gap:9px;white-space:nowrap}.brand-mark{width:10px;height:10px;border-radius:50%;background:var(--blueb);box-shadow:0 0 10px rgba(68,147,248,.7)}h1{font-size:15px;margin:0}
+.tabs{display:flex;gap:3px;margin-left:10px;padding:3px;background:var(--deep);border:1px solid var(--line2);border-radius:9px}
+.tabs button{min-height:32px;padding:4px 13px;border:0;background:transparent;color:var(--muted);white-space:nowrap}.tabs button.active{background:var(--raised2);color:var(--text)}
+.chip{font:500 11px var(--mono);color:var(--muted);background:var(--deep);border:1px solid var(--line2);border-radius:6px;padding:5px 8px;white-space:nowrap}.header-spacer{margin-left:auto}
+.app{flex:1;display:grid;grid-template-columns:310px 1fr;min-height:0}.rail{border-right:1px solid var(--line);background:var(--rail);padding:11px;overflow-y:auto}.content{overflow-y:auto;padding:13px;min-width:0}
+.rail-title,.ptitle{font:600 10px var(--mono);letter-spacing:1.5px;color:var(--muted)}.rail-title{display:block;margin:4px 3px 9px}
+.connection{background:var(--inner);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}.connection.live{border-color:rgba(63,185,80,.5)}.connection.error{border-color:rgba(248,81,73,.55)}
+.connection-head{display:flex;align-items:center;gap:8px}.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}.live .dot{background:var(--green);box-shadow:0 0 7px var(--green)}.error .dot{background:var(--redl)}
+.connection b{font-size:12px}.connection small{display:block;color:var(--muted);font:500 10px/1.4 var(--mono);margin:4px 0 8px 16px}.connection-actions{display:flex;gap:6px}.connection-actions button{flex:1}
+.rail-note{margin:10px 3px;color:var(--muted);font-size:11px;line-height:1.5}.rail-note strong{color:var(--amberl)}
+.page{display:none;flex-direction:column;gap:11px}.page.active{display:flex}.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.phead{display:flex;align-items:center;gap:9px;margin-bottom:12px}.phead .right{margin-left:auto}
+.tag{font:500 10px var(--mono);border:1px solid var(--line2);border-radius:5px;padding:2px 7px;color:var(--muted)}.tag.green{color:var(--greenl);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.07)}.tag.amber{color:var(--amberl);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.07)}.tag.red{color:var(--redl);border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.07)}
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+label{display:block;font-size:11px;color:var(--muted);font-weight:600}input,select{width:100%;margin-top:5px;padding:9px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--deep);color:var(--text);font:500 13px var(--mono)}input:focus,select:focus{outline:none;border-color:var(--blueb)}
+.note{color:var(--muted);font-size:11px;line-height:1.5;margin:8px 0 0}.warning{border-left:3px solid var(--amber);background:rgba(210,153,34,.06);padding:9px 11px;color:var(--muted);font-size:11px;line-height:1.5}
+.metric-grid{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:8px}.metric{background:var(--deep);border:1px solid var(--line2);border-radius:8px;padding:9px}.metric span{display:block;color:var(--muted);font:500 9px var(--mono);letter-spacing:.8px;text-transform:uppercase}.metric b{display:block;margin-top:5px;font:600 14px var(--mono);overflow:hidden;text-overflow:ellipsis}
+.flow{display:grid;grid-template-columns:1fr 70px 1fr 70px 1fr;align-items:stretch;gap:8px}.node{position:relative;background:var(--inner);border:1px solid var(--line2);border-radius:10px;padding:13px;min-height:128px}.node.active{border-color:var(--blueb);box-shadow:inset 0 0 0 1px rgba(68,147,248,.25)}.node.success{border-color:var(--green)}.node.failed{border-color:var(--redl)}
+.node-head{display:flex;align-items:center;gap:8px}.node-index{display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--raised2);color:var(--blueb);font:700 11px var(--mono)}.node h3{font-size:13px;margin:0}.node p{font:500 10px/1.5 var(--mono);color:var(--muted);margin:10px 0 0}.node-state{position:absolute;bottom:12px;left:13px;right:13px;color:var(--dim);font:600 10px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.link{display:grid;place-content:center;color:var(--dim);font:600 9px var(--mono);text-align:center;line-height:1.5}.link-arrow{font-size:24px;line-height:1;color:var(--line2)}.link.active{color:var(--blueb)}.link.active .link-arrow{color:var(--blueb);text-shadow:0 0 8px rgba(68,147,248,.6)}
+.workflow{display:flex;align-items:center;gap:6px;overflow-x:auto;padding-bottom:4px}.step{min-width:150px;background:var(--deep);border:1px solid var(--line2);border-radius:8px;padding:9px}.step.current{border-color:var(--blueb)}.step.done{border-color:var(--green)}.step.failed{border-color:var(--redl)}.step .owner{font:600 9px var(--mono);color:var(--muted);text-transform:uppercase}.step b{display:block;font-size:11px;margin-top:5px}.step-link{color:var(--dim)}
+.console{height:230px;overflow:auto;margin:0;padding:10px 12px;background:var(--deep);border:1px solid var(--line2);border-radius:8px;color:#c9d1d9;font:10px/1.55 var(--mono);white-space:pre-wrap}.console.tall{height:330px}
+.timeline{max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--deep)}.event{display:grid;grid-template-columns:72px 70px 1fr;gap:9px;padding:7px 10px;border-bottom:1px solid #1c2330;font:10px/1.4 var(--mono)}.event:last-child{border:0}.event time{color:var(--dim)}.event .source{color:var(--blueb)}.event.error .message{color:var(--redl)}.event.success .message{color:var(--greenl)}
+.pad-layout{display:grid;grid-template-columns:290px 1fr;gap:14px}.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.pad button{min-height:58px}.pad .stop{background:var(--red);border-color:var(--redl);color:#fff;font-weight:800}.drive-readouts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.wheel{background:var(--inner);border:1px solid var(--line2);border-radius:9px;padding:10px}.wheel-head{display:flex;align-items:center;gap:7px}.swatch{width:8px;height:8px;border-radius:2px}.wheel b{font-size:11px}.wheel .velocity{font:600 15px var(--mono);color:var(--greenl);margin:9px 0 3px}.wheel small{font:500 9px var(--mono);color:var(--muted)}
+.tape-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tape-module{background:var(--deep);border:1px solid var(--line2);border-radius:8px;padding:9px;text-align:center}.tape-module.match{border-color:var(--green)}.bits{display:flex;justify-content:center;gap:5px;margin-top:8px}.bit{display:grid;place-items:center;width:25px;height:25px;border:1px solid var(--line2);border-radius:5px;color:var(--dim);font:700 11px var(--mono)}.bit.on{background:#1a3d24;border-color:var(--green);color:var(--greenl)}
+.tof-layout{display:grid;grid-template-columns:310px 1fr;gap:11px}.process{display:flex;flex-direction:column;gap:7px}.process-step{display:grid;grid-template-columns:25px 1fr auto;align-items:center;gap:8px;padding:9px;background:var(--deep);border:1px solid var(--line2);border-radius:8px}.process-step.current{border-color:var(--blueb)}.process-step.done{border-color:var(--green)}.process-step.failed{border-color:var(--redl)}.process-step .num{display:grid;place-items:center;width:23px;height:23px;border-radius:5px;background:var(--raised2);font:700 10px var(--mono)}.process-step b{font-size:11px}.process-step span:last-child{font:500 9px var(--mono);color:var(--muted)}
+.sensor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.sensor{background:var(--inner);border:1px solid var(--line2);border-radius:9px;padding:10px}.sensor.ok{border-color:rgba(63,185,80,.5)}.sensor.bad{border-color:var(--redl)}.sensor .sensor-head{display:flex;justify-content:space-between;gap:8px}.sensor h3{font-size:11px;margin:0}.sensor .address{font:600 10px var(--mono);color:var(--blueb)}.sensor .distance{font:600 19px var(--mono);margin:11px 0 4px}.sensor small{font:500 9px/1.4 var(--mono);color:var(--muted)}
+.tof-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px}.tof-cell{min-height:42px;display:grid;place-content:center;border:1px solid var(--line2);border-radius:6px;background:var(--deep);font:600 10px var(--mono)}
+.actuator-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:9px}.actuator{background:var(--inner);border:1px solid var(--line2);border-radius:9px;padding:11px}.actuator.servo{border-top:3px solid var(--purple)}.actuator.stepper{border-top:3px solid var(--green)}.actuator-head{display:flex;align-items:start;gap:8px;padding-bottom:9px;border-bottom:1px solid var(--line)}.actuator h3{font-size:12px;margin:0}.actuator .position{margin-left:auto;text-align:right;font:700 15px var(--mono)}.actuator .position small{display:block;color:var(--muted);font:500 9px var(--mono);margin-top:3px}.actuator .controls{margin-top:9px}.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.mini-grid button{padding:5px;min-height:36px}.inline{display:flex;align-items:end;gap:6px}.inline label{flex:1}.inline button{flex:none}
+details{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}summary{cursor:pointer;color:var(--muted);font:600 10px var(--mono);letter-spacing:.7px}.advanced{margin-top:8px;display:flex;flex-direction:column;gap:7px}
+@media(max-width:1180px){.metric-grid{grid-template-columns:repeat(3,1fr)}.flow{grid-template-columns:1fr 45px 1fr}.flow .pi-link,.flow .pi-node{display:none}.g4{grid-template-columns:repeat(2,1fr)}.drive-readouts{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:860px){body{overflow:auto;height:auto;min-height:100vh}.app{display:flex;flex-direction:column}.rail{border-right:0;border-bottom:1px solid var(--line)}.content{overflow:visible}.flow{grid-template-columns:1fr}.link{min-height:40px}.link-arrow{transform:rotate(90deg)}.flow .pi-link,.flow .pi-node{display:grid}.pad-layout,.tof-layout{grid-template-columns:1fr}.g2,.g3,.g4{grid-template-columns:1fr}header{flex-wrap:wrap}.header-spacer{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-mark"></span><h1>Robot System Test Console</h1></div>
+  <nav class="tabs" aria-label="Test workspace">
+    <button class="active" data-page-button="coordination">Coordination</button>
+    <button data-page-button="drivetrain">Drivetrain</button>
+    <button data-page-button="tof">ToF</button>
+    <button data-page-button="arm">Arm jog</button>
+  </nav>
+  <span class="header-spacer"></span>
+  <span class="chip" id="connectionCount">0 / 2 connected</span>
+  <span class="chip" id="serialSupport">Checking Web Serial</span>
+  <button id="stopEverything" class="danger-button">STOP CONNECTED HARDWARE <span class="kbd">SPACE</span></button>
+</header>
+
+<div class="app">
+  <aside class="rail">
+    <span class="rail-title">PHYSICAL CONTROLLERS · 115200 BAUD</span>
+    <div id="connectionRack"></div>
+    <p class="rail-note"><strong>One connection per controller.</strong> The selected test firmware determines which tab can use that controller. Telemetry is routed automatically by format. Close PlatformIO serial monitors before connecting.</p>
+  </aside>
+
+  <main class="content">
+    <section class="page active" id="page-coordination">
+      <div class="warning">This view merges coordinator and top-controller JSON into one live model. It highlights who owns the current action, what crossed the controller link, and where a task stopped. The Pi node becomes authoritative when scan telemetry is exposed by the task harness.</div>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">TASK REQUEST</span><span class="tag" id="taskHarnessStatus">waiting for coordinator</span><span class="right"></span><button class="sm" data-send="coordDrive:status">Refresh both</button><button class="sm warn" id="resetCoordination">Recover link</button></div>
+        <div class="g4" style="align-items:end">
+          <label>Top-level task<select id="taskType"><option value="tape">Tape following</option><option value="picking">Tower picking</option><option value="building">Tower building</option><option value="scan">Teletubby scan</option></select></label>
+          <label>Tape speed (m/s)<input id="taskSpeed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
+          <label>Tape distance (m)<input id="taskDistance" type="number" min="0" max="100" step="0.1" value="1.0"></label>
+          <div class="row"><button id="startTask" class="primary">Start task</button><button data-send="coordDrive:cancel" class="danger-button">Cancel</button></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span class="ptitle">SIMULATE RESULT</span>
+          <button class="sm" data-send="coordDrive:drive succeed">Drivetrain succeeds</button>
+          <button class="sm" data-send="coordDrive:drive fail">Drivetrain fails</button>
+          <button class="sm" data-send="coordTop:arm succeed">Top succeeds</button>
+          <button class="sm" data-send="coordTop:arm fail">Top fails</button>
+          <label style="display:flex;align-items:center;gap:6px;margin-left:auto">Top auto complete (ms)<input id="autoComplete" type="number" min="0" max="60000" step="100" value="0" style="width:100px;margin:0"></label>
+          <button class="sm" id="applyAutoComplete">Apply</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">LIVE OWNERSHIP AND COMMAND FLOW</span><span class="tag" id="coordHealth">offline</span></div>
+        <div class="flow">
+          <article class="node" id="driveNode">
+            <div class="node-head"><span class="node-index">01</span><div><h3>Drivetrain ESP32</h3><span class="tag">authoritative coordinator</span></div></div>
+            <p id="driveNodeDetail">Owns the top-level runtime and dispatches the current action.</p>
+            <span class="node-state" id="driveNodeState">No coordinator telemetry</span>
+          </article>
+          <div class="link" id="taskLink"><span>UART TASK LINK</span><span class="link-arrow">→</span><span id="taskLinkState">idle</span></div>
+          <article class="node" id="topNode">
+            <div class="node-head"><span class="node-index">02</span><div><h3>Top ESP32</h3><span class="tag">remote executor</span></div></div>
+            <p id="topNodeDetail">Routes arm actions locally and scan actions to the Pi.</p>
+            <span class="node-state" id="topNodeState">No top telemetry</span>
+          </article>
+          <div class="link pi-link" id="piLink"><span>PI REQUEST</span><span class="link-arrow">→</span><span id="piLinkState">idle</span></div>
+          <article class="node pi-node" id="piNode">
+            <div class="node-head"><span class="node-index">03</span><div><h3>Raspberry Pi</h3><span class="tag">scan executor</span></div></div>
+            <p>Runs Teletubby detection for a stable task/action identity.</p>
+            <span class="node-state" id="piNodeState">Waiting for scan action</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">CURRENT WORKFLOW</span><span class="tag" id="workflowStatus">idle</span></div>
+        <div class="workflow" id="workflow"></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">COORDINATION STATE</span></div>
+        <div class="metric-grid">
+          <div class="metric"><span>Task</span><b id="mTask">none</b></div>
+          <div class="metric"><span>Task status</span><b id="mTaskStatus">idle</b></div>
+          <div class="metric"><span>Current action</span><b id="mAction">none</b></div>
+          <div class="metric"><span>Action owner</span><b id="mOwner">none</b></div>
+          <div class="metric"><span>Execution / step</span><b id="mExecution">- / -</b></div>
+          <div class="metric"><span>Failure</span><b id="mFailure">none</b></div>
+          <div class="metric"><span>Drive session</span><b id="mDriveSession">-</b></div>
+          <div class="metric"><span>Top session</span><b id="mTopSession">-</b></div>
+          <div class="metric"><span>Drive TX / RX</span><b id="mDrivePackets">0 / 0</b></div>
+          <div class="metric"><span>Top TX / RX</span><b id="mTopPackets">0 / 0</b></div>
+          <div class="metric"><span>Retries</span><b id="mRetries">0</b></div>
+          <div class="metric"><span>Duplicates / errors</span><b id="mErrors">0 / 0</b></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">MERGED EVENT TIMELINE</span><span class="right"></span><button class="sm" id="clearTimeline">Clear</button></div>
+        <div class="timeline" id="coordTimeline"></div>
+      </section>
+    </section>
+
+    <section class="page" id="page-drivetrain">
+      <div class="warning"><strong>Lift and secure the robot before issuing motion commands.</strong> Keyboard drive is enabled only on this page while the drivetrain-test endpoint is connected. Release a key to send a controlled stop; Space stops every connected test endpoint.</div>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">MOVEMENT</span><span class="tag">W A S D · Q/E rotate</span><span class="tag" id="driveCommandState">runtime not ready</span><span class="right"></span><button class="danger-button sm" data-send="drive:stop">STOP</button></div>
+        <div class="pad-layout">
+          <div class="pad" id="drivePad"></div>
+          <div>
+            <div class="g2">
+              <label>Speed (m/s)<input id="driveSpeed" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
+              <label>Turn (rad/s)<input id="driveTurn" type="number" min="0.01" max="2" step="0.05" value="1.00"></label>
+              <label>Button duration (ms)<input id="driveDuration" type="number" min="1" max="10000" step="100" value="10000"></label>
+              <label>Motor duty<input id="driveDuty" type="number" min="0.01" max="0.8" step="0.01" value="0.25"></label>
+            </div>
+            <div class="row" style="margin-top:10px"><button id="driveCcw">Rotate CCW</button><button id="driveCw">Rotate CW</button><button id="driveSequence" class="warn">Run sequence</button><span class="chip" id="lastDriveCommand">none</span></div>
+            <div class="row" id="drivePairButtons" style="margin-top:8px"><span class="ptitle">SINGLE-WHEEL DUTY TEST</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">ENCODER-RELATIVE MOVES</span></div>
+        <div class="g4" style="align-items:end">
+          <label>Direction<select id="distanceDirection"><option>forward</option><option>backward</option><option>left</option><option>right</option><option>forward-left</option><option>forward-right</option><option>backward-left</option><option>backward-right</option></select></label>
+          <label>Distance (m)<input id="driveDistance" type="number" min="0.011" max="100" step="0.01" value="1.00"></label>
+          <label>Turn direction<select id="angleDirection"><option>cw</option><option>ccw</option></select></label>
+          <label>Angle (deg)<input id="driveAngle" type="number" min="2.1" max="3600" step="1" value="90"></label>
+        </div>
+        <div class="row" style="margin-top:10px"><button id="moveDistance" class="primary">Move distance</button><button id="turnAngle" class="primary">Turn angle</button><button class="sm" data-send="drive:reset-encoders">Reset encoders</button><button class="sm" data-send="drive:status">Refresh telemetry</button></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">WHEEL TELEMETRY</span><span class="tag" id="driveRxState">waiting</span></div>
+        <div class="drive-readouts" id="wheelReadouts"></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">TAPE FOLLOWING · TARGET 0110</span><span class="right"></span><button class="sm" data-send="drive:tape">Refresh</button></div>
+        <div class="tape-grid" id="driveTape"></div>
+        <div class="g4" style="align-items:end;margin-top:11px">
+          <label>Guidance module<select id="tapeSensor"><option value="front">Front</option><option value="back">Back</option></select></label>
+          <label>Max strafe (m/s)<input id="tapeStrafe" type="number" min="0.01" max="1" step="0.01" value="0.20"></label>
+          <label>Travel speed (m/s)<input id="tapeTravel" type="number" min="0.01" max="1" step="0.01" value="0.30"></label>
+          <label>Duration (ms)<input id="tapeDuration" type="number" min="1" max="60000" step="100" value="10000"></label>
+        </div>
+        <div class="row" style="margin-top:10px"><button id="tapeCenter" class="primary">Center to tape</button><button id="tapeForward" class="primary">Follow forward</button><button id="tapeBackward">Follow backward</button><span class="chip" id="tapeState">No tape telemetry</span></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">DIRECT HARDWARE COMMANDS</span></div>
+        <div class="row"><button class="sm" data-send="drive:config">Inversion config</button><button class="sm" data-send="drive:limits">Limits</button><button class="sm" data-send="drive:coast">Coast</button><button class="sm warn" data-send="drive:brake">Hardware brake</button><button class="sm" data-send="drive:enable">Enable</button><button class="sm" data-send="drive:help">Firmware help</button></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">DRIVETRAIN SERIAL LOG</span><span class="right"></span><button class="sm" data-clear-log="drive">Clear</button></div>
+        <pre class="console" id="log-drive"></pre>
+      </section>
+    </section>
+
+    <section class="page" id="page-tof">
+      <div class="warning">The ToF harness uses one serial endpoint per controller. Follow the address sequence in order: hold shutdown, release one sensor, assign its unique address, then verify it before continuing.</div>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">ADDRESS SEQUENCE CONTROL</span><span class="right"></span><button class="sm" data-send="tofDrive:identify">Identify drivetrain</button><button class="sm" data-send="tofTop:identify">Identify top</button></div>
+        <div class="g2">
+          <div>
+            <div class="row"><span class="tag">DRIVETRAIN</span><button class="sm primary" data-tof-action="tofDrive:step">Run next step</button><button class="sm" data-send="tofDrive:reset">Reset</button><button class="sm danger-button" data-send="tofDrive:stop">Stop</button></div>
+            <div class="process" id="tofDriveProcess" style="margin-top:9px"></div>
+          </div>
+          <div>
+            <div class="row"><span class="tag">TOP / ARM</span><button class="sm primary" data-tof-action="tofTop:step">Run next step</button><button class="sm" data-send="tofTop:reset">Reset</button><button class="sm danger-button" data-send="tofTop:stop">Stop</button></div>
+            <div class="process" id="tofTopProcess" style="margin-top:9px"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="tof-layout">
+        <section class="panel">
+          <div class="phead"><span class="ptitle">PROCESS STATUS</span></div>
+          <div class="metric-grid" style="grid-template-columns:1fr 1fr">
+            <div class="metric"><span>Drive next step</span><b id="tofDriveNext">0</b></div>
+            <div class="metric"><span>Top next step</span><b id="tofTopNext">0</b></div>
+            <div class="metric"><span>Drive state</span><b id="tofDriveState">offline</b></div>
+            <div class="metric"><span>Top state</span><b id="tofTopState">offline</b></div>
+          </div>
+          <p class="note">A red sensor or failed step is a hard stop: resolve wiring, shutdown state, or address collision before advancing.</p>
+        </section>
+        <section class="panel">
+          <div class="phead"><span class="ptitle">SENSOR READINGS</span></div>
+          <div class="sensor-grid" id="tofSensors"></div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">DRIVETRAIN CENTER 4×4 GRID</span><span class="tag" id="gridStatus">waiting</span></div>
+        <div class="tof-grid" id="tofGrid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="phead"><span class="ptitle">TOF SERIAL LOGS</span></div>
+        <div class="g2"><div><span class="rail-title">DRIVETRAIN</span><pre class="console" id="log-tofDrive"></pre></div><div><span class="rail-title">TOP / ARM</span><pre class="console" id="log-tofTop"></pre></div></div>
+      </section>
+    </section>
+
+    <section class="page" id="page-arm">
+      <div class="warning"><strong>Clear the mechanism before connecting.</strong> Servo angles and stepper positions are commanded open-loop estimates. STOP halts step pulses, but servos continue holding their commanded angles.</div>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">ARM HARNESS CONTROL</span><span class="tag" id="armRxState">waiting</span><span class="right"></span><button class="sm" data-send="arm:state">Refresh state</button><button class="danger-button sm" data-send="arm:stop">STOP ALL STEPPERS</button></div>
+      </section>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">SERVOS</span><span class="tag amber">RAM-only configuration</span></div>
+        <div class="actuator-grid" id="servoGrid"></div>
+      </section>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">STEPPERS</span><span class="tag">signed distance from logical home</span></div>
+        <div class="actuator-grid" id="stepperGrid"></div>
+      </section>
+      <section class="panel">
+        <div class="phead"><span class="ptitle">ARM SERIAL LOG</span><span class="right"></span><button class="sm" data-clear-log="arm">Clear</button></div>
+        <pre class="console" id="log-arm"></pre>
+      </section>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const ENDPOINTS = [
+  {id:"drive", name:"Drivetrain ESP32", detail:"coordination · drivetrain · ToF", modes:["coordination","drivetrain","tof"]},
+  {id:"top", name:"Top / Arm ESP32", detail:"coordination · ToF · arm jog", modes:["coordination","arm","tof"]}
+];
+const endpointMap = Object.fromEntries(ENDPOINTS.map(config => [config.id, {...config, port:null, reader:null, writer:null, readTask:null, reading:false, buffer:"", lastRx:0, connectionLabel:"serial", mode:"unknown firmware", activeMode:"unknown", driveReady:false}]));
+const LOGICAL_ENDPOINTS = {
+  coordDrive:"drive", drive:"drive", tofDrive:"drive",
+  coordTop:"top", tofTop:"top", arm:"top", top:"top"
+};
+const coordination = {drive:{}, top:{}, timeline:[], lastBySource:{}};
+const tof = {
+  tofDrive:{next:0,state:"offline",steps:[],sensors:{}},
+  tofTop:{next:0,state:"offline",steps:[],sensors:{}}
+};
+const TOF_STEPS = {
+  tofDrive:["Hold all sensors in shutdown","Start I2C and verify 0x29","Address right: 0x29 → 0x32","Address left: 0x29 → 0x30","Address center: 0x29 → 0x33","Start continuous ranging"],
+  tofTop:["Hold all sensors in shutdown","Start I2C and verify 0x29","Address middle: 0x29 → 0x31","Address left: 0x29 → 0x30","Address right: 0x29 → 0x32","Start continuous ranging"]
+};
+const SENSOR_CONFIG = [
+  {key:"tofDrive:right", endpoint:"tofDrive", name:"Right VL53L0X", address:"0x32"},
+  {key:"tofDrive:left", endpoint:"tofDrive", name:"Left VL53L0X", address:"0x30"},
+  {key:"tofDrive:center", endpoint:"tofDrive", name:"Center VL53L5CX", address:"0x33"},
+  {key:"tofTop:middle", endpoint:"tofTop", name:"Middle VL53L0X", address:"0x31"},
+  {key:"tofTop:left", endpoint:"tofTop", name:"Left VL53L0X", address:"0x30"},
+  {key:"tofTop:right", endpoint:"tofTop", name:"Right VL53L0X", address:"0x32"}
+];
+const SERVOS = ["Habitat Left","Habitat Right","Tower Rotate","Tower Left","Tower Middle","Tower Right","Solar Panel"];
+const STEPPERS = ["Tower X","Tower Z","Habitat X","Habitat Z"];
+const STEPPER_RANGES = [138,220,187,152];
+const STEPPER_DELAYS = [3000,1500,3000,1500];
+const wheels = [
+  {key:"FL",name:"Front left",color:"#58a6ff"},
+  {key:"FR",name:"Front right",color:"#d29922"},
+  {key:"BL",name:"Back left",color:"#3fb950"},
+  {key:"BR",name:"Back right",color:"#f85149"}
+];
+const workflowDefinitions = {
+  tape:[{action:"Follow tape",owner:"drivetrain"}],
+  picking:[{action:"Align to task tape",owner:"drivetrain"},{action:"Pick up block",owner:"top / arm",placeholder:true},{action:"Align to main route",owner:"drivetrain"}],
+  building:[{action:"Build tower",owner:"top / arm",placeholder:true}],
+  scan:[{action:"Scan Teletubbies",owner:"top → Pi"}],
+  routine:[{action:"Follow tape",owner:"drivetrain"},{action:"Pick up block",owner:"top / arm"},{action:"Build tower",owner:"top / arm"}]
+};
+let currentPage = "coordination";
+const heldKeys = new Set();
+let pendingDriveCommand = null;
+let driveModeRequestPending = false;
+let driveModeTimer = null;
+
+function buildConnectionRack() {
+  $("#connectionRack").innerHTML = ENDPOINTS.map(item => `
+    <article class="connection" id="connection-${item.id}">
+      <div class="connection-head"><span class="dot"></span><b>${item.name}</b></div>
+      <small>${item.detail}<br><span id="connection-status-${item.id}">not connected</span></small>
+      <div class="connection-actions">
+        <button class="sm primary" data-connect="${item.id}">Connect</button>
+        <button class="sm" data-disconnect="${item.id}" disabled>Disconnect</button>
+      </div>
+      <div class="inline" style="margin-top:7px">
+        <label style="flex:1">Runtime mode<select id="mode-${item.id}" style="margin-top:3px">${item.modes.map(mode => `<option value="${mode}">${mode}</option>`).join("")}</select></label>
+        <button class="sm warn" data-activate-mode="${item.id}" disabled>Activate</button>
+      </div>
+    </article>`).join("");
+}
+
+function setEndpointUi(id, state, message) {
+  const card = $(`#connection-${id}`);
+  card.classList.toggle("live", state === "live");
+  card.classList.toggle("error", state === "error");
+  $(`[data-connect="${id}"]`).disabled = state === "live";
+  $(`[data-disconnect="${id}"]`).disabled = state !== "live";
+  $(`[data-activate-mode="${id}"]`).disabled = state !== "live";
+  $(`#connection-status-${id}`).textContent = message;
+  const count = ENDPOINTS.filter(item => endpointMap[item.id].writer).length;
+  $("#connectionCount").textContent = `${count} / ${ENDPOINTS.length} connected`;
+  renderCoordination();
+}
+
+async function connectEndpoint(id) {
+  const endpoint = endpointMap[id];
+  if (!("serial" in navigator)) {
+    setEndpointUi(id,"error","Web Serial unavailable");
+    return;
+  }
+  try {
+    endpoint.port = await navigator.serial.requestPort();
+    await endpoint.port.open({baudRate:115200});
+    endpoint.reader = endpoint.port.readable.getReader();
+    endpoint.writer = endpoint.port.writable.getWriter();
+    endpoint.reading = true;
+    endpoint.mode = "detecting firmware";
+    const info = endpoint.port.getInfo ? endpoint.port.getInfo() : {};
+    const usb = info.usbVendorId ? `${info.usbVendorId.toString(16).padStart(4,"0")}:${(info.usbProductId || 0).toString(16).padStart(4,"0")}` : "serial";
+    endpoint.connectionLabel = `${usb} · 115200`;
+    setEndpointUi(id,"live",`${endpoint.mode} · ${endpoint.connectionLabel}`);
+    addLog(id,"# connected at 115200");
+    addEvent(id,"connected","success");
+    endpoint.readTask = readEndpoint(endpoint);
+    setTimeout(() => send(id, initialCommand(id), false), 250);
+  } catch (error) {
+    endpoint.port = null;
+    setEndpointUi(id,"error",error.message);
+    addLog(id,`# connection error: ${error.message}`);
+  }
+}
+
+function initialCommand(id) {
+  return "mode";
+}
+
+async function readEndpoint(endpoint) {
+  try {
+    while (endpoint.reading && endpoint.reader) {
+      const {value,done} = await endpoint.reader.read();
+      if (done) break;
+      if (!value) continue;
+      endpoint.lastRx = Date.now();
+      endpoint.buffer += decoder.decode(value,{stream:true});
+      let newline;
+      while ((newline = endpoint.buffer.indexOf("\n")) >= 0) {
+        const line = endpoint.buffer.slice(0,newline).replace(/\r$/,"").trim();
+        endpoint.buffer = endpoint.buffer.slice(newline + 1);
+        if (line) handleLine(endpoint.id,line);
+      }
+    }
+  } catch (error) {
+    if (endpoint.reading) {
+      addLog(endpoint.id,`# read error: ${error.message}`);
+      setEndpointUi(endpoint.id,"error","read error");
+    }
+  } finally {
+    if (endpoint.reader) {
+      endpoint.reader.releaseLock();
+      endpoint.reader = null;
+    }
+  }
+}
+
+async function disconnectEndpoint(id, safeStop = true) {
+  const endpoint = endpointMap[id];
+  try {
+    if (safeStop && endpoint.writer) await send(id,"stop",false);
+    endpoint.reading = false;
+    if (endpoint.reader) await endpoint.reader.cancel();
+    if (endpoint.readTask) await endpoint.readTask;
+    if (endpoint.writer) { endpoint.writer.releaseLock(); endpoint.writer = null; }
+    if (endpoint.port) await endpoint.port.close();
+  } catch (error) {
+    addLog(id,`# disconnect error: ${error.message}`);
+  } finally {
+    endpoint.port = null;
+    endpoint.readTask = null;
+    endpoint.buffer = "";
+    endpoint.mode = "unknown firmware";
+    endpoint.activeMode = "unknown";
+    endpoint.driveReady = false;
+    if (id === "drive") {
+      pendingDriveCommand = null;
+      driveModeRequestPending = false;
+      if (driveModeTimer) clearTimeout(driveModeTimer);
+      driveModeTimer = null;
+      updateDriveCommandState("runtime not ready","idle");
+    }
+    setEndpointUi(id,"idle","not connected");
+    addLog(id,"# disconnected");
+    addEvent(id,"disconnected");
+  }
+}
+
+async function send(id, command, visible = true) {
+  const physicalId = LOGICAL_ENDPOINTS[id] || id;
+  const endpoint = endpointMap[physicalId];
+  if (!endpoint) return false;
+  if (!endpoint.writer) {
+    if (visible) addLog(id,`# cannot send "${command}": endpoint is not connected`);
+    return false;
+  }
+  try {
+    await endpoint.writer.write(encoder.encode(command + "\n"));
+    if (visible) {
+      addLog(id,`> ${command}`);
+      if (id === "drive") $("#lastDriveCommand").textContent = command;
+      if (id.startsWith("coord")) addEvent(id,`TX ${command}`);
+    }
+    return true;
+  } catch (error) {
+    addLog(id,`# write error: ${error.message}`);
+    return false;
+  }
+}
+
+function logElementFor(id) {
+  if (id.startsWith("coord")) return null;
+  return $(`#log-${id}`);
+}
+
+function addLog(id, message) {
+  const element = logElementFor(id);
+  if (!element) return;
+  const lines = (element.textContent + message + "\n").split("\n");
+  if (lines.length > 600) lines.splice(0,lines.length - 600);
+  element.textContent = lines.join("\n");
+  element.scrollTop = element.scrollHeight;
+}
+
+function sourceLabel(id) {
+  return ({coordDrive:"DRIVE",coordTop:"TOP",drive:"DRIVE",tofDrive:"TOF-DRV",tofTop:"TOF-TOP",arm:"ARM"})[id] || id;
+}
+
+function addEvent(id, message, kind = "") {
+  if (!id.startsWith("coord")) return;
+  const item = {time:new Date(), source:sourceLabel(id), message, kind};
+  coordination.timeline.push(item);
+  if (coordination.timeline.length > 300) coordination.timeline.shift();
+  const timeline = $("#coordTimeline");
+  const row = document.createElement("div");
+  row.className = `event ${kind}`;
+  row.innerHTML = `<time>${item.time.toLocaleTimeString([],{hour12:false})}</time><span class="source">${item.source}</span><span class="message"></span>`;
+  row.querySelector(".message").textContent = message;
+  timeline.appendChild(row);
+  while (timeline.children.length > 300) timeline.firstElementChild.remove();
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
+function markDetected(id,mode) {
+  const endpoint = endpointMap[id];
+  if (!endpoint || endpoint.mode === mode) return;
+  endpoint.mode = mode;
+  setEndpointUi(id,"live",`${mode} · ${endpoint.connectionLabel}`);
+}
+
+function handleLine(id,line) {
+  if (line.startsWith("SYSTEM,")) {
+    const parts = line.split(",");
+    if (parts[1] === "MODE" && parts[2]) {
+      endpointMap[id].activeMode = parts[2];
+      if (id === "drive" && parts[2] !== "drivetrain") {
+        endpointMap[id].driveReady = false;
+        updateDriveCommandState(`${parts[2]} runtime active`,"waiting");
+      }
+      markDetected(id,`system-test · ${parts[2]}`);
+      const select = $(`#mode-${id}`);
+      if (select && [...select.options].some(option => option.value === parts[2])) {
+        select.value = parts[2];
+      }
+    } else if (parts[1] === "READY") {
+      markDetected(id,"system-test · select mode");
+    }
+    addLog(id === "drive" ? "drive" : "arm",line);
+    return;
+  }
+  if (id === "drive" && line.startsWith("DRIVE,")) {
+    addLog("drive",line);
+    return handleDriveProtocolLine(line);
+  }
+  const json = parseJson(line);
+  if (json) {
+    markDetected(id,id === "drive" ? "task-coordinator-test" : "task-link-test");
+    return handleCoordinatorLine(id === "drive" ? "coordDrive" : "coordTop",line,json);
+  }
+  if (line.startsWith("TOF,")) {
+    const logicalId = id === "drive" ? "tofDrive" : "tofTop";
+    markDetected(id,"tof-test");
+    addLog(logicalId,line);
+    return handleTofLine(logicalId,line);
+  }
+  if (id === "top" && /^(servo|stepper),/.test(line)) {
+    markDetected(id,"arm_jog");
+    addLog("arm",line);
+    return handleArmLine(line);
+  }
+  if (id === "drive") {
+    if (/^(TAPE,|\d+,(?:FL|FR|BL|BR),)|^# ms,wheel/.test(line)) markDetected(id,"drivetrain-test");
+    addLog("drive",line);
+    return handleDriveLine(line);
+  }
+  addLog("arm",line);
+}
+
+function parseJson(line) {
+  try { return JSON.parse(line); } catch (_) {
+    const start = line.indexOf("{");
+    if (start >= 0) try { return JSON.parse(line.slice(start)); } catch (_) {}
+    return null;
+  }
+}
+
+function handleCoordinatorLine(id,line,parsedData = null) {
+  const data = parsedData || parseJson(line);
+  const kind = /fail|error|timeout|invalid/i.test(line) ? "error" : /success|succeed|complete/i.test(line) ? "success" : "";
+  if (!data) {
+    addEvent(id,line,kind);
+    return;
+  }
+  if (id === "coordDrive") coordination.drive = data;
+  else coordination.top = data;
+  const summary = coordinatorSummary(id,data);
+  if (coordination.lastBySource[id] !== summary) {
+    coordination.lastBySource[id] = summary;
+    addEvent(id,summary,kind);
+  }
+  renderCoordination();
+}
+
+function value(data,...keys) {
+  for (const key of keys) if (data && data[key] !== undefined && data[key] !== null) return data[key];
+  return undefined;
+}
+
+function coordinatorSummary(id,data) {
+  if (id === "coordDrive") {
+    const task = value(data,"task","taskType") ?? "none";
+    const status = value(data,"taskStatus","status") ?? "unknown";
+    const action = value(data,"action","currentAction","stepStatus") ?? "";
+    return `state task=${task} status=${status}${action ? ` action=${action}` : ""}`;
+  }
+  const action = value(data,"action","command") ?? "none";
+  const status = value(data,"stepStatus","status") ?? "unknown";
+  return `state action=${action} status=${status}`;
+}
+
+function normalizedTask(raw) {
+  const text = String(raw ?? "none").toLowerCase().replaceAll("_"," ");
+  if (text.includes("tape")) return "tape";
+  if (text.includes("pick")) return "picking";
+  if (text.includes("build")) return "building";
+  if (text.includes("scan") || text.includes("teletubby")) return "scan";
+  if (text.includes("routine")) return "routine";
+  return text === "0" ? "none" : text;
+}
+
+function normalizedStatus(raw) {
+  const text = String(raw ?? "idle").toLowerCase().replaceAll("_"," ");
+  const numeric = {0:"idle",1:"running",2:"success",3:"failed",4:"cancelled"};
+  return numeric[text] || text;
+}
+
+function currentAction(drive,top,task) {
+  const explicit = value(drive,"action","currentAction","taskAction");
+  if (explicit !== undefined && explicit !== "none" && explicit !== 0) return String(explicit).replaceAll("_"," ");
+  const topAction = value(top,"hasCommand") === false ? undefined : value(top,"action","command");
+  if (topAction !== undefined && topAction !== "none" && topAction !== 0) return String(topAction).replaceAll("_"," ");
+  return workflowDefinitions[task]?.[Math.max(0,Number(value(drive,"step","currentStep") || 0))]?.action || "none";
+}
+
+function ownerFor(action,task) {
+  const actionText = String(action).toLowerCase();
+  if (actionText.includes("scan") || actionText.includes("teletubby")) return "top → Pi";
+  if (actionText.includes("align") || actionText.includes("tape") || actionText.includes("drive")) return "drivetrain";
+  if (actionText.includes("pick") || actionText.includes("build") || actionText.includes("arm")) return "top / arm";
+  const taskText = String(task).toLowerCase();
+  if (taskText.includes("tape")) return "drivetrain";
+  if (taskText.includes("pick") || taskText.includes("build")) return "top / arm";
+  return "none";
+}
+
+function renderCoordination() {
+  const d = coordination.drive;
+  const t = coordination.top;
+  const task = normalizedTask(value(d,"task","taskType"));
+  const taskStatus = normalizedStatus(value(d,"taskStatus","status"));
+  const previewing = taskStatus === "idle";
+  const displayedTask = previewing ? $("#taskType").value : task;
+  const action = currentAction(d,t,displayedTask);
+  const owner = ownerFor(action,displayedTask);
+  const step = Number(value(d,"step","currentStep") || 0);
+  const stepStatus = normalizedStatus(value(d,"stepStatus","actionStatus") ?? taskStatus);
+  const topStatus = normalizedStatus(value(t,"stepStatus","status"));
+  const failure = value(d,"failure","failureCode","error") ?? "none";
+  const execution = value(d,"execution","executionId") ?? "-";
+  const driveSession = value(d,"coordinatorSession","session","sessionId") ?? "-";
+  const topSession = value(d,"armSession","executorSession") ?? value(t,"armSession","session","sessionId") ?? "-";
+  const dTx = value(d,"tx","packetsTx") ?? 0, dRx = value(d,"rx","packetsRx") ?? 0;
+  const tTx = value(t,"tx","packetsTx") ?? 0, tRx = value(t,"rx","packetsRx") ?? 0;
+  const retries = value(d,"retries","retryCount") ?? 0;
+  const duplicates = value(t,"duplicates","duplicateCount") ?? 0;
+  const errors = ["checksumErrors","parseErrors","protocolErrors"].reduce((sum,key) => sum + Number(value(d,key) || 0) + Number(value(t,key) || 0),0);
+
+  $("#mTask").textContent = previewing ? `${displayedTask} (preview)` : task;
+  $("#mTaskStatus").textContent = taskStatus;
+  $("#mAction").textContent = action;
+  $("#mOwner").textContent = owner;
+  $("#mExecution").textContent = `${execution} / ${step}`;
+  $("#mFailure").textContent = failure;
+  $("#mDriveSession").textContent = driveSession;
+  $("#mTopSession").textContent = topSession;
+  $("#mDrivePackets").textContent = `${dTx} / ${dRx}`;
+  $("#mTopPackets").textContent = `${tTx} / ${tRx}`;
+  $("#mRetries").textContent = retries;
+  $("#mErrors").textContent = `${duplicates} / ${errors}`;
+
+  const isRunning = taskStatus.includes("running") || stepStatus.includes("running");
+  $("#taskHarnessStatus").textContent = previewing
+    ? `${displayedTask} · preview`
+    : Object.keys(d).length ? `${task} · ${taskStatus}` : "waiting for coordinator";
+  setTagState($("#taskHarnessStatus"),taskStatus);
+  $("#coordHealth").textContent = !endpointMap.drive.writer ? "coordinator offline" : !endpointMap.top.writer ? "top offline" : errors ? `${errors} protocol errors` : "both controllers online";
+  setTagState($("#coordHealth"),errors ? "failed" : endpointMap.drive.writer && endpointMap.top.writer ? "success" : "idle");
+
+  setNodeState($("#driveNode"),owner === "drivetrain" && isRunning ? "active" : taskStatus);
+  setNodeState($("#topNode"),owner.includes("top") && isRunning ? "active" : topStatus);
+  setNodeState($("#piNode"),owner.includes("Pi") && isRunning ? "active" : task === "scan" ? taskStatus : "idle");
+  $("#driveNodeState").textContent = `task ${task} · ${taskStatus} · step ${step}`;
+  $("#topNodeState").textContent = Object.keys(t).length ? `action ${value(t,"action","command") ?? action} · ${topStatus}` : "No top telemetry";
+  $("#piNodeState").textContent = owner.includes("Pi") ? `${action} · ${stepStatus}` : "Waiting for scan action";
+  $("#taskLink").classList.toggle("active",owner.includes("top") && isRunning);
+  $("#taskLinkState").textContent = owner.includes("top") ? `${dTx} TX / ${dRx} RX` : "idle";
+  $("#piLink").classList.toggle("active",owner.includes("Pi") && isRunning);
+  $("#piLinkState").textContent = owner.includes("Pi") ? stepStatus : "idle";
+  renderWorkflow(displayedTask,previewing ? 0 : step,
+                 previewing ? "pending" : stepStatus,
+                 previewing ? "ready to start" : taskStatus);
+}
+
+function setTagState(element,status) {
+  element.classList.remove("green","amber","red");
+  const text = String(status).toLowerCase();
+  if (/success|complete|online|ready/.test(text)) element.classList.add("green");
+  else if (/fail|error|cancel|timeout/.test(text)) element.classList.add("red");
+  else if (/run|wait|pending/.test(text)) element.classList.add("amber");
+}
+
+function setNodeState(node,status) {
+  node.classList.remove("active","success","failed");
+  const text = String(status).toLowerCase();
+  if (/active|run|wait|pending/.test(text)) node.classList.add("active");
+  else if (/success|complete/.test(text)) node.classList.add("success");
+  else if (/fail|error|cancel|timeout/.test(text)) node.classList.add("failed");
+}
+
+function renderWorkflow(task,step,status,taskStatus) {
+  const definition = workflowDefinitions[task] || [];
+  $("#workflowStatus").textContent = `${task} · ${taskStatus}`;
+  setTagState($("#workflowStatus"),taskStatus);
+  if (!definition.length) {
+    $("#workflow").innerHTML = `<span class="note">Start a task or connect the coordinator to display its action sequence.</span>`;
+    return;
+  }
+  $("#workflow").innerHTML = definition.map((item,index) => {
+    let state = index < step ? "done" : index === step ? (/fail|error/.test(status) ? "failed" : "current") : "";
+    if (/success|complete/.test(taskStatus)) state = "done";
+    return `${index ? `<span class="step-link">→</span>` : ""}<article class="step ${state}"><span class="owner">${item.owner}</span><b>${index + 1}. ${item.action}</b>${item.placeholder ? `<span class="tag amber" style="display:inline-block;margin-top:6px">placeholder</span>` : ""}</article>`;
+  }).join("");
+}
+
+function setNodeConnectionState() {
+  renderCoordination();
+}
+
+function buildDriveUi() {
+  const padItems = [
+    ["forward-left","↖"],["forward","↑"],["forward-right","↗"],
+    ["left","←"],["stop","STOP"],["right","→"],
+    ["backward-left","↙"],["backward","↓"],["backward-right","↘"]
+  ];
+  $("#drivePad").innerHTML = padItems.map(([command,label]) => `<button data-drive-motion="${command}" class="${command === "stop" ? "stop" : ""}">${label}</button>`).join("");
+  $("#wheelReadouts").innerHTML = wheels.map(wheel => `<article class="wheel"><div class="wheel-head"><span class="swatch" style="background:${wheel.color}"></span><b>${wheel.name}</b></div><div class="velocity" id="wheel-${wheel.key}-velocity">-- m/s</div><small id="wheel-${wheel.key}-detail">target -- · duty -- · count --</small></article>`).join("");
+  $("#drivePairButtons").insertAdjacentHTML("beforeend",wheels.map(wheel => `<button class="sm" data-pair-wheel="${wheel.key.toLowerCase()}">${wheel.key}</button>`).join(""));
+  $("#driveTape").innerHTML = ["front","back","left"].map(name => `<article class="tape-module" id="tape-${name}"><span class="rail-title">${name.toUpperCase()}</span><div class="bits">${[0,1,2,3].map(() => `<span class="bit">0</span>`).join("")}</div></article>`).join("");
+}
+
+function driveNumber(id,min,max) {
+  const input = $(`#${id}`), number = Number(input.value);
+  if (!Number.isFinite(number) || number < min || number > max) {
+    input.focus();
+    throw new Error(`${id} must be between ${min} and ${max}`);
+  }
+  return number;
+}
+
+function driveMotion(command,duration = true) {
+  try {
+    if (command === "stop") return stopDrive();
+    const speed = driveNumber("driveSpeed",.01,1);
+    return driveCommand(`${command} ${speed}${duration ? ` ${Math.round(driveNumber("driveDuration",1,10000))}` : ""}`);
+  } catch (error) { addLog("drive",`# ${error.message}`); }
+}
+
+function updateDriveCommandState(message,state = "waiting") {
+  const tag = $("#driveCommandState");
+  if (!tag) return;
+  tag.textContent = message;
+  setTagState(tag,state);
+}
+
+async function requestDrivetrainRuntime() {
+  const endpoint = endpointMap.drive;
+  if (!endpoint.writer || driveModeRequestPending) return false;
+  driveModeRequestPending = true;
+  endpoint.driveReady = false;
+  $("#mode-drive").value = "drivetrain";
+  updateDriveCommandState("activating drivetrain runtime","waiting");
+  addLog("drive","# activating drivetrain runtime before sending controls");
+  const sent = await send("drive","mode drivetrain");
+  if (!sent) {
+    driveModeRequestPending = false;
+    updateDriveCommandState("mode request failed","failed");
+    return false;
+  }
+  if (driveModeTimer) clearTimeout(driveModeTimer);
+  driveModeTimer = setTimeout(() => {
+    if (endpointMap.drive.driveReady) return;
+    driveModeRequestPending = false;
+    pendingDriveCommand = null;
+    updateDriveCommandState("no drivetrain runtime response","failed");
+    addLog("drive","# no DRIVE,READY response; flash the system-test firmware and reconnect");
+  },5000);
+  return true;
+}
+
+async function driveCommand(command) {
+  const endpoint = endpointMap.drive;
+  if (!endpoint.writer) {
+    updateDriveCommandState("drivetrain disconnected","failed");
+    return send("drive",command);
+  }
+  if (endpoint.driveReady) {
+    updateDriveCommandState(`sending ${command}`,"waiting");
+    return send("drive",command);
+  }
+  pendingDriveCommand = command;
+  updateDriveCommandState(`queued ${command}`,"waiting");
+  await requestDrivetrainRuntime();
+  return true;
+}
+
+async function stopDrive() {
+  heldKeys.clear();
+  pendingDriveCommand = null;
+  updateDriveCommandState("stop requested","waiting");
+  return send("drive","stop");
+}
+
+function handleDriveProtocolLine(line) {
+  const parts = line.split(",");
+  const endpoint = endpointMap.drive;
+  if (parts[1] === "READY") {
+    const ready = parts[2] === "1";
+    endpoint.activeMode = "drivetrain";
+    endpoint.driveReady = ready;
+    driveModeRequestPending = false;
+    if (driveModeTimer) clearTimeout(driveModeTimer);
+    driveModeTimer = null;
+    markDetected("drive","drivetrain-test · ready");
+    if (!ready) {
+      pendingDriveCommand = null;
+      updateDriveCommandState(`initialization failed: ${parts[3] || "unknown"}`,"failed");
+      return;
+    }
+    updateDriveCommandState("drivetrain ready","success");
+    const queued = pendingDriveCommand;
+    pendingDriveCommand = null;
+    if (queued) {
+      addLog("drive",`# runtime ready; sending queued command: ${queued}`);
+      void driveCommand(queued);
+    }
+    return;
+  }
+  if (parts[1] === "RX") {
+    const command = parts.slice(2).join(",");
+    $("#lastDriveCommand").textContent = `${command} ✓`;
+    updateDriveCommandState(`received: ${command}`,"success");
+    return;
+  }
+  if (parts[1] === "ERROR") {
+    updateDriveCommandState(`${parts[2] || "command"} failed: ${parts[3] || "error"}`,"failed");
+  }
+}
+
+function handleDriveLine(line) {
+  if (line.startsWith("#")) {
+    if (/error|failed|not ready|not initialized|must be|usage:|unknown command|rejected|timed out/i.test(line)) {
+      updateDriveCommandState(line.replace(/^#\s*/,""),"failed");
+    } else if (/START|UPDATE|ready|complete|stopped|enabled|coasting|brake engaged/i.test(line)) {
+      updateDriveCommandState(line.replace(/^#\s*/,""),"success");
+    }
+    return;
+  }
+  const parts = line.replace(/^>\s*/,"").split(",");
+  if (parts[0] === "TAPE" && parts.length === 9) {
+    const [front,back,left] = parts.slice(2,5);
+    if ([front,back,left].every(bits => /^[01]{4}$/.test(bits))) {
+      [["front",front],["back",back],["left",left]].forEach(([name,bits]) => {
+        const module = $(`#tape-${name}`);
+        module.classList.toggle("match",bits === "0110");
+        module.querySelectorAll(".bit").forEach((bit,index) => {
+          bit.textContent = bits[index];
+          bit.classList.toggle("on",bits[index] === "1");
+        });
+      });
+      $("#tapeState").textContent = `${parts[5]} · error ${parts[6]} · correction ${parts[7]} m/s`;
+    }
+    return;
+  }
+  if (parts.length !== 6 || !/^\d+$/.test(parts[0])) return;
+  const key = parts[1].slice(0,2);
+  if (!wheels.some(wheel => wheel.key === key)) return;
+  const [count,target,measured,duty] = parts.slice(2).map(Number);
+  if ([count,target,measured,duty].some(Number.isNaN)) return;
+  $(`#wheel-${key}-velocity`).textContent = `${measured.toFixed(3)} m/s`;
+  $(`#wheel-${key}-detail`).textContent = `target ${target.toFixed(3)} · duty ${duty.toFixed(2)} · count ${count}`;
+  $("#driveRxState").textContent = "live telemetry";
+  setTagState($("#driveRxState"),"success");
+}
+
+function buildTofUi() {
+  for (const id of ["tofDrive","tofTop"]) renderTofProcess(id);
+  $("#tofSensors").innerHTML = SENSOR_CONFIG.map(sensor => `<article class="sensor" id="sensor-${sensor.key.replace(":","-")}"><div class="sensor-head"><h3>${sensor.name}</h3><span class="address">${sensor.address}</span></div><div class="distance">-- mm</div><small>${sourceLabel(sensor.endpoint)} · waiting for verification</small></article>`).join("");
+  $("#tofGrid").innerHTML = Array.from({length:16},(_,index) => `<div class="tof-cell" id="tof-cell-${index}">--</div>`).join("");
+}
+
+function renderTofProcess(id) {
+  const model = tof[id];
+  $(`#${id}Process`).innerHTML = TOF_STEPS[id].map((label,index) => {
+    let state = "";
+    if (model.steps[index] === "failed") state = "failed";
+    else if (index < model.next || model.steps[index] === "done") state = "done";
+    else if (index === model.next) state = "current";
+    return `<div class="process-step ${state}"><span class="num">${index}</span><b>${label}</b><span>${model.steps[index] || (index === model.next ? "next" : "pending")}</span></div>`;
+  }).join("");
+  $(`#${id}Next`).textContent = model.next;
+  $(`#${id}State`).textContent = model.state;
+}
+
+function handleTofLine(id,line) {
+  if (!line.startsWith("TOF,")) return;
+  const parts = line.split(",");
+  const type = parts[1] || "";
+  const model = tof[id];
+  if (type === "READY") {
+    model.state = `${parts[2] || "unknown"} ready`;
+  } else if (type === "RESET") {
+    model.next = 0; model.state = "reset"; model.steps = [];
+  } else if (type === "STEP_BEGIN") {
+    const stage = parts[2];
+    const stageIndex = {shutdown:0,bus:1,ranging:5}[stage];
+    if (stageIndex !== undefined) model.next = stageIndex;
+    model.state = `running ${stage}`;
+  } else if (type === "NEXT") {
+    model.next = Number(parts[2]) || 0; model.state = "ready";
+  } else if (type === "STATE") {
+    model.next = Number(parts[3]) || 0;
+    model.state = `${parts[2] || "unknown"} synchronized`;
+  } else if (type === "EVENT") {
+    const event = parts[2] || "";
+    const sensorName = parts[4] || "";
+    let step = event === "shutdown_ok" ? 0 : event === "bus_ok" ? 1 : sensorStep(id,sensorName);
+    if (Number.isFinite(step)) {
+      model.next = step;
+      model.steps[step] = /error|fail/.test(event) ? "failed" : /_ok$/.test(event) ? "done" : "running";
+    }
+  } else if (type === "ERROR") {
+    model.state = "error";
+    if (model.next >= 0 && model.next < TOF_STEPS[id].length) model.steps[model.next] = "failed";
+  } else if (["SENSOR","VERIFY","DIST"].includes(type)) {
+    updateTofSensor(id,parts);
+  } else if (type === "GRID") {
+    const count = Number(parts[4]);
+    const values = parts.slice(5,5 + count).map(Number);
+    if (count >= 16 && values.length >= 16 && values.every(Number.isFinite)) {
+      values.slice(0,16).forEach((distance,index) => updateGridCell(index,distance));
+      $("#gridStatus").textContent = "live";
+      setTagState($("#gridStatus"),"success");
+    }
+  } else if (type === "RANGING") {
+    model.next = 6; model.steps[5] = "done"; model.state = "ranging";
+  } else if (type === "COMPLETE") {
+    model.next = 6; model.steps[5] = "done"; model.state = "complete";
+  } else if (type === "STOPPED") {
+    model.state = "stopped";
+  }
+  renderTofProcess(id);
+}
+
+function sensorStep(id,name) {
+  const order = id === "tofDrive" ? ["right","left","center"] : ["middle","left","right"];
+  const index = order.indexOf(String(name).toLowerCase());
+  return index >= 0 ? index + 2 : NaN;
+}
+
+function findSensor(id,text) {
+  const normalized = String(text).toLowerCase();
+  return SENSOR_CONFIG.find(sensor => sensor.endpoint === id && normalized.includes(sensor.name.split(" ")[0].toLowerCase()))
+    || SENSOR_CONFIG.find(sensor => sensor.endpoint === id && normalized.includes(sensor.address.toLowerCase()));
+}
+
+function updateTofSensor(id,parts) {
+  const line = parts.join(" ");
+  const sensor = findSensor(id,line);
+  if (!sensor) return;
+  const card = $(`#sensor-${sensor.key.replace(":","-")}`);
+  const distance = parts[1] === "DIST" ? Number(parts[4]) : NaN;
+  const failed = /fail|error|missing|collision/i.test(line);
+  const sensorState = parts[1] === "SENSOR" ? parts[3] : "";
+  const sensorError = parts[1] === "SENSOR" ? Number(parts[5]) : 0;
+  const verified = parts[1] === "VERIFY" && parts[4] === "1";
+  const validDistance = parts[1] === "DIST" && parts[5] === "1";
+  const passed = verified || validDistance || /ready|ranging|address_assigned/i.test(sensorState);
+  const hasFailed = failed || sensorError !== 0;
+  card.classList.toggle("bad",hasFailed);
+  card.classList.toggle("ok",!hasFailed && passed);
+  if (Number.isFinite(distance)) card.querySelector(".distance").textContent = `${distance} mm`;
+  card.querySelector("small").textContent = line;
+}
+
+function updateGridCell(index,distance) {
+  const cell = $(`#tof-cell-${index}`);
+  cell.textContent = `${distance} mm`;
+  const hue = Math.max(0,Math.min(120,distance / 1000 * 120));
+  cell.style.background = `hsl(${hue} 45% 18%)`;
+  cell.style.borderColor = `hsl(${hue} 45% 35%)`;
+}
+
+function buildArmUi() {
+  $("#servoGrid").innerHTML = SERVOS.map((name,index) => {
+    const id = index + 1;
+    return `<article class="actuator servo" id="servo-card-${id}">
+      <div class="actuator-head"><div><h3>Servo ${id} · ${name}</h3><span class="tag">awaiting telemetry</span></div><div class="position" id="servo-position-${id}">--°<small>commanded angle</small></div></div>
+      <div class="controls">
+        <div class="mini-grid"><button data-arm-command="servo goto ${id} a">Position A</button><button data-arm-command="servo neutral ${id}">Neutral</button><button data-arm-command="servo goto ${id} b">Position B</button></div>
+        <div class="inline" style="margin-top:7px"><label>Angle (deg)<input id="servo-angle-${id}" type="number" min="0" max="180" step="1" value="45"></label><button data-arm-build="servo-angle" data-id="${id}" class="primary">Move</button></div>
+      </div>
+      <details><summary>Positions and PWM configuration</summary><div class="advanced">
+        <div class="inline"><label>A (deg)<input id="servo-a-${id}" type="number" min="0" max="180" value="44"></label><button data-arm-build="servo-a" data-id="${id}">Set A</button><label>B (deg)<input id="servo-b-${id}" type="number" min="0" max="180" value="46"></label><button data-arm-build="servo-b" data-id="${id}">Set B</button></div>
+        <div class="inline"><label>Hz<input id="servo-hz-${id}" type="number" min="1" max="1000" value="50"></label><label>Min µs<input id="servo-min-${id}" type="number" min="500" max="2500" value="1000"></label><label>Max µs<input id="servo-max-${id}" type="number" min="500" max="2500" value="2000"></label><button data-arm-build="servo-pwm" data-id="${id}">Apply</button></div>
+      </div></details>
+    </article>`;
+  }).join("");
+  $("#stepperGrid").innerHTML = STEPPERS.map((name,index) => {
+    const id = index + 1, range = STEPPER_RANGES[index];
+    return `<article class="actuator stepper" id="stepper-card-${id}">
+      <div class="actuator-head"><div><h3>Stepper ${id} · ${name}</h3><span class="tag" id="stepper-state-${id}">awaiting telemetry</span></div><div class="position" id="stepper-position-${id}">-- mm<small>-- steps</small></div></div>
+      <div class="controls">
+        <div class="mini-grid">${[-10,-1,1,10].map(amount => `<button data-arm-command="stepper mm ${id} ${amount}">${amount > 0 ? "+" : ""}${amount} mm</button>`).join("")}<button data-arm-command="stepper home ${id}">Set home</button><button class="danger-button" data-arm-command="stop stepper ${id}">STOP</button></div>
+        <div class="inline" style="margin-top:7px"><label>Custom distance (mm)<input id="stepper-mm-${id}" type="number" min="-${range}" max="${range}" step="0.1" value="1"></label><button data-arm-build="stepper-mm" data-id="${id}" class="primary">Jog</button></div>
+      </div>
+      <details><summary>Steps, timing, and full range</summary><div class="advanced">
+        <div class="inline"><label>Signed steps<input id="stepper-steps-${id}" type="number" step="1" value="1"></label><button data-arm-build="stepper-steps" data-id="${id}">Jog steps</button></div>
+        <div class="inline"><label>Pulse high (µs)<input id="stepper-pulse-${id}" type="number" min="1" value="3"></label><label>Between steps (µs)<input id="stepper-delay-${id}" type="number" min="1" value="${STEPPER_DELAYS[index]}"></label><button data-arm-build="stepper-timing" data-id="${id}">Apply</button></div>
+        <div class="inline"><label>Full range (mm)<input id="stepper-range-${id}" type="number" min="0.1" value="${range}"></label><button data-arm-build="stepper-range" data-id="${id}">Set range</button><button data-arm-command="stepper full ${id} negative">− full</button><button data-arm-command="stepper full ${id} positive">+ full</button></div>
+      </div></details>
+    </article>`;
+  }).join("");
+}
+
+function armInput(id) {
+  const input = $(`#${id}`);
+  if (!input.reportValidity()) return null;
+  const result = Number(input.value);
+  return Number.isFinite(result) ? result : null;
+}
+
+function buildArmCommand(action,id) {
+  if (action === "servo-angle") return `servo angle ${id} ${armInput(`servo-angle-${id}`)}`;
+  if (action === "servo-a") return `servo a ${id} ${armInput(`servo-a-${id}`)}`;
+  if (action === "servo-b") return `servo b ${id} ${armInput(`servo-b-${id}`)}`;
+  if (action === "servo-pwm") return `servo pwm ${id} ${armInput(`servo-hz-${id}`)} ${armInput(`servo-min-${id}`)} ${armInput(`servo-max-${id}`)}`;
+  if (action === "stepper-mm") return `stepper mm ${id} ${armInput(`stepper-mm-${id}`)}`;
+  if (action === "stepper-steps") return `stepper steps ${id} ${armInput(`stepper-steps-${id}`)}`;
+  if (action === "stepper-timing") return `stepper timing ${id} ${armInput(`stepper-pulse-${id}`)} ${armInput(`stepper-delay-${id}`)}`;
+  if (action === "stepper-range") return `stepper range ${id} ${armInput(`stepper-range-${id}`)}`;
+  return null;
+}
+
+function handleArmLine(line) {
+  const parts = line.split(",");
+  if (parts[0] === "servo" && parts.length === 9) {
+    const [id,current,a,b,hz,minUs,maxUs,ready] = parts.slice(1).map(Number);
+    if (!Number.isFinite(id) || id < 1 || id > SERVOS.length) return;
+    $(`#servo-position-${id}`).innerHTML = `${current}°<small>commanded angle</small>`;
+    const tag = $(`#servo-card-${id} .tag`);
+    tag.textContent = ready ? `${hz} Hz · ${minUs}-${maxUs} µs` : "initialization failed";
+    setTagState(tag,ready ? "success" : "failed");
+    [["angle",current],["a",a],["b",b],["hz",hz],["min",minUs],["max",maxUs]].forEach(([field,val]) => {
+      const input = $(`#servo-${field}-${id}`);
+      if (input && document.activeElement !== input) input.value = val;
+    });
+    $("#armRxState").textContent = "live telemetry";
+    setTagState($("#armRxState"),"success");
+  } else if (parts[0] === "stepper" && parts.length === 10) {
+    const [id,steps,mm,rangeMm,rangeSteps,pulseUs,delayUs,moving,ready] = parts.slice(1).map(Number);
+    if (!Number.isFinite(id) || id < 1 || id > STEPPERS.length) return;
+    $(`#stepper-position-${id}`).innerHTML = `${mm.toFixed(3)} mm<small>${steps} steps</small>`;
+    const tag = $(`#stepper-state-${id}`);
+    tag.textContent = !ready ? "initialization failed" : moving ? "moving" : `idle · ±${rangeMm.toFixed(1)} mm`;
+    setTagState(tag,!ready ? "failed" : moving ? "running" : "success");
+    [["range",rangeMm],["pulse",pulseUs],["delay",delayUs]].forEach(([field,val]) => {
+      const input = $(`#stepper-${field}-${id}`);
+      if (input && document.activeElement !== input) input.value = val;
+    });
+    $(`#stepper-steps-${id}`).min = -rangeSteps;
+    $(`#stepper-steps-${id}`).max = rangeSteps;
+  }
+}
+
+function selectPage(page) {
+  currentPage = page;
+  $$(".page").forEach(element => element.classList.toggle("active",element.id === `page-${page}`));
+  $$("[data-page-button]").forEach(button => button.classList.toggle("active",button.dataset.pageButton === page));
+  if (page === "coordination") {
+    $("#mode-drive").value = "coordination";
+    $("#mode-top").value = "coordination";
+  } else if (page === "drivetrain") {
+    $("#mode-drive").value = "drivetrain";
+    if (endpointMap.drive.writer && !endpointMap.drive.driveReady) {
+      void requestDrivetrainRuntime();
+    }
+  } else if (page === "tof") {
+    $("#mode-drive").value = "tof";
+    $("#mode-top").value = "tof";
+  } else if (page === "arm") {
+    $("#mode-top").value = "arm";
+  }
+}
+
+async function activateMode(id) {
+  const mode = $(`#mode-${id}`).value;
+  if (id === "drive" && mode === "drivetrain") {
+    pendingDriveCommand = null;
+    return requestDrivetrainRuntime();
+  }
+  if (id === "drive") {
+    endpointMap.drive.driveReady = false;
+    updateDriveCommandState(`switching to ${mode}`,"waiting");
+  }
+  await send(id,"stop",false);
+  if (id === "drive") await send(id,"cancel",false);
+  await new Promise(resolve => setTimeout(resolve,100));
+  await send(id,`mode ${mode}`);
+}
+
+async function stopEverything() {
+  heldKeys.clear();
+  pendingDriveCommand = null;
+  await send("drive","stop",false);
+  await send("coordDrive","cancel",false);
+  await send("top","stop",false);
+  addLog("drive","> stop (global)");
+  addLog("arm","> stop (global)");
+  addEvent("coordDrive","TX cancel (global)");
+}
+
+function bindEvents() {
+  $$("[data-page-button]").forEach(button => button.onclick = () => selectPage(button.dataset.pageButton));
+  $$("[data-connect]").forEach(button => button.onclick = () => connectEndpoint(button.dataset.connect));
+  $$("[data-disconnect]").forEach(button => button.onclick = () => disconnectEndpoint(button.dataset.disconnect));
+  $$("[data-activate-mode]").forEach(button => button.onclick = () => activateMode(button.dataset.activateMode));
+  $$("[data-send]").forEach(button => button.onclick = () => {
+    const colon = button.dataset.send.indexOf(":");
+    const endpoint = button.dataset.send.slice(0,colon);
+    const command = button.dataset.send.slice(colon + 1);
+    if (endpoint === "drive") {
+      if (command === "stop") void stopDrive();
+      else void driveCommand(command);
+    } else {
+      send(endpoint,command);
+    }
+    if (button.dataset.send === "coordDrive:status") send("coordTop","status");
+  });
+  $$("[data-clear-log]").forEach(button => button.onclick = () => {
+    const element = logElementFor(button.dataset.clearLog);
+    if (element) element.textContent = "";
+  });
+  $("#stopEverything").onclick = stopEverything;
+  $("#clearTimeline").onclick = () => { coordination.timeline = []; $("#coordTimeline").innerHTML = ""; };
+  $("#resetCoordination").onclick = async () => {
+    addEvent("coordDrive","Recovery requested: cancelling orphaned work and creating fresh sessions");
+    await send("coordDrive","reset");
+    await send("coordTop","reset");
+  };
+  $("#startTask").onclick = () => {
+    const type = $("#taskType").value;
+    const command = type === "tape" ? `start tape ${$("#taskSpeed").value} ${$("#taskDistance").value}` : `start ${type}`;
+    send("coordDrive",command);
+    renderWorkflow(type,0,"pending","pending");
+  };
+  $("#taskType").onchange = () => {
+    const status = normalizedStatus(
+      value(coordination.drive,"taskStatus","status"));
+    if (status === "idle" || !Object.keys(coordination.drive).length) {
+      renderWorkflow($("#taskType").value,0,"pending","ready to start");
+      $("#mTask").textContent = `${$("#taskType").value} (preview)`;
+    }
+  };
+  $("#applyAutoComplete").onclick = () => send("coordTop",`auto ${Math.max(0,Math.round(Number($("#autoComplete").value) || 0))}`);
+  $$("[data-drive-motion]").forEach(button => button.onclick = () => driveMotion(button.dataset.driveMotion));
+  $$("[data-pair-wheel]").forEach(button => button.onclick = () => {
+    try {
+      const duty = driveNumber("driveDuty",.01,.8);
+      const duration = Math.round(driveNumber("driveDuration",1,10000));
+      driveCommand(`pair ${button.dataset.pairWheel} ${duty} ${duration}`);
+    } catch (error) { addLog("drive",`# ${error.message}`); }
+  });
+  $("#driveCw").onclick = () => driveCommand(`cw ${$("#driveTurn").value} ${$("#driveDuration").value}`);
+  $("#driveCcw").onclick = () => driveCommand(`ccw ${$("#driveTurn").value} ${$("#driveDuration").value}`);
+  $("#driveSequence").onclick = () => driveCommand(`sequence ${$("#driveSpeed").value} ${$("#driveDuration").value}`);
+  $("#moveDistance").onclick = () => driveCommand(`distance ${$("#distanceDirection").value} ${$("#driveDistance").value} ${$("#driveSpeed").value}`);
+  $("#turnAngle").onclick = () => driveCommand(`turn-angle ${$("#angleDirection").value} ${$("#driveAngle").value} ${$("#driveTurn").value}`);
+  $("#tapeCenter").onclick = () => driveCommand(`tape-center ${$("#tapeSensor").value} ${$("#tapeStrafe").value} ${$("#tapeDuration").value} 1`);
+  $("#tapeForward").onclick = () => driveCommand(`tape-follow front ${$("#tapeTravel").value} ${$("#tapeStrafe").value} ${$("#tapeDuration").value} 1`);
+  $("#tapeBackward").onclick = () => driveCommand(`tape-follow back ${$("#tapeTravel").value} ${$("#tapeStrafe").value} ${$("#tapeDuration").value} 1`);
+  $$("[data-tof-action]").forEach(button => button.onclick = () => {
+    const [id,command] = button.dataset.tofAction.split(":");
+    send(id,`${command} ${tof[id].next}`);
+  });
+  $$("[data-arm-command]").forEach(button => button.onclick = () => send("arm",button.dataset.armCommand));
+  $$("[data-arm-build]").forEach(button => button.onclick = () => {
+    const command = buildArmCommand(button.dataset.armBuild,Number(button.dataset.id));
+    if (command && !command.includes("null")) send("arm",command);
+  });
+  document.addEventListener("keydown",event => {
+    if (event.key === " " && !["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName)) {
+      event.preventDefault(); stopEverything(); return;
+    }
+    if (currentPage !== "drivetrain" || ["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName) || event.ctrlKey || event.altKey || event.metaKey) return;
+    const key = event.key.toLowerCase();
+    if (!["w","a","s","d","q","e"].includes(key) || heldKeys.has(key)) return;
+    event.preventDefault(); heldKeys.add(key); syncHeldDrive();
+  });
+  document.addEventListener("keyup",event => {
+    const key = event.key.toLowerCase();
+    if (!heldKeys.has(key)) return;
+    event.preventDefault(); heldKeys.delete(key); syncHeldDrive();
+  });
+  window.addEventListener("blur",() => { if (heldKeys.size) void stopDrive(); });
+  navigator.serial?.addEventListener("disconnect",event => {
+    const endpoint = ENDPOINTS.find(item => endpointMap[item.id].port === event.target);
+    if (endpoint) disconnectEndpoint(endpoint.id,false);
+  });
+}
+
+function syncHeldDrive() {
+  const x = Number(heldKeys.has("w")) - Number(heldKeys.has("s"));
+  const y = Number(heldKeys.has("d")) - Number(heldKeys.has("a"));
+  const ccw = heldKeys.has("q"), cw = heldKeys.has("e");
+  if (ccw !== cw) return driveCommand(`${ccw ? "ccw" : "cw"} ${$("#driveTurn").value} 10000`);
+  let command = "";
+  if (x > 0 && y < 0) command = "forward-left";
+  else if (x > 0 && y > 0) command = "forward-right";
+  else if (x < 0 && y < 0) command = "backward-left";
+  else if (x < 0 && y > 0) command = "backward-right";
+  else if (x > 0) command = "forward";
+  else if (x < 0) command = "backward";
+  else if (y < 0) command = "left";
+  else if (y > 0) command = "right";
+  if (command) driveCommand(`${command} ${$("#driveSpeed").value} 10000`);
+  else stopDrive();
+}
+
+function updateRxAges() {
+  const now = Date.now();
+  [["drive","#driveRxState"],["top","#armRxState"]].forEach(([id,selector]) => {
+    const endpoint = endpointMap[id], tag = $(selector);
+    if (!endpoint.writer) { tag.textContent = "offline"; setTagState(tag,"idle"); return; }
+    if (!endpoint.lastRx) { tag.textContent = "waiting for RX"; setTagState(tag,"waiting"); return; }
+    const age = (now - endpoint.lastRx) / 1000;
+    tag.textContent = age < 3 ? `RX ${age.toFixed(1)}s ago` : "RX stale";
+    setTagState(tag,age < 1 ? "success" : age < 3 ? "waiting" : "failed");
+  });
+}
+
+buildConnectionRack();
+buildDriveUi();
+buildTofUi();
+buildArmUi();
+renderCoordination();
+renderWorkflow("none",0,"idle","idle");
+bindEvents();
+ENDPOINTS.forEach(item => setEndpointUi(item.id,"idle","not connected"));
+$("#serialSupport").textContent = "serial" in navigator ? "Web Serial ready" : "Web Serial unavailable";
+$("#serialSupport").style.color = "serial" in navigator ? "var(--greenl)" : "var(--redl)";
+setInterval(updateRxAges,250);
+setInterval(() => { if (heldKeys.size && endpointMap.drive.writer) syncHeldDrive(); },3000);
+})();
+</script>
+</body>
+</html>

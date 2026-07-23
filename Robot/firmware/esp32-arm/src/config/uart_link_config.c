@@ -18,7 +18,7 @@ const UartLinkConfig DRIVETRAIN_UART_LINK_CONFIG = {
 // the drivetrain link above -- UART1 is already in use for that connection.
 // Baud must match SERIAL_BAUD in the Pi's uart_link.py.
 // Uses UART2 for the electrically separate Raspberry Pi connection.
-// The application should initialize this link when the Pi packet protocol is integrated.
+// Production owns this link through its dedicated Pi PacketRouter.
 const UartLinkConfig PI_UART_LINK_CONFIG = {
     .uart_num = UART_NUM_2,
     .tx_pin = PIN_PI_UART_TX,

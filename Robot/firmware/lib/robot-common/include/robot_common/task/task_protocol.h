@@ -19,20 +19,22 @@ typedef enum {
 } TaskCommandType;
 
 typedef enum {
-    TASK_CONTROLLER_DRIVETRAIN = 0,
-    TASK_CONTROLLER_ARM,
-} TaskControllerId;
+    TASK_ENDPOINT_DRIVETRAIN = 0,
+    TASK_ENDPOINT_TOP,
+    TASK_ENDPOINT_PI,
+    TASK_ENDPOINT_COUNT,
+} TaskEndpointId;
 
 typedef struct {
-    uint32_t coordinator_session_id;
+    uint32_t requester_session_id;
     uint32_t command_id;
     TaskCommandType type;
     TaskStepCommand step;
 } TaskCommandMessage;
 
 typedef struct {
-    uint32_t coordinator_session_id;
-    uint32_t arm_session_id;
+    uint32_t requester_session_id;
+    uint32_t executor_session_id;
     uint32_t execution_id;
     uint32_t command_id;
     TaskStepStatus status;
@@ -40,7 +42,7 @@ typedef struct {
 } TaskStatusMessage;
 
 typedef struct {
-    TaskControllerId sender;
+    TaskEndpointId sender;
     uint32_t session_id;
 } TaskHeartbeatMessage;
 

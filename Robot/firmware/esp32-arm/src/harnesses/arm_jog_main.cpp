@@ -10,6 +10,12 @@
 #include "drivers/servo_driver.h"
 #include "drivers/stepper_driver.h"
 
+#ifdef SYSTEM_TEST_BUILD
+#include "system_test_mode.h"
+#define setup arm_jog_test_setup
+#define loop arm_jog_test_loop
+#endif
+
 namespace {
 
 constexpr size_t kServoCount = 7;
@@ -434,6 +440,9 @@ void process_stop_command(String tokens[], int count) {
 void process_command_line(String line) {
     line.trim();
     if (line.length() == 0) return;
+#ifdef SYSTEM_TEST_BUILD
+    if (system_test_handle_mode_command(line)) return;
+#endif
     String tokens[8];
     const int count = split_tokens(line, tokens, 8);
     if (count == 0) return;

@@ -12,6 +12,16 @@
 #define ENCODER_APB_CLK_HZ 80000000UL
 #define ENCODER_PCNT_FILTER_MAX_CYCLES 1023
 
+// Counts per encoder line under 4x quadrature decoding (fixed by how channels
+// A and B are configured below, not tunable). Velocity is only computed over
+// whole multiples of this many counts so that the uneven sub-line spacing
+// between A-rise/B-rise/A-fall/B-fall cancels out instead of showing up as
+// ripple. Note: if direction reverses mid-group, the carried remainder no
+// longer represents a coherent group of one direction; the arithmetic stays
+// sign-safe, but the cancellation rationale only strictly holds within a
+// single direction of rotation.
+#define ENCODER_QUADRATURE_GROUP_SIZE 4
+
 // Checks encoder IDs, pins, PCNT resources, geometry, limits, and filter range.
 bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
     if (config == NULL) return false;
@@ -26,6 +36,7 @@ bool encoder_driver_config_is_valid(const EncoderDriverConfig *config) {
     if (!isfinite(config->wheel_diameter_m) || config->wheel_diameter_m <= 0.0f) return false;
     if (config->high_limit <= 0 || config->low_limit >= 0) return false;
     if (config->low_limit >= config->high_limit) return false;
+    if (config->low_speed_timeout_us == 0) return false;
     uint64_t filter_cycles =
         ((uint64_t)config->glitch_filter_ns * ENCODER_APB_CLK_HZ + 999999999ULL) /
         1000000000ULL;
@@ -199,7 +210,9 @@ esp_err_t encoder_driver_init(EncoderDriver *encoder, const EncoderDriverConfig 
         if (err != ESP_OK) return err;
     }
 
-    encoder->last_timestamp_us = esp_timer_get_time();
+    int64_t now = esp_timer_get_time();
+    encoder->last_timestamp_us = now;
+    encoder->velocity_window_start_us = now;
     encoder->initialized = true;
 
     return ESP_OK;
@@ -213,7 +226,11 @@ esp_err_t encoder_driver_start(EncoderDriver *encoder) {
     if (err != ESP_OK) return err;
 
     encoder->enabled = true;
-    encoder->last_timestamp_us = esp_timer_get_time();
+
+    int64_t now = esp_timer_get_time();
+    encoder->last_timestamp_us = now;
+    encoder->velocity_window_start_us = now;
+    encoder->velocity_remainder_count = 0;
 
     return ESP_OK;
 }
@@ -243,7 +260,12 @@ esp_err_t encoder_driver_reset(EncoderDriver *encoder) {
     if (err != ESP_OK) return err;
 
     encoder->accumulated_count = 0;
-    encoder->last_timestamp_us = esp_timer_get_time();
+
+    int64_t now = esp_timer_get_time();
+    encoder->last_timestamp_us = now;
+    encoder->velocity_window_start_us = now;
+    encoder->velocity_remainder_count = 0;
+
     encoder->velocity_mps = 0.0f;
     encoder->velocity_rps = 0.0f;
 
@@ -312,18 +334,42 @@ esp_err_t encoder_driver_update(EncoderDriver *encoder) {
     int64_t current_timestamp_us = esp_timer_get_time();
     int64_t delta_time_us = current_timestamp_us - encoder->last_timestamp_us;
     if (delta_time_us <= 0) return ESP_ERR_INVALID_STATE;
-    float delta_time_s = (float)delta_time_us / 1000000.0f;
 
     int32_t delta_count = 0;
     esp_err_t err = encoder_driver_flush_delta(encoder, &delta_count);
     if (err != ESP_OK) return err;
 
-    float delta_revolutions = (float)delta_count / (float)encoder->config->counts_per_revolution;
+    // Only compute velocity over whole quadrature groups (see
+    // ENCODER_QUADRATURE_GROUP_SIZE) so per-edge asymmetry cancels out; any
+    // leftover counts are carried into the next window. If a full group
+    // hasn't formed within low_speed_timeout_us, fall back to whatever
+    // partial count is pending so low-speed readings stay responsive and
+    // decay to true zero on an actual stop.
+    int32_t total_pending = encoder->velocity_remainder_count + delta_count;
+    int32_t usable = total_pending - (total_pending % ENCODER_QUADRATURE_GROUP_SIZE);
+    bool timed_out = (current_timestamp_us - encoder->velocity_window_start_us) >=
+                      (int64_t)encoder->config->low_speed_timeout_us;
+
+    if (usable == 0 && !timed_out) {
+        // Not enough counts yet and still within the timeout: hold the last
+        // velocity estimate rather than reporting a false zero.
+        encoder->velocity_remainder_count = total_pending;
+        encoder->last_timestamp_us = current_timestamp_us;
+        return ESP_OK;
+    }
+
+    int32_t counts_for_velocity = (usable != 0) ? usable : total_pending;
+    int64_t window_us = current_timestamp_us - encoder->velocity_window_start_us;
+    float window_s = (float)window_us / 1000000.0f;
+
+    float delta_revolutions = (float)counts_for_velocity / (float)encoder->config->counts_per_revolution;
     float circumference_m = ENCODER_PI * encoder->config->wheel_diameter_m;
 
-    encoder->velocity_rps = delta_revolutions / delta_time_s;
+    encoder->velocity_rps = delta_revolutions / window_s;
     encoder->velocity_mps = circumference_m * encoder->velocity_rps;
 
+    encoder->velocity_remainder_count = total_pending - counts_for_velocity;
+    encoder->velocity_window_start_us = current_timestamp_us;
     encoder->last_timestamp_us = current_timestamp_us;
 
     return ESP_OK;

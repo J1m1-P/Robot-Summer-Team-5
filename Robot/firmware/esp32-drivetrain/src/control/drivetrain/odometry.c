@@ -22,10 +22,11 @@ esp_err_t drivetrain_odometry_update(
         return ESP_OK;
     }
 
+    /* Right-handed frame: +x forward, +y left, +heading CCW. */
     const float cosine = cosf(odometry->pose.heading_rad);
     const float sine = sinf(odometry->pose.heading_rad);
-    odometry->pose.x_mm += cosine * delta->forward_mm + sine * delta->lateral_mm;
-    odometry->pose.y_mm += -sine * delta->forward_mm + cosine * delta->lateral_mm;
+    odometry->pose.x_mm += cosine * delta->forward_mm - sine * delta->lateral_mm;
+    odometry->pose.y_mm += sine * delta->forward_mm + cosine * delta->lateral_mm;
     odometry->pose.heading_rad += delta->heading_delta_rad;
     return ESP_OK;
 }
@@ -33,4 +34,20 @@ esp_err_t drivetrain_odometry_update(
 // Restores pose and fault fields to their zero defaults.
 void drivetrain_odometry_reset(DrivetrainOdometry *odometry) {
     if (odometry != NULL) memset(odometry, 0, sizeof(*odometry));
+}
+
+// Re-anchors pose to an arbitrary value and clears fault state.
+esp_err_t drivetrain_odometry_set_pose(
+    DrivetrainOdometry *odometry,
+    const DrivetrainPose *pose
+) {
+    if (odometry == NULL || pose == NULL ||
+        !isfinite(pose->x_mm) || !isfinite(pose->y_mm) ||
+        !isfinite(pose->heading_rad)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    odometry->pose = *pose;
+    odometry->fault_latched = false;
+    odometry->last_fault = DRIVETRAIN_ODOMETRY_FAULT_NONE;
+    return ESP_OK;
 }

@@ -107,6 +107,8 @@ void start_body_command(
         &drivetrain, vx, vy, omega);
     if (error != ESP_OK) {
         output_line("# command rejected: " + String(esp_err_to_name(error)));
+        drivetrain_brake(&drivetrain);
+        drivetrain_ready = false;
         return;
     }
 
@@ -148,7 +150,10 @@ void stop_drive() {
     drive_vx = 0.0f;
     drive_vy = 0.0f;
     drive_omega = 0.0f;
-    if (drivetrain_ready) drivetrain_stop(&drivetrain);
+    if (drivetrain_ready && drivetrain_stop(&drivetrain) != ESP_OK) {
+        drivetrain_brake(&drivetrain);
+        drivetrain_ready = false;
+    }
     output_line("# stopped");
 }
 
@@ -266,6 +271,7 @@ void loop() {
     if (error == ESP_OK) error = drivetrain_update(&drivetrain, esp_timer_get_time());
     if (error != ESP_OK) {
         output_line("# drivetrain update failed: " + String(esp_err_to_name(error)));
+        drivetrain_brake(&drivetrain);
         drivetrain_ready = false;
         return;
     }

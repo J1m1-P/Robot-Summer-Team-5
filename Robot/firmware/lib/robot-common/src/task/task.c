@@ -24,12 +24,8 @@ bool task_request_is_valid(const TaskRequest *request) {
             return tape_params_are_valid(&request->params.tape_following);
         case TASK_TYPE_TOWER_PICKING:
         case TASK_TYPE_TOWER_BUILDING:
+        case TASK_TYPE_TELETUBBY_SCAN:
             return true;
-        case TASK_TYPE_TOWER_ROUTINE:
-            return tape_params_are_valid(
-                       &request->params.tower_routine.tape_to_pieces) &&
-                   tape_params_are_valid(
-                       &request->params.tower_routine.tape_to_base);
         default:
             return false;
     }
@@ -37,7 +33,12 @@ bool task_request_is_valid(const TaskRequest *request) {
 
 // Rejects sentinel or out-of-range actions at module boundaries.
 bool task_action_is_valid(TaskAction action) {
-    return action >= TASK_ACTION_FOLLOW_TAPE && action < TASK_ACTION_COUNT;
+    return action == TASK_ACTION_FOLLOW_TAPE ||
+           action == TASK_ACTION_ALIGN_TO_PIECES ||
+           action == TASK_ACTION_PICK_UP_BLOCK ||
+           action == TASK_ACTION_ALIGN_TO_TAPE ||
+           action == TASK_ACTION_BUILD_TOWER ||
+           action == TASK_ACTION_SCAN_TELETUBBIES;
 }
 
 // Identifies results that permanently close an individual workflow step.

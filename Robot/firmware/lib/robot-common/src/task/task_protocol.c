@@ -41,7 +41,7 @@ static float decode_float(const uint8_t *input) {
 
 // Shares command validation between encoding and decoding.
 static bool command_is_valid(const TaskCommandMessage *message) {
-    return message != NULL && message->coordinator_session_id != 0U &&
+    return message != NULL && message->requester_session_id != 0U &&
            message->step.execution_id != 0U && message->command_id != 0U &&
            message->type <= TASK_COMMAND_CANCEL &&
            task_action_is_valid(message->step.action);
@@ -59,15 +59,15 @@ static bool result_is_valid(TaskStepStatus status, TaskFailure failure) {
 
 // Shares status identity and result validation between both wire directions.
 static bool status_is_valid(const TaskStatusMessage *message) {
-    return message != NULL && message->coordinator_session_id != 0U &&
-           message->arm_session_id != 0U && message->execution_id != 0U &&
+    return message != NULL && message->requester_session_id != 0U &&
+           message->executor_session_id != 0U && message->execution_id != 0U &&
            message->command_id != 0U &&
            result_is_valid(message->status, message->failure);
 }
 
 // Rejects reserved sessions and controller IDs before or after serialization.
 static bool heartbeat_is_valid(const TaskHeartbeatMessage *message) {
-    return message != NULL && message->sender <= TASK_CONTROLLER_ARM &&
+    return message != NULL && message->sender < TASK_ENDPOINT_COUNT &&
            message->session_id != 0U;
 }
 
@@ -81,7 +81,7 @@ bool task_protocol_encode_command(const TaskCommandMessage *message,
     memset(frame_out, 0, sizeof(*frame_out));
     frame_out->message_type = PACKET_TYPE_TASK_COMMAND;
     frame_out->payload_len = TASK_COMMAND_PAYLOAD_SIZE;
-    encode_u32(&frame_out->payload[0], message->coordinator_session_id);
+    encode_u32(&frame_out->payload[0], message->requester_session_id);
     encode_u32(&frame_out->payload[4], message->step.execution_id);
     encode_u32(&frame_out->payload[8], message->command_id);
     frame_out->payload[12] = (uint8_t)message->type;
@@ -106,7 +106,7 @@ bool task_protocol_decode_command(const PacketFrame *frame,
     }
 
     TaskCommandMessage decoded = {0};
-    decoded.coordinator_session_id = decode_u32(&frame->payload[0]);
+    decoded.requester_session_id = decode_u32(&frame->payload[0]);
     decoded.step.execution_id = decode_u32(&frame->payload[4]);
     decoded.command_id = decode_u32(&frame->payload[8]);
     decoded.type = (TaskCommandType)frame->payload[12];
@@ -124,7 +124,7 @@ bool task_protocol_decode_command(const PacketFrame *frame,
     return true;
 }
 
-// Serializes an arm result while enforcing consistent status/failure combinations.
+// Serializes an executor result while enforcing status/failure consistency.
 bool task_protocol_encode_status(const TaskStatusMessage *message,
                                  PacketFrame *frame_out) {
     if (frame_out == NULL || !status_is_valid(message)) {
@@ -134,8 +134,8 @@ bool task_protocol_encode_status(const TaskStatusMessage *message,
     memset(frame_out, 0, sizeof(*frame_out));
     frame_out->message_type = PACKET_TYPE_TASK_STATUS;
     frame_out->payload_len = TASK_STATUS_PAYLOAD_SIZE;
-    encode_u32(&frame_out->payload[0], message->coordinator_session_id);
-    encode_u32(&frame_out->payload[4], message->arm_session_id);
+    encode_u32(&frame_out->payload[0], message->requester_session_id);
+    encode_u32(&frame_out->payload[4], message->executor_session_id);
     encode_u32(&frame_out->payload[8], message->execution_id);
     encode_u32(&frame_out->payload[12], message->command_id);
     frame_out->payload[16] = (uint8_t)message->status;
@@ -153,8 +153,8 @@ bool task_protocol_decode_status(const PacketFrame *frame,
     }
 
     TaskStatusMessage decoded = {0};
-    decoded.coordinator_session_id = decode_u32(&frame->payload[0]);
-    decoded.arm_session_id = decode_u32(&frame->payload[4]);
+    decoded.requester_session_id = decode_u32(&frame->payload[0]);
+    decoded.executor_session_id = decode_u32(&frame->payload[4]);
     decoded.execution_id = decode_u32(&frame->payload[8]);
     decoded.command_id = decode_u32(&frame->payload[12]);
     decoded.status = (TaskStepStatus)frame->payload[16];
@@ -187,7 +187,7 @@ bool task_protocol_decode_heartbeat(const PacketFrame *frame,
         return false;
     }
     TaskHeartbeatMessage decoded = {
-        .sender = (TaskControllerId)frame->payload[0],
+        .sender = (TaskEndpointId)frame->payload[0],
         .session_id = decode_u32(&frame->payload[1]),
     };
     if (!heartbeat_is_valid(&decoded)) return false;

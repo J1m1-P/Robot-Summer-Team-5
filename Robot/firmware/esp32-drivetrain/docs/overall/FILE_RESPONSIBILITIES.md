@@ -253,7 +253,7 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should contain:** diagnostic protocol parsing, Wi-Fi/WebSocket setup, presentation formatting, and harness scheduling.
 - **Should not contain:** raw PWM operations, PI equations, encoder implementation, or board configuration constants.
 - **Dependencies:** Arduino, WiFi, WebSockets, ESP timer, logging, `DRIVETRAIN_CONFIG`, and the public drivetrain API.
-- **Consumers:** the `drive` PlatformIO environment and `tools/drive_dashboard.html` protocol.
+- **Consumers:** the `drive` PlatformIO environment and `tools/deprecated/drive_dashboard.html` protocol.
 - **Interaction:** this is the best current example of how a caller should use the drivetrain facade.
 
 ### `src/harnesses/tuning_main.cpp`
@@ -263,7 +263,7 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should contain:** experimental command parsing, test sequencing, and diagnostic output.
 - **Should not contain:** reusable control equations or permanent robot behavior.
 - **Dependencies:** Arduino, drivetrain configuration, motor/encoder drivers, and wheel PI.
-- **Consumers:** the `tuning` PlatformIO environment and `tools/tuning_dashboard.html` protocol.
+- **Consumers:** the `tuning` PlatformIO environment and `tools/deprecated/tuning_dashboard.html` protocol.
 - **Intentional bypass:** it calls drivers directly instead of `Drivetrain` because single-wheel experimentation is its purpose. That would be inappropriate in production application code.
 
 ### `src/harnesses/drivetrain_test_main.cpp`
@@ -312,19 +312,23 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Telemetry:** plots rolling target/measured wheel velocity and applied duty for all four wheels, displays all three four-channel tape patterns, and reports tape detection, centering error, lateral correction, and exact `0110` matches.
 - **Consumers:** operators running the `drivetrain-test` PlatformIO environment in desktop Chrome or Edge.
 
-### `tools/drive_dashboard.html`
+### `tools/deprecated/drive_dashboard.html` (deprecated)
 
 - **Layer:** host-side diagnostics UI.
 - **Responsibility:** provide controls and visualization for the serial/WebSocket protocol exposed by `drive_main.cpp`.
-- **Should not contain:** authoritative firmware limits or control equations.
-- **Dependency:** its command and telemetry formats must remain synchronized with the drive harness.
+- **Status:** deprecated 2026-07-22 -- superseded by `tools/jog_program_composer.html` for this branch's workflow.
 
-### `tools/tuning_dashboard.html`
+### `tools/deprecated/tuning_dashboard.html` (deprecated)
 
 - **Layer:** host-side calibration UI.
 - **Responsibility:** send tuning commands and display wheel-controller measurements produced by `tuning_main.cpp`.
-- **Should not contain:** production controller state or embedded hardware logic.
-- **Dependency:** tightly coupled to the tuning harness's textual protocol.
+- **Status:** deprecated 2026-07-22 -- wheel-PI gains are tuned and locked into `move_calibration_config.c`; kept only for re-tuning after a mechanical change.
+
+### `tools/deprecated/odometry_plotter.html` (deprecated)
+
+- **Layer:** host-side offline analysis UI.
+- **Responsibility:** paste a captured serial dump and plot its odometry/commanded path.
+- **Status:** deprecated 2026-07-22 -- live trajectory now lives in `tools/jog_program_composer.html`; kept only for offline analysis of a pasted dump.
 
 ## Current dependency and responsibility findings
 

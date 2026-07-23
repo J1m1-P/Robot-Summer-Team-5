@@ -75,12 +75,6 @@ void test_integral_resets_immediately_when_target_becomes_zero() {
     // must not inherit the cruise-phase accumulation.
     wheel_velocity_controller_update(pi, cfg, 0.0f, 0.9f, 0.1f, duty);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, pi.integral);
-}
-
-void test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting() {
-    const WheelVelocityControllerConfig cfg = make_config();
-    WheelVelocityController pi = {};
-    float duty = 0.0f;
 
     // Simulate a coast-down: target is 0 throughout, measured speed
     // decays toward 0 over several cycles. The integral should stay
@@ -108,6 +102,10 @@ void test_stop_command_coasts_to_zero_duty() {
     // (reverse-polarity, actively braking) duty if it weren't overridden --
     // duty must be exactly 0 (coast) instead, regardless of kp/ki/kff.
     wheel_velocity_controller_update(pi, cfg, 0.0f, 0.9f, 0.1f, duty);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
+
+    // The same coast invariant applies once the measured speed reaches zero.
+    wheel_velocity_controller_update(pi, cfg, 0.0f, 0.0f, 0.1f, duty);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
 }
 
@@ -138,28 +136,10 @@ void test_stop_never_pushes_forward_even_with_misconfigured_positive_output() {
     // 0.9 m/s. Duty must be exactly 0 (coast), not merely non-positive.
     wheel_velocity_controller_update(pi, cfg, 0.0f, 0.9f, 0.1f, duty);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
-}
 
-void test_stop_never_pushes_further_backward_when_wheel_already_reversed() {
-    WheelVelocityControllerConfig cfg = make_config();
-    cfg.kp = -0.5f; // same defensive misconfiguration, mirrored for the
-                     // wheel-already-moving-backward case
-    WheelVelocityController pi = {};
-    float duty = 0.0f;
-
-    // measured_mps = -0.9 (wheel already spinning backward), target = 0.
-    // Without the override, kp*error = -0.5*(0-(-0.9)) = -0.45 -- would
-    // drive it further backward instead of coasting it toward 0.
+    // The same invariant must hold when the wheel is already moving
+    // backward; stopping must never command more reverse duty.
     wheel_velocity_controller_update(pi, cfg, 0.0f, -0.9f, 0.1f, duty);
-    TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
-}
-
-void test_stop_at_exactly_zero_measured_produces_zero_duty() {
-    const WheelVelocityControllerConfig cfg = make_config();
-    WheelVelocityController pi = {};
-    float duty = 0.0f;
-
-    wheel_velocity_controller_update(pi, cfg, 0.0f, 0.0f, 0.1f, duty);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, duty);
 }
 
@@ -256,13 +236,10 @@ int main(int argc, char **argv) {
 
     RUN_TEST(test_integral_accumulates_normally_while_target_nonzero);
     RUN_TEST(test_integral_resets_immediately_when_target_becomes_zero);
-    RUN_TEST(test_integral_stays_zero_while_target_remains_zero_and_wheel_still_coasting);
     RUN_TEST(test_stop_command_coasts_to_zero_duty);
     RUN_TEST(test_integral_resumes_accumulating_once_target_goes_nonzero_again);
 
     RUN_TEST(test_stop_never_pushes_forward_even_with_misconfigured_positive_output);
-    RUN_TEST(test_stop_never_pushes_further_backward_when_wheel_already_reversed);
-    RUN_TEST(test_stop_at_exactly_zero_measured_produces_zero_duty);
 
     RUN_TEST(test_slew_limit_caps_first_cycle_jump_from_rest);
     RUN_TEST(test_slew_limit_ramps_toward_target_over_multiple_cycles);

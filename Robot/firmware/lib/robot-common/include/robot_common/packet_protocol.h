@@ -17,9 +17,9 @@ extern "C" {
 typedef enum {
     PACKET_TYPE_INVALID = 0,
     PACKET_TYPE_ODOMETRY,      // arm -> Pi cumulative pose (odometry_packet.h)
-    PACKET_TYPE_COMMAND,       // Pi -> arm steering/mode commands (command_packet.h)
-    PACKET_TYPE_STATUS,        // arm -> Pi status reports (status_packet.h)
-    PACKET_TYPE_TASK_COMMAND,  // arm <-> drivetrain task coordination (task_protocol.h)
+    PACKET_TYPE_COMMAND,       // Reserved legacy value; no production codec.
+    PACKET_TYPE_STATUS,        // Reserved legacy value; no production codec.
+    PACKET_TYPE_TASK_COMMAND,  // Reliable remote task execution (task_protocol.h)
     PACKET_TYPE_TASK_STATUS,
     PACKET_TYPE_HEARTBEAT,
     PACKET_TYPE_MAX

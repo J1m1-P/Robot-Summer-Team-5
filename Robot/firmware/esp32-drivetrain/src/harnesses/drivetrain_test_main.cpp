@@ -64,12 +64,12 @@ struct SequenceStep {
 const SequenceStep kSequence[] = {
     {"forward",        1.0f,             0.0f,             0.0f},
     {"backward",      -1.0f,             0.0f,             0.0f},
-    {"left",           0.0f,            -1.0f,             0.0f},
-    {"right",          0.0f,             1.0f,             0.0f},
-    {"forward-left",   kInverseSqrtTwo, -kInverseSqrtTwo,  0.0f},
-    {"forward-right",  kInverseSqrtTwo,  kInverseSqrtTwo,  0.0f},
-    {"backward-left", -kInverseSqrtTwo, -kInverseSqrtTwo,  0.0f},
-    {"backward-right",-kInverseSqrtTwo,  kInverseSqrtTwo,  0.0f},
+    {"left",           0.0f,             1.0f,             0.0f},
+    {"right",          0.0f,            -1.0f,             0.0f},
+    {"forward-left",   kInverseSqrtTwo,  kInverseSqrtTwo,  0.0f},
+    {"forward-right",  kInverseSqrtTwo, -kInverseSqrtTwo,  0.0f},
+    {"backward-left", -kInverseSqrtTwo,  kInverseSqrtTwo,  0.0f},
+    {"backward-right",-kInverseSqrtTwo, -kInverseSqrtTwo,  0.0f},
     {"cw",              0.0f,             0.0f,            -1.0f},
     {"ccw",             0.0f,             0.0f,             1.0f},
 };

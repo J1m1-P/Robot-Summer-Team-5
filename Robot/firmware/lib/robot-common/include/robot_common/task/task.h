@@ -13,7 +13,7 @@ extern "C" {
 /** Controller that physically executes a workflow action. */
 typedef enum {
     TASK_OWNER_DRIVETRAIN = 0,
-    TASK_OWNER_ARM,
+    TASK_OWNER_TOP,
     TASK_OWNER_COUNT,
 } TaskOwner;
 
@@ -22,20 +22,22 @@ typedef enum {
     TASK_TYPE_TAPE_FOLLOWING = 0,
     TASK_TYPE_TOWER_PICKING,
     TASK_TYPE_TOWER_BUILDING,
-    TASK_TYPE_TOWER_ROUTINE,
+    TASK_TYPE_TELETUBBY_SCAN,
     TASK_TYPE_COUNT,
 } TaskType;
 
 /** Physical actions assigned to one subsystem manager. */
 typedef enum {
     TASK_ACTION_FOLLOW_TAPE = 0,
-    TASK_ACTION_ALIGN_TO_PIECES,
-    TASK_ACTION_PICK_UP_BLOCK,
-    TASK_ACTION_ALIGN_TO_TAPE,
-    TASK_ACTION_ALIGN_TO_BASE,
-    TASK_ACTION_BUILD_TOWER,
-    TASK_ACTION_COUNT,
+    TASK_ACTION_ALIGN_TO_PIECES = 1,
+    TASK_ACTION_PICK_UP_BLOCK = 2,
+    TASK_ACTION_ALIGN_TO_TAPE = 3,
+    TASK_ACTION_BUILD_TOWER = 5,
+    TASK_ACTION_SCAN_TELETUBBIES = 6,
+    TASK_ACTION_COUNT = 7,
 } TaskAction;
+
+#define TASK_ACTION_BIT(action) (UINT32_C(1) << (uint32_t)(action))
 
 /** Authoritative lifecycle state of one task execution. */
 typedef enum {
@@ -67,6 +69,10 @@ typedef enum {
     TASK_FAILURE_PEER_RESET,
     TASK_FAILURE_STALE_MESSAGE,
     TASK_FAILURE_PROTOCOL,
+    TASK_FAILURE_NOT_IMPLEMENTED,
+    TASK_FAILURE_SAFE_STATE_FAILED,
+    TASK_FAILURE_EXECUTOR_UNAVAILABLE,
+    TASK_FAILURE_TARGET_NOT_FOUND,
     TASK_FAILURE_COUNT,
 } TaskFailure;
 
@@ -83,16 +89,9 @@ typedef struct {
     float distance_m;
 } TapeFollowingTaskParams;
 
-/** Immutable inputs for the complete collect-and-build routine. */
-typedef struct {
-    TapeFollowingTaskParams tape_to_pieces;
-    TapeFollowingTaskParams tape_to_base;
-} TowerRoutineTaskParams;
-
 /** Type-specific request parameters. */
 typedef union {
     TapeFollowingTaskParams tape_following;
-    TowerRoutineTaskParams tower_routine;
 } TaskParams;
 
 /** Minimal immutable request submitted to the coordinator. */

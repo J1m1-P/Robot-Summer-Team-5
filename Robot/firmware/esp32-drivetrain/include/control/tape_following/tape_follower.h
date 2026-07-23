@@ -41,7 +41,7 @@ typedef struct {
 /* Combines estimator geometry, feedback gains, and lost-tape behavior.
  *
  * The front and back estimators should use weights whose signs follow the
- * drivetrain body convention: negative is left and positive is right.
+ * drivetrain body convention: negative is right and positive is left.
  */
 typedef struct {
     const TapeLineEstimatorConfig *estimators[TAPE_FOLLOWER_SENSOR_COUNT];
