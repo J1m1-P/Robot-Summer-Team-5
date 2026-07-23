@@ -118,7 +118,7 @@ static void process_command(ArmTaskServer *server,
 
     server->command = *command;
     server->has_command = true;
-    if (!arm_manager_start(server->manager, &command->step)) {
+    if (!arm_manager_start(server->manager, &command->step, now_ms)) {
         (void)send_status_for(server, command, TASK_STEP_FAILED,
                               TASK_FAILURE_STEP_REJECTED);
         return;

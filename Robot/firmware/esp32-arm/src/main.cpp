@@ -74,6 +74,7 @@ void loop() {
     }
     if (application_ready) {
         const uint32_t now_ms = millis();
+        arm_manager_update(&arm_manager, now_ms);
         if (packet_router_update(&drivetrain_packet_router, now_ms) != ESP_OK) {
             arm_task_server_handle_link_error(&task_server);
         }

@@ -12,6 +12,8 @@
 #include "config/communication/task_link_config.h"
 #include "config/communication/uart_link_config.h"
 #include "config/drivetrain/drivetrain_config.h"
+#include "config/tape_following/tape_following_config.h"
+#include "config/task/production_task_config.h"
 #include "control/drivetrain/drivetrain.h"
 #include "task/drivetrain_manager.h"
 #include "task/task_coordinator.h"
@@ -23,6 +25,8 @@ static PacketRouter arm_packet_router = {};
 static ArmTaskClient arm_client = {};
 static TaskCoordinator task_coordinator = {};
 static bool application_ready = false;
+static bool production_task_started = false;
+static uint32_t ready_since_ms = 0;
 
 static uint32_t new_session_id() {
     uint32_t value = esp_random();
@@ -47,7 +51,14 @@ void setup() {
         return;
     }
 
-    drivetrain_manager_init(&drivetrain_manager, &drivetrain);
+    // Tape-following hardware failure is logged internally and leaves
+    // follow-tape actions disabled rather than blocking the whole robot.
+    (void)drivetrain_manager_init(&drivetrain_manager, &drivetrain,
+                                  &TAPE_SENSOR_MUX_CONFIG,
+                                  &FRONT_TAPE_SENSOR_CONFIG,
+                                  &BACK_TAPE_SENSOR_CONFIG,
+                                  &LEFT_TAPE_SENSOR_CONFIG,
+                                  &TAPE_FOLLOWER_CONFIG);
     if (!arm_task_client_init(&arm_client, &arm_uart, new_session_id(),
                               &ARM_TASK_CLIENT_CONFIG)) {
         APP_LOGE(LOG_TAG_UART, "Arm task client initialization failed");
@@ -73,6 +84,7 @@ void setup() {
     }
 
     application_ready = true;
+    ready_since_ms = millis();
     APP_LOGI(LOG_TAG_DRIVETRAIN,
              "Task coordinator ready; drivetrain remains safely braked");
 }
@@ -84,6 +96,16 @@ void loop() {
     }
 
     const uint32_t now_ms = millis();
+
+    if (!production_task_started &&
+        now_ms - ready_since_ms >= PRODUCTION_TASK_START_DELAY_MS) {
+        production_task_started = true;
+        if (!task_coordinator_start(&task_coordinator, &PRODUCTION_TASK_REQUEST,
+                                    new_session_id())) {
+            APP_LOGE(LOG_TAG_DRIVETRAIN, "Failed to start production task");
+        }
+    }
+
     if (packet_router_update(&arm_packet_router, now_ms) != ESP_OK) {
         arm_task_client_handle_link_error(&arm_client);
     }
