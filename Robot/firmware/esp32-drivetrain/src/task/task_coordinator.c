@@ -136,16 +136,11 @@ static bool build_step_command(const TaskRuntime *runtime,
     command_out->step = runtime->current_step;
     command_out->action = step.action;
     command_out->parameters =
-        runtime->request.step_parameter_overrides[runtime->current_step]
+        (runtime->request.step_parameter_override_mask &
+         (UINT16_C(1) << runtime->current_step))
             ? runtime->request.step_parameters[runtime->current_step]
             : step.parameters;
-    if (step.action != TASK_ACTION_FOLLOW_TAPE) return true;
-
-    if (runtime->request.type == TASK_TYPE_TAPE_FOLLOWING) {
-        command_out->tape_following = runtime->request.params.tape_following;
-        return true;
-    }
-    return false;
+    return true;
 }
 
 // Validates the callback table at the one module that invokes it.

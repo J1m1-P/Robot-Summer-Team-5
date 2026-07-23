@@ -75,6 +75,14 @@ machines from disagreeing.
 the same executor interface as local managers, so the coordinator does not know
 which actions cross UART.
 
+**Inferred intent:** one `TaskStepParameters` representation keeps numeric
+action inputs at the workflow-step boundary. `amount` is a signed distance or
+angle, `speed` is its positive magnitude, and `settle_ms` is optional mechanism
+settling time. Tape following uses the sign of `amount` for direction; tower
+actions use the same fields according to their action identity. This avoids a
+type-specific request union for one workflow while keeping workflow defaults in
+the coordinator.
+
 **Inferred intent:** separate requester/executor session IDs make boot resets
 observable without persistent storage. Execution IDs identify top-level work;
 command IDs identify retry-stable link operations.
@@ -121,6 +129,9 @@ timeout cancels active downstream work and produces a terminal failure.
 The coordinator owns `TaskRuntime`. Each task-link endpoint owns its current
 wire command and boot/session synchronization. The top dispatcher owns only a
 pointer to the currently selected executor. The Pi owns only its current scan.
+`TaskRequest.step_parameter_override_mask` selects which request entries
+replace coordinator-owned workflow defaults; the resolved command carries only
+one generic `TaskStepParameters` value.
 
 ## 9. Control Flow and Scheduling
 
@@ -177,6 +188,9 @@ steering commands or place drivetrain sequencing inside the Pi.
 - Hardware behavior and timeout values are unvalidated.
 - Higher-level task test harnesses still target the former role-specific APIs
   and are intentionally awaiting replacement.
+- `test_task_model` covers shared validation and command serialization, but the
+  older integrated coordinator native test still needs its stale paths and
+  hardware dependencies repaired.
 
 ### Potential Concerns
 

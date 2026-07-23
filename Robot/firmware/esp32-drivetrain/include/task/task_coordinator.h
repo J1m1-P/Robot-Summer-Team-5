@@ -54,6 +54,7 @@ bool task_coordinator_cancel(TaskCoordinator *coordinator, uint32_t now_ms);
 bool task_coordinator_fail(TaskCoordinator *coordinator,
                            TaskFailure failure,
                            uint32_t now_ms);
+
 #ifdef __cplusplus
 }
 #endif

@@ -53,7 +53,7 @@ TASK_FAILURE_EXECUTOR_UNAVAILABLE = 12
 TASK_FAILURE_TARGET_NOT_FOUND = 13
 
 # Fixed little-endian payload layouts shared with task_protocol.c.
-COMMAND_FORMAT = "<IIIBBBBff"
+COMMAND_FORMAT = "<IIIBBBBffffI"
 STATUS_FORMAT = "<IIIIBB"
 HEARTBEAT_FORMAT = "<BI"
 
@@ -119,9 +119,12 @@ class TaskCommand:
     command_type: int  # Start or cancel operation.
     action: int  # Physical task action requested by the top dispatcher.
     step: int  # Zero-based coordinator workflow index.
-    tape_direction: int  # Shared payload field; unused by scan.
-    tape_speed_mps: float  # Shared payload field; unused by scan.
-    tape_distance_m: float  # Shared payload field; unused by scan.
+    tape_direction: int  # Legacy tape wire field; unused by scan.
+    tape_speed: float  # Legacy tape wire field; unused by scan.
+    tape_distance: float  # Legacy tape wire field; unused by scan.
+    amount: float  # Generic signed distance or angle; unused by scan.
+    speed: float  # Generic linear or angular speed; unused by scan.
+    settle_ms: int  # Generic settling time; unused by scan.
 
 
 def decode_command(payload: bytes) -> TaskCommand | None:

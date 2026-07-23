@@ -38,7 +38,7 @@ bool stream_enabled = true;
 uint32_t last_stream_ms = 0;
 uint32_t next_execution_id = 1;
 TaskStepParameters step_parameters[TASK_MAX_STEPS] = {};
-bool step_parameter_overrides[TASK_MAX_STEPS] = {};
+uint16_t step_parameter_override_mask = 0U;
 
 bool drive_start(void *, const TaskStepCommand *command, uint32_t now_ms) {
     if (command == nullptr ||
@@ -219,13 +219,15 @@ void start_task(String args) {
     request.type = type;
     memcpy(request.step_parameters, step_parameters,
            sizeof(step_parameters));
-    memcpy(request.step_parameter_overrides, step_parameter_overrides,
-           sizeof(step_parameter_overrides));
-    request.params.tape_following = {TAPE_DIRECTION_FORWARD, 0.20f, 1.0f};
+    request.step_parameter_override_mask = step_parameter_override_mask;
+    float speed = 0.20f;
+    float distance = 1.0f;
     if (type == TASK_TYPE_TAPE_FOLLOWING && values.length()) {
-        float speed = 0.20f, distance = 1.0f;
         sscanf(values.c_str(), "%f %f", &speed, &distance);
-        request.params.tape_following = {TAPE_DIRECTION_FORWARD, speed, distance};
+    }
+    if (type == TASK_TYPE_TAPE_FOLLOWING) {
+        request.step_parameters[0] = {distance, speed, 0U};
+        request.step_parameter_override_mask |= UINT16_C(1);
     }
     if (!task_coordinator_start(&coordinator, &request, next_execution_id++)) {
         reply("error", "task rejected (busy or invalid parameters)");
@@ -262,14 +264,15 @@ void handle_command(String line) {
         if (accepted) {
             step_parameters[step] = {
                 amount, speed, (uint32_t)settle_ms};
-            step_parameter_overrides[step] = true;
+            step_parameter_override_mask |=
+                (uint16_t)(UINT16_C(1) << step);
         }
         reply(accepted ? "ok" : "error",
               accepted ? "step parameters updated"
                        : "usage: param <step_0_based> <amount> <speed> <settle_ms>");
     } else if (line == "params clear") {
         memset(step_parameters, 0, sizeof(step_parameters));
-        memset(step_parameter_overrides, 0, sizeof(step_parameter_overrides));
+        step_parameter_override_mask = 0U;
         reply("ok", "step parameter overrides cleared");
     }
     else if (line.startsWith("start ")) start_task(line.substring(6));

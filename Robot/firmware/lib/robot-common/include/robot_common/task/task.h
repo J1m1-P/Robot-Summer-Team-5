@@ -38,6 +38,7 @@ typedef enum {
     TASK_ACTION_ALIGN_TO_PIECES = 1,
     TASK_ACTION_PICK_UP_BLOCK = 2,
     TASK_ACTION_ALIGN_TO_TAPE = 3,
+    TASK_ACTION_RESERVED = 4,
     TASK_ACTION_BUILD_TOWER = 5,
     TASK_ACTION_SCAN_TELETUBBIES = 6,
     TASK_ACTION_FOLLOW_PIECES_TAPE = 7,
@@ -93,27 +94,9 @@ typedef enum {
     TASK_FAILURE_COUNT,
 } TaskFailure;
 
-/** Direction of travel during tape following. */
-typedef enum {
-    TAPE_DIRECTION_FORWARD = 0,
-    TAPE_DIRECTION_REVERSE,
-} TapeDirection;
-
-/** Immutable inputs for one tape-following action. */
-typedef struct {
-    TapeDirection direction; /**< Forward or reverse travel along the tape. */
-    float speed_mps;         /**< Positive commanded travel speed. */
-    float distance_m;        /**< Positive path length that completes the step. */
-} TapeFollowingTaskParams;
-
-/** Type-specific request parameters. */
-typedef union {
-    TapeFollowingTaskParams tape_following;
-} TaskParams;
-
 /** Tuneable values attached to one workflow step.
- *  amount is radians or metres according to the action; speed is rad/s or
- *  m/s; settle_ms is the post-command mechanism settling time. */
+ *  amount is signed radians or metres according to the action; speed is rad/s
+ *  or m/s; settle_ms is the post-command mechanism settling time. */
 typedef struct {
     float amount;       /**< Action-specific angle or linear distance. */
     float speed;        /**< Action-specific angular or linear speed. */
@@ -123,9 +106,8 @@ typedef struct {
 /** Minimal immutable request submitted to the coordinator. */
 typedef struct {
     TaskType type; /**< Workflow selected by the caller. */
-    TaskParams params; /**< Parameters used by the selected workflow type. */
     TaskStepParameters step_parameters[TASK_MAX_STEPS]; /**< Optional values by step. */
-    bool step_parameter_overrides[TASK_MAX_STEPS]; /**< True when the matching value overrides the workflow default. */
+    uint16_t step_parameter_override_mask; /**< Bit set when a step overrides its workflow default. */
 } TaskRequest;
 
 /** Command passed from the coordinator to a local or remote manager. */
@@ -133,7 +115,6 @@ typedef struct {
     uint32_t execution_id; /**< Identity shared by every step in one run. */
     uint8_t step;          /**< Zero-based workflow step index. */
     TaskAction action;     /**< Physical behavior the executor must run. */
-    TapeFollowingTaskParams tape_following; /**< Tape-specific input when applicable. */
     TaskStepParameters parameters; /**< Generic action tuning values. */
 } TaskStepCommand;
 

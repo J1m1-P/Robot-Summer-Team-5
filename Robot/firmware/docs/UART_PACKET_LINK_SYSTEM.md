@@ -46,6 +46,10 @@ workflow behavior.
 
 **Inferred intent:** the fixed packet and payload layouts permit C and Python
 implementations without sharing compiler struct layout or alignment.
+The in-memory command uses one generic `amount`, `speed`, and `settle_ms`
+tuple. The codec retains the existing 36-byte wire layout, including its legacy
+tape slots, so the model can be simplified without changing deployed ESP
+packet compatibility. The action identity selects the relevant wire slots.
 
 ## 6. Initialization Workflow
 

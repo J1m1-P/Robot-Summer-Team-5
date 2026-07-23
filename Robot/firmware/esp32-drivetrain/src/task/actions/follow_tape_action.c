@@ -105,7 +105,7 @@ void follow_tape_action_init(FollowTapeAction *action, Drivetrain *drivetrain,
     action->result.status = TASK_STEP_NOT_STARTED;
 }
 
-// Validates direction/speed/distance, enables motion, and captures odometry baseline.
+// Validates speed/distance, enables motion, and captures odometry baseline.
 bool follow_tape_action_start(FollowTapeAction *action,
                               const TaskStepCommand *command,
                               uint32_t now_ms) {
@@ -114,9 +114,9 @@ bool follow_tape_action_start(FollowTapeAction *action,
         action->result.status == TASK_STEP_RUNNING) {
         return false;
     }
-    const TapeFollowingTaskParams *params = &command->tape_following;
-    if (!isfinite(params->speed_mps) || params->speed_mps <= 0.0f ||
-        !isfinite(params->distance_m) || params->distance_m <= 0.0f ||
+    const TaskStepParameters *params = &command->parameters;
+    if (!isfinite(params->speed) || params->speed <= 0.0f ||
+        !isfinite(params->amount) || params->amount == 0.0f ||
         !configure_odometry_source(action)) {
         return false;
     }
@@ -133,10 +133,9 @@ bool follow_tape_action_start(FollowTapeAction *action,
     action->traveled_distance_m = 0.0f;
     if (integrate_odometry_step(action) != ESP_OK) return false;
     action->last_update_ms = now_ms;
-    action->target_distance_m = params->distance_m;
+    action->target_distance_m = fabsf(params->amount);
     action->signed_travel_speed_mps =
-        params->direction == TAPE_DIRECTION_FORWARD ? params->speed_mps
-                                                     : -params->speed_mps;
+        params->amount > 0.0f ? params->speed : -params->speed;
     action->result =
         (TaskActionResult){TASK_STEP_RUNNING, TASK_FAILURE_NONE};
     return true;

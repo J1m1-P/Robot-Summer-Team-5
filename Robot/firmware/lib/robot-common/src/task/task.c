@@ -11,15 +11,6 @@
 #include <math.h>
 #include <stddef.h>
 
-// Validates the physical units and direction required by a tape-following action.
-static bool tape_params_are_valid(const TapeFollowingTaskParams *params) {
-    return params != NULL &&
-           (params->direction == TAPE_DIRECTION_FORWARD ||
-            params->direction == TAPE_DIRECTION_REVERSE) &&
-           isfinite(params->speed_mps) && params->speed_mps > 0.0f &&
-           isfinite(params->distance_m) && params->distance_m > 0.0f;
-}
-
 // Validates only the parameters used by the selected task type.
 bool task_request_is_valid(const TaskRequest *request) {
     if (request == NULL) return false;
@@ -30,36 +21,22 @@ bool task_request_is_valid(const TaskRequest *request) {
         }
     }
 
-    switch (request->type) {
-        case TASK_TYPE_TAPE_FOLLOWING:
-            return tape_params_are_valid(&request->params.tape_following);
-        case TASK_TYPE_TOWER_PICKING:
-        case TASK_TYPE_TOWER_BUILDING:
-        case TASK_TYPE_TELETUBBY_SCAN:
-            return true;
-        default:
-            return false;
+    if (request->type < TASK_TYPE_TAPE_FOLLOWING ||
+        request->type >= TASK_TYPE_COUNT) {
+        return false;
     }
+
+    if (request->type != TASK_TYPE_TAPE_FOLLOWING) return true;
+
+    const TaskStepParameters *params = &request->step_parameters[0];
+    return (request->step_parameter_override_mask & UINT16_C(1)) != 0U &&
+           params->amount != 0.0f && params->speed > 0.0f;
 }
 
 // Rejects sentinel or out-of-range actions at module boundaries.
 bool task_action_is_valid(TaskAction action) {
-    return action == TASK_ACTION_FOLLOW_TAPE ||
-           action == TASK_ACTION_ALIGN_TO_PIECES ||
-           action == TASK_ACTION_PICK_UP_BLOCK ||
-           action == TASK_ACTION_ALIGN_TO_TAPE ||
-           action == TASK_ACTION_BUILD_TOWER ||
-           action == TASK_ACTION_SCAN_TELETUBBIES ||
-           action == TASK_ACTION_FOLLOW_PIECES_TAPE ||
-           action == TASK_ACTION_FOLLOW_TASK_TAPE ||
-           action == TASK_ACTION_POSITION_TOWER_X ||
-           action == TASK_ACTION_OPEN_TOWER_CLAWS ||
-           action == TASK_ACTION_TOWER_FACE_DOWN ||
-           action == TASK_ACTION_LOWER_TOWER ||
-           action == TASK_ACTION_CLOSE_TOWER_CLAWS ||
-           action == TASK_ACTION_RAISE_TOWER ||
-           action == TASK_ACTION_TOWER_FACE_FRONT ||
-           action == TASK_ACTION_BACK_OFF_PIECES;
+    return action >= TASK_ACTION_FOLLOW_TAPE && action < TASK_ACTION_COUNT &&
+           action != TASK_ACTION_RESERVED;
 }
 
 // Identifies results that permanently close an individual workflow step.
