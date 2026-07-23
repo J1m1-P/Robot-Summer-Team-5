@@ -313,7 +313,7 @@ const workflowDefinitions = {
   tape:[{action:"Follow tape",owner:"drivetrain",amount:1.0,amountLabel:"Distance (m)",speed:.20,speedLabel:"Speed (m/s)"}],
   picking:[
     {action:"Turn, find and align pieces tape",owner:"drivetrain",amount:70,amountLabel:"Clockwise turn (deg)",amountScale:-Math.PI/180,speed:.50,speedLabel:"Turn speed (rad/s)"},
-    {action:"Follow left sensor to task tape",owner:"drivetrain",speed:.10,speedLabel:"Speed (m/s)"},
+    {action:"Follow left sensor until task-tape interrupt",owner:"drivetrain",speed:.10,speedLabel:"Speed (m/s)"},
     {action:"Follow back sensor along task tape",owner:"drivetrain",amount:.30,amountLabel:"Distance (m)",speed:.10,speedLabel:"Speed (m/s)"},
     {action:"Adjust tower X",owner:"top / arm",amount:0,amountLabel:"Signed distance (m)"},
     {action:"Open tower claws",owner:"top / arm",settle:500},
@@ -322,7 +322,7 @@ const workflowDefinitions = {
     {action:"Close tower claws",owner:"top / arm",settle:500},
     {action:"Raise tower Z",owner:"top / arm",amount:.20,amountLabel:"Distance (m)"},
     {action:"Face tower claw front",owner:"top / arm",settle:500},
-    {action:"Back off without tape following",owner:"drivetrain",amount:.30,amountLabel:"Distance (m)",speed:.10,speedLabel:"Speed (m/s)"},
+    {action:"Back off until route-tape interrupt",owner:"drivetrain",amount:.30,amountLabel:"Minimum distance (m)",speed:.10,speedLabel:"Speed (m/s)"},
     {action:"Realign left sensor to main route",owner:"drivetrain",speed:.30,speedLabel:"Turn speed (rad/s)"}
   ],
   building:[{action:"Build tower",owner:"top / arm",placeholder:true}],

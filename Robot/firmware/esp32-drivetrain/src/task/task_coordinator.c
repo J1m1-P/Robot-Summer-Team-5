@@ -25,7 +25,7 @@ static const TaskStepDefinition PICKING_WORKFLOW[] = {
     // Tower picking 1: turn 70 degrees clockwise, find the left tape, align.
     {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN,
      {-1.2217305f, 0.50f, 0U}},
-    // Tower picking 2: follow with the left module until back sees task tape.
+    // Tower picking 2: follow until the task-tape detector interrupts the leg.
     {TASK_ACTION_FOLLOW_PIECES_TAPE, TASK_OWNER_DRIVETRAIN,
      {0.0f, 0.10f, 0U}},
     // Tower picking 3: follow the task tape with the back module for 0.3 m.
@@ -52,7 +52,7 @@ static const TaskStepDefinition PICKING_WORKFLOW[] = {
     // Tower picking 10: rotate the tower claw front/vertical.
     {TASK_ACTION_TOWER_FACE_FRONT, TASK_OWNER_TOP,
      {0.0f, 0.0f, 500U}},
-    // Tower picking 11: back away from the pieces without tape following.
+    // Tower picking 11: back away at least this far, then await route detection.
     {TASK_ACTION_BACK_OFF_PIECES, TASK_OWNER_DRIVETRAIN,
      {0.30f, 0.10f, 0U}},
     // Tower picking 12: reacquire and align the left module to the main route.

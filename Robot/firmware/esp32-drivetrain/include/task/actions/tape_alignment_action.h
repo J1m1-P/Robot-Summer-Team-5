@@ -34,6 +34,9 @@ typedef struct {
     float traveled_distance_m;
     uint8_t phase;
     uint8_t stable_samples;
+    volatile bool task_tape_detected;
+    volatile bool route_tape_detected;
+    bool route_tape_cleared;
 } TapeAlignmentAction;
 
 void tape_alignment_action_init(TapeAlignmentAction *action,
@@ -48,6 +51,15 @@ bool tape_alignment_action_start(TapeAlignmentAction *action,
 TaskActionResult tape_alignment_action_update(TapeAlignmentAction *action,
                                               uint32_t now_ms);
 void tape_alignment_action_cancel(TapeAlignmentAction *action);
+/** Tiny flag-only hooks for the future detector ISR. */
+static inline __attribute__((always_inline)) void
+tape_alignment_action_notify_task_tape(TapeAlignmentAction *action) {
+    if (action != NULL) action->task_tape_detected = true;
+}
+static inline __attribute__((always_inline)) void
+tape_alignment_action_notify_route_tape(TapeAlignmentAction *action) {
+    if (action != NULL) action->route_tape_detected = true;
+}
 bool tape_alignment_action_report_succeeded(TapeAlignmentAction *action);
 bool tape_alignment_action_report_failed(TapeAlignmentAction *action,
                                          TaskFailure failure);

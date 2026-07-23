@@ -175,6 +175,12 @@ bool tape_alignment_action_start(TapeAlignmentAction *action,
     action->active_action = command->action;
     action->parameters = command->parameters;
     action->phase = PHASE_PRIMARY;
+    if (command->action == TASK_ACTION_ALIGN_TO_PIECES) {
+        action->task_tape_detected = false;
+    } else if (command->action == TASK_ACTION_BACK_OFF_PIECES) {
+        action->route_tape_detected = false;
+        action->route_tape_cleared = false;
+    }
     tape_line_estimator_reset(&action->estimator_state);
     (void)tape_following_controller_reset(&action->controller_state);
     (void)tape_follower_reset(action->tape_follower);
@@ -237,10 +243,25 @@ TaskActionResult tape_alignment_action_update(TapeAlignmentAction *action,
         return align_with_left_sensor(action, dt_s);
     }
 
+    // Temporary adapters for the future interrupt-based tape detector. The
+    // notification functions preserve the workflow boundary when the GPIO
+    // interrupt implementation replaces these sampled edges.
+    if (action->active_action == TASK_ACTION_FOLLOW_PIECES_TAPE &&
+        tape_present(action->back_sensor)) {
+        tape_alignment_action_notify_task_tape(action);
+    }
+    if (action->active_action == TASK_ACTION_BACK_OFF_PIECES) {
+        if (!tape_present(action->left_sensor)) {
+            action->route_tape_cleared = true;
+        } else if (action->route_tape_cleared) {
+            tape_alignment_action_notify_route_tape(action);
+        }
+    }
+
     // Tower picking 2: use the left module as the leading guidance module
-    // until the back module reports the crossing task tape.
+    // until the latched task-tape interrupt ends this nondeterministic leg.
     if (action->active_action == TASK_ACTION_FOLLOW_PIECES_TAPE) {
-        if (tape_present(action->back_sensor)) return succeed(action);
+        if (action->task_tape_detected) return succeed(action);
         const TapeFollowerInput input = {
             {action->left_sensor, action->left_sensor},
             action->parameters.speed,
@@ -280,10 +301,11 @@ TaskActionResult tape_alignment_action_update(TapeAlignmentAction *action,
         return action->result;
     }
 
-    // Tower picking 11: back off without tape following by the requested
-    // distance and speed.
+    // Tower picking 11: back off by at least the requested distance, then
+    // continue until the latched route-tape interrupt permits realignment.
     if (action->active_action == TASK_ACTION_BACK_OFF_PIECES) {
-        if (action->traveled_distance_m >= action->parameters.amount) {
+        if (action->traveled_distance_m >= action->parameters.amount &&
+            action->route_tape_detected) {
             return succeed(action);
         }
         if (drivetrain_set_body_velocity(action->drivetrain,
