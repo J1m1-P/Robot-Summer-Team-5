@@ -4,11 +4,11 @@
 
 The tape-following subsystem reads three four-channel tape modules through a shared two-bit multiplexer address, interprets the front or back module as a lateral line position, and computes a bounded drivetrain body-velocity request. The front module guides forward travel, the back module guides reverse travel, and the left module is intended to detect broad task markers.
 
-The implementation is split into board configuration, GPIO sampling, hardware-independent sensing, control mathematics, a stateful follower, and application/drivetrain integration. The pure sensing and control pieces are implemented and covered by native tests. Physical sampling and end-to-end motion are exercised only by the `drivetrain-test` diagnostic firmware.
+The implementation is split into board configuration, GPIO sampling, hardware-independent sensing, control mathematics, a stateful follower, a session/alignment layer built on top of the follower, and application/drivetrain integration. The pure sensing and control pieces are implemented and covered by native tests. Physical sampling and end-to-end motion are exercised only by the `drivetrain-test` diagnostic firmware.
 
-There is no production tape-following application or robot/course state machine in this repository. The default `src/main.cpp` is a two-motor duty bench test and does not initialize the mux, tape modules, `TapeFollower`, `TapeTaskDetector`, or `Drivetrain`. The left-module task detector is configured and unit-tested but is not used by the diagnostic harness either.
+There is no production tape-following application or robot/course state machine in this repository. The default `src/main.cpp` is a two-motor duty bench test and does not initialize the mux, tape modules, `TapeFollower`, `TapeFollowingSession`, `TapeTaskDetector`, or `Drivetrain`. The left-module task detector is configured and unit-tested but is not used by the diagnostic harness either. Everything described in this document, including the newer session/alignment/locating layer, is reachable only through the `drivetrain-test` serial command surface (see §4a "Usage: diagnostic serial commands").
 
-Primary inputs are the three module GPIO levels, requested signed longitudinal velocity, elapsed update time, and immutable tuning/configuration. The follower's primary output is a `DrivetrainBodyVelocity` plus `motion_valid`, line error, and follower status. Only the diagnostic harness currently forwards that output to the drivetrain.
+Primary inputs are the three module GPIO levels, requested signed longitudinal velocity, elapsed update time, and immutable tuning/configuration. The follower's primary output is a `DrivetrainBodyVelocity` plus `motion_valid`, line error, and follower status. The session layer wraps that output with distance/marker stop conditions, an end-of-run lateral correction, and optional homing. Only the diagnostic harness currently forwards any of this output to the drivetrain.
 
 ## 2. System Context
 
@@ -24,12 +24,23 @@ flowchart LR
     Follower --> Heading["tape_following_kinematics.c<br/>bounded angular request"]
     Controller --> Body["DrivetrainBodyVelocity"]
     Heading --> Body
-    Body --> Harness["drivetrain_test_main.cpp<br/>TestMode::TAPE_CENTER"]
+    Follower --> Session["tape_following_session.c<br/>homing/follow/stop/correction state machine"]
+    Samples --> Session
+    Samples --> Locating["tape_locating_detection.c<br/>one/two-piece marker events"]
+    Locating --> Session
+    Session --> SessionBody["DrivetrainBodyVelocity"]
+    Estimator --> Alignment["tape_alignment.c<br/>bounded I/L pose alignment"]
+    Alignment --> AlignBody["DrivetrainBodyVelocity"]
+    Body --> Harness["drivetrain_test_main.cpp<br/>TestMode::TAPE_CENTER / TAPE_FOLLOW"]
+    SessionBody --> Harness2["drivetrain_test_main.cpp<br/>TestMode::TAPE_SESSION"]
+    AlignBody --> Harness3["drivetrain_test_main.cpp<br/>TestMode::TAPE_ALIGNMENT"]
     Harness --> Drivetrain["drivetrain_set_body_velocity()<br/>drivetrain_update()"]
+    Harness2 --> Drivetrain
+    Harness3 --> Drivetrain
     Samples -. "left module (not integrated)" .-> Task["tape_task_detection.c<br/>stable task events"]
 ```
 
-`src/harnesses/drivetrain_test_main.cpp` is the only application entry point that initializes and samples physical tape hardware. It polls all modules every 5 ms and runs its motion-control path on a nominal 5 ms period. Serial commands select monitoring, stationary centering, or forward/reverse following. `tools/drivetrain_test_dashboard.html` is an operator UI for those commands and telemetry.
+`src/harnesses/drivetrain_test_main.cpp` is the only application entry point that initializes and samples physical tape hardware. It polls all modules every 5 ms and runs its motion-control path on a nominal 5 ms period. Serial commands select monitoring, stationary centering, forward/reverse following, bounded pose alignment, or a full session run (optional homing, travel to a distance or locating marker, controlled stop, and end correction). `tools/drivetrain_test_dashboard.html` is an operator UI, but it currently only wires up `tape-center` and `tape-follow`; `tape-align` and `tape-session` must be typed into the harness's serial console directly (see §4a).
 
 The subsystem depends on ESP-IDF GPIO and microsecond-delay APIs at the driver boundary. Above that boundary, the estimator, task detector, controller, kinematics, and follower operate on C structs and are host-testable.
 
@@ -80,19 +91,48 @@ The diagnostic harness owns scheduling, commands, mode transitions, live tuning 
 | `src/control/tape_following/tape_following_kinematics.c` | Heading control math | Applies travel-direction polarity, angular limits, and angular acceleration limits. |
 | `include/control/tape_following/tape_follower.h` | Follower public contract | Defines follower configuration, input/output, status, and retained runtime history. |
 | `src/control/tape_following/tape_follower.c` | Tape behavior coordinator | Selects the leading sensor and coordinates tracking, searching, lost, idle, and direction-change behavior. |
-| `include/control/drivetrain/x_drive_kinematics.h` | Shared command type | Declares `DrivetrainBodyVelocity`, the follower/drivetrain integration contract. |
+| `include/sensing/tape_following/tape_locating_detection.h` | Locating-marker API/state | Defines one/two-piece marker detection config, debounce/progress state, and event output for a chosen locating sensor. |
+| `src/sensing/tape_following/tape_locating_detection.c` | Locating-marker interpretation | Debounces active-channel runs on the configured side sensor into single/double marker events with along-tape center progress. |
+| `include/control/tape_following/tape_following_session.h` | Session public contract | Defines the homing/following/stop/end-correction/complete/timeout/fault state machine built on `TapeFollower`. |
+| `src/control/tape_following/tape_following_session.c` | Session state machine | Runs optional homing, hands off to the follower, watches for a distance or locating-marker stop condition, then runs a bounded end-of-run lateral correction. |
+| `include/config/tape_following/tape_following_session_config.h` | Session production defaults | Exposes `TAPE_FOLLOWING_SESSION_CONFIG`, the stop/correction/locating-geometry tuning ported from the harness's `start_tape_session()`. |
+| `src/config/tape_following/tape_following_session_config.c` | Session default composition | Defines `TAPE_FOLLOWING_SESSION_CONFIG`; per-invocation fields (direction/speed/distance/marker) are left for a future caller to set. |
+| `include/control/tape_following/tape_alignment.h` | Alignment public contract | Defines bounded, non-oscillating pose-alignment config/state for the "I" (longitudinal) and "L" (`PY`+`MX`) modes. |
+| `src/control/tape_following/tape_alignment.c` | Alignment state machine | Drives front/back (and side, for L-mode) line error to zero within tolerance, with settle-sample confirmation and a timeout/fault path. |
+| `include/control/drivetrain/x_drive_kinematics.h` | Shared command type | Declares `DrivetrainBodyVelocity`, the follower/session/alignment/drivetrain integration contract. |
 | `include/control/drivetrain/drivetrain.h` | Drivetrain facade API | Accepts bounded body commands and exposes drivetrain lifecycle/update operations. |
 | `src/control/drivetrain/drivetrain.c` | Drivetrain command consumer | Converts accepted follower commands into closed-loop wheel duties and enforces timeout/error safety. |
 | `include/config/drivetrain/drivetrain_config.h` | Drivetrain configuration interface | Exposes the hardware and motion limits used by the diagnostic integration. |
 | `src/config/drivetrain/drivetrain_config.c` | Drivetrain composition | Supplies the body-velocity bounds against which harness commands are checked. |
-| `src/harnesses/drivetrain_test_main.cpp` | Current hardware/application integration | Initializes sensors and drivetrain, polls tape, implements `TestMode`, runs center/follow commands, and publishes telemetry. |
-| `tools/drivetrain_test_dashboard.html` | Diagnostic operator UI | Sends tape commands/tuning and renders front/back/left bit patterns and correction telemetry. |
+| `src/harnesses/drivetrain_test_main.cpp` | Current hardware/application integration | Initializes sensors and drivetrain, polls tape, implements `TestMode`, runs center/follow/align/session commands, and publishes telemetry. |
+| `tools/drivetrain_test_dashboard.html` | Diagnostic operator UI | Sends `tape-center`/`tape-follow` commands and tuning, and renders front/back/left bit patterns and correction telemetry. Does not yet expose `tape-align` or `tape-session`. |
 | `test/test_tape_following/test_tape_following.cpp` | Native unit tests | Tests estimator, PID, heading mapping, directional follower behavior, search/lost transitions, and task debounce without GPIO. |
 | `test/native_stubs/driver/gpio.h` | Native test type stub | Supplies `gpio_num_t` so sampled tape structs compile on the host. |
 | `test/native_stubs/esp_err.h` | Native error stub | Supplies the ESP error types/constants used by pure modules. |
 | `test/native_stubs/robot_common/math_utils.h` | Native math stub | Supplies `clamp()` used by the tape PID implementation. |
 | `platformio.ini` | Build integration | Selects tape pure modules for native tests and all required tape/drivetrain sources for `drivetrain-test`. |
 | `src/main.cpp` | Default application entry point | Establishes that tape following is absent from the default firmware; it currently runs a motor bench test. |
+
+### Usage: diagnostic serial commands
+
+All tape behavior is driven through the `drivetrain-test` firmware's newline-terminated serial console (115200 baud). There is no other entry point today. `help` prints the full command list from `print_help()`; the tape-relevant subset is:
+
+| Command | Purpose | Underlying layer |
+|---|---|---|
+| `tape` / `tape-center front\|back [max_mps] [ms] [polarity]` | Stationary lateral centering on one sensor; `vx`/`omega` stay zero. | Harness-local estimator+PID path, bypasses `TapeFollower`. |
+| `tape-follow front\|back [travel_mps] [max_strafe_mps] [ms] [polarity]` | Timed forward/reverse following with no stop/marker/homing logic. | `tape_follower_update()` directly (`TestMode::TAPE_CENTER`, `tape_follow_velocity_mps != 0`). |
+| `tape-align i\|l [timeout_ms]` | Bounded, non-oscillating pose alignment: `i` zeroes front/back longitudinal error, `l` aligns `PY`+`MX` including a side sensor. | `tape_alignment_*()` (`TestMode::TAPE_ALIGNMENT`). |
+| `tape-session px\|mx\|py cw\|ccw none\|one\|two [distance_m] [speed_mps] [timeout_ms]` | One full run: optional homing, follow in `direction`, stop at `distance_m` and/or a `one`/`two`-piece locating marker on the `cw`/`ccw` side sensor, controlled stop, then end-of-run correction back onto the marker. | `tape_following_session_*()` (`TestMode::TAPE_SESSION`). |
+
+Notes for `tape-session`, since it is the newest and least discoverable path:
+
+- At least one of `distance_m > 0` or a marker other than `none` is required — the harness rejects `tape-session px cw none` outright.
+- `speed_mps` is clamped to `test_config.max_vx_mps`; `timeout_ms` is clamped to `kMaxTapeDurationMs` (60 s), same as the other timed tape commands.
+- The per-invocation `direction`/`locating_side`/`speed`/`distance`/`marker`/`timeout` come from the command line; the remaining tuning (`stop_settle_time_s`, `correction_speed_mps`, `correction_tolerance_m`, `correction_max_distance_m`, locating-detector geometry) is hardcoded in `start_tape_session()` in `drivetrain_test_main.cpp`, not read from `TAPE_FOLLOWING_SESSION_CONFIG` in `tape_following_session_config.c`. `home_before_following` is always left `false` from this command; there is currently no serial flag to request homing.
+- `TapeFollowingSessionStatus` (`idle`/`homing`/`following`/`controlled-stop`/`end-correction`/`complete-distance`/`complete-locating`/`timeout`/`tape-lost`/`fault`/`stopped`) is reported in status telemetry via `tape_session_status_name()`, alongside `progress_m` and the detected `locating_marker`.
+- `tape-session` requires `tape_sensors_ready`; like the other tape commands it coasts the drivetrain before starting and stops automatically at a terminal status (`tape_session_is_terminal()`).
+
+`tools/drivetrain_test_dashboard.html` only has buttons/fields for `tape-center` and `tape-follow` (`followTape()`, the `#tapeCenter` handler). `tape-align` and `tape-session` must be typed directly into a serial terminal; they are not reachable from the dashboard yet.
 
 ### Configuration files
 
@@ -112,9 +152,15 @@ The line estimator owns interpretation of an already sampled module. The task de
 
 `TapeLineEstimatorState.last_known_error` is used for follower search direction. `TapeFollowerStatus` is returned per update; it is not itself an application state machine and is not retained as a status field in `TapeFollower`.
 
+### Session, alignment, and locating files
+
+`TapeFollowingSession` is a state machine layered on top of `TapeFollower`, not a replacement for it: it owns one `TapeFollower` instance plus one `TapeLocatingDetector`, and its `tape_following_session_update()` delegates line-tracking to `tape_follower_update()` while adding what the follower deliberately does not do — optional wiggle-based homing before following starts, a distance and/or locating-marker stop condition, a settle-timed controlled stop, and a bounded end-of-run lateral correction back onto the detected marker. `TapeFollowingSessionStatus` (see the usage table above) is the closest thing this repository has to a course/task state machine, but it is still scoped to one session run, not a persistent robot manager.
+
+`TapeAlignment` is independent of both `TapeFollower` and `TapeFollowingSession`. It drives estimator error on one or two sensors to zero within tolerance for `settle_samples` consecutive updates, then reports `TAPE_ALIGNMENT_COMPLETE`; it never calls the follower and has no locating/session awareness. `TapeLocatingDetector` is a pure debounce/geometry module — it turns one sensor's active-channel run into `TAPE_LOCATING_MARKER_SINGLE`/`_DOUBLE` events with an along-tape center position — that only the session currently consumes.
+
 ### Application and test files
 
-The harness maintains stable storage for configuration copies and runtime objects, samples at 5 ms, and runs its drivetrain control block at 5,000 us. `TestMode::TAPE_CENTER` is used for both stationary centering and moving tape following; `tape_follow_velocity_mps == 0` distinguishes them. That naming is diagnostic-harness behavior, not a reusable tape-layer state model.
+The harness maintains stable storage for configuration copies and runtime objects, samples at 5 ms, and runs its drivetrain control block at 5,000 us. `TestMode::TAPE_CENTER` is used for both stationary centering and moving tape following; `tape_follow_velocity_mps == 0` distinguishes them. `TestMode::TAPE_ALIGNMENT` and `TestMode::TAPE_SESSION` are separate modes for `tape-align` and `tape-session`. This naming is diagnostic-harness behavior, not a reusable tape-layer state model.
 
 The native tests construct `TapeSensor` values directly and therefore validate interpretation/control but not GPIO configuration, mux sequencing, settling, bit packing, actual timing, harness transitions, or drivetrain effects. `platformio.ini` deliberately excludes the hardware driver from the native build.
 
@@ -295,15 +341,15 @@ No filtering or debounce is applied to guidance channel samples; the estimator c
 
 ## 12. Integration with the Rest of the Project
 
-The best current trace begins at `setup()` and `loop()` in `src/harnesses/drivetrain_test_main.cpp`. `initialize_tape_sensors()` shows physical composition. `sample_tape_sensors()` shows the polling boundary. `start_tape_center()` and `service_tape_center()` show diagnostic mode and follower orchestration. The control block in `loop()` shows the handoff to `drivetrain_set_body_velocity()` and `drivetrain_update()`.
+The best current trace begins at `setup()` and `loop()` in `src/harnesses/drivetrain_test_main.cpp`. `initialize_tape_sensors()` shows physical composition. `sample_tape_sensors()` shows the polling boundary. `start_tape_center()`/`service_tape_center()`, `start_tape_alignment()`/`service_tape_alignment()`, and `start_tape_session()`/`service_tape_session()` show the three diagnostic mode/orchestration pairs (§4a). The control block in `loop()` shows the handoff to `drivetrain_set_body_velocity()` and `drivetrain_update()` for all three.
 
-Within the reusable subsystem, start with `tape_follower_update()`. It calls `tape_line_estimator_compute_error()`, `tape_following_controller_update()`, and `tape_following_kinematics_velocity_to_angular_velocity()`. It reads `TapeSensor` snapshots but has no dependency on the tape sampling implementation.
+Within the reusable subsystem, start with `tape_follower_update()`. It calls `tape_line_estimator_compute_error()`, `tape_following_controller_update()`, and `tape_following_kinematics_velocity_to_angular_velocity()`. It reads `TapeSensor` snapshots but has no dependency on the tape sampling implementation. `tape_following_session_update()` calls `tape_follower_update()` plus `tape_locating_detector_update()` and adds its own homing/stop/correction logic; `tape_alignment_update()` calls only `tape_line_estimator_compute_error()` and has no follower or session dependency.
 
-The drivetrain does not know that a command came from tape following. It accepts the same `vx`, `vy`, and `omega` interface used by other motion sources and applies its own limits and watchdog. This is a clean integration boundary.
+The drivetrain does not know that a command came from tape following, alignment, or a session. It accepts the same `vx`, `vy`, and `omega` interface used by other motion sources and applies its own limits and watchdog. This is a clean integration boundary.
 
-State-machine integration is incomplete. The only state machine is diagnostic `TestMode`, and it treats tape following as a timed operator test. The header reference to `RobotManager` has no implementation. There is no course logic to choose a travel velocity, consume `detection_started`/`detection_ended`, arbitrate task behavior, or decide a persistent response to `TAPE_FOLLOWER_LOST`.
+State-machine integration is still incomplete above the session layer. `TapeFollowingSession` (added since the previous revision of this document) now owns homing, stop-at-distance/marker, and end correction for one run, but it is only reachable through the diagnostic `tape-session` serial command and `TestMode::TAPE_SESSION`; nothing schedules or chains sessions automatically. `tape_following_session_config.h` documents that per-run fields (direction/speed/distance/marker) are meant to be set by a `tape_session_action.c` caller, but no such file exists in this repository yet — the only working reference is the hardcoded tuning inside the harness's `start_tape_session()`. The header reference to `RobotManager` in the task detector still has no implementation. There is no course logic to chain multiple sessions, consume `detection_started`/`detection_ended`, arbitrate task behavior, or decide a persistent response to `TAPE_FOLLOWER_LOST`/`TAPE_SESSION_TAPE_LOST`.
 
-The default PlatformIO environment compiles `src/main.cpp`, which does not use `Drivetrain` or tape code. Although the broad default source filter compiles non-harness tape implementation/configuration files into the image, nothing invokes them. The `drivetrain-test` environment explicitly compiles the hardware driver, sensing/control pieces, configurations, drivetrain, and its alternate entry point. It omits `tape_task_detection.c`, which further confirms that task detection is not part of that hardware image.
+The default PlatformIO environment compiles `src/main.cpp`, which does not use `Drivetrain` or tape code. Although the broad default source filter compiles non-harness tape implementation/configuration files into the image, nothing invokes them. The `drivetrain-test` environment explicitly compiles the hardware driver, sensing/control pieces (including `tape_alignment.c`, `tape_following_session.c`, and `tape_locating_detection.c`), configurations, drivetrain, and its alternate entry point. It omits `tape_task_detection.c`, which further confirms that task detection is not part of that hardware image.
 
 ## 13. Extension Points
 
@@ -314,7 +360,10 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 - To tune lateral PID or heading mapping behavior, change the relevant control module/config and tests. The harness already supports RAM-only gain/search tuning for physical experiments.
 - To change search, direction, or loss policy, change `tape_follower.*`. Application arbitration and task/course state should remain above it.
 - To integrate task markers, a real application owner must instantiate `TapeTaskDetector`, feed it the left `TapeSensor` after successful scans, and consume its edge events. That owner does not currently exist.
-- To add production tape following, the default application must compose the mux, sensors, follower, task detector, and drivetrain; schedule scans/updates; and define reactions to invalid motion and task events. The existing component interfaces can support this, but the high-level controller is missing.
+- To change one-run stop/homing/correction behavior (distance vs. locating-marker stop, controlled-stop settle time, end-correction speed/tolerance/max distance, homing wiggle), change `tape_following_session.*` and/or the tuning in `tape_following_session_config.c`; per-run direction/speed/distance/marker should stay caller-supplied.
+- To change locating-marker geometry (tape width, single vs. double spacing, debounce/confirmation counts), change `tape_locating_detection.*` and its config, consumed only by the session today.
+- To change bounded pose-alignment behavior (I vs. L mode, correction speed, tolerance, settle samples, timeout), change `tape_alignment.*`; it has no follower/session dependency to preserve.
+- To add production tape following, a real application must compose the mux, sensors, follower/session, task detector, and drivetrain; schedule scans/updates; chain or select sessions (the `tape_session_action.c` caller implied by `tape_following_session_config.h` does not exist yet); and define reactions to invalid motion and task events. The existing component interfaces, including the session/alignment/locating layer, can support this, but the high-level composition/course owner is still missing.
 - To add another physical module, both the fixed `TAPE_SENSOR_MODULE_COUNT` scan API and application ordering would change. The current driver is intentionally/concretely shaped around exactly three outputs rather than an arbitrary-length list.
 - To add hardware-driver tests, GPIO/delay fakes would be needed because the native environment currently stubs only public types and excludes `tape_sensor_driver.c`.
 
@@ -322,14 +371,17 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 
 ### Confirmed Gaps
 
-1. **No production controller/composition.** `src/main.cpp` is a motor bench test. It does not initialize or schedule any tape component or the drivetrain facade.
-2. **No robot/course manager.** `RobotManager` appears only in a task-detector comment. There is no implementation that selects tape-following commands, consumes task events, or arbitrates behaviors.
+1. **No production controller/composition.** `src/main.cpp` is a motor bench test. It does not initialize or schedule any tape component, session, or the drivetrain facade.
+2. **No robot/course manager.** `RobotManager` appears only in a task-detector comment. `TapeFollowingSession` covers one run's homing/stop/correction, but nothing selects, chains, or arbitrates between runs, consumes task events, or persists state across sessions.
 3. **Task detection is not integrated.** `TAPE_TASK_DETECTOR_CONFIG` and detector code exist and are unit-tested, but no application instantiates or updates the detector. The `drivetrain-test` source filter does not include its implementation.
-4. **Diagnostic state integration is incomplete for loss.** The harness zeroes motion when follower output is invalid but remains in timed `TestMode::TAPE_CENTER`; it does not transition to a distinct lost/fault state.
+4. **Diagnostic state integration is incomplete for loss.** The harness zeroes motion when follower output is invalid but remains in timed `TestMode::TAPE_CENTER`; it does not transition to a distinct lost/fault state. `TestMode::TAPE_SESSION` is more explicit — `TapeFollowingSessionStatus` surfaces `tape-lost`/`fault` directly — but still ends the harness mode rather than handing off to any recovery behavior.
 5. **No hardware-driver tests.** Mux selection, GPIO init, settling, active level, module ordering, state writes, and nibble packing are untested by the native suite.
-6. **No end-to-end integration tests.** Tests do not cover application scheduling, `TestMode`, sample-to-follower timing, follower-to-drivetrain command handoff, or drivetrain safety response.
+6. **No end-to-end integration tests.** Tests do not cover application scheduling, `TestMode`, sample-to-follower timing, follower/session-to-drivetrain command handoff, or drivetrain safety response.
 7. **No tape deinitialization or rollback path.** A failed module leaves earlier GPIO setup active, and a runtime sample error makes the diagnostic sensors unavailable until reboot.
 8. **Sample freshness is not represented.** `TapeSensor` stores booleans only; there is no timestamp, generation, validity, or error field. The harness has a single external readiness flag.
+9. **Session per-run tuning is hardcoded in the harness, not the documented config.** `tape_following_session_config.h` says per-run fields are meant to be set by a `tape_session_action.c` caller; that file does not exist. `start_tape_session()` in `drivetrain_test_main.cpp` hardcodes the stop/correction/locating tuning instead of reading `TAPE_FOLLOWING_SESSION_CONFIG`, so the two can silently drift.
+10. **`tape-align` and `tape-session` are not exposed by the operator dashboard.** `tools/drivetrain_test_dashboard.html` only sends `tape-center`/`tape-follow`; both newer commands must be typed into a raw serial terminal.
+11. **No serial flag for session homing.** `start_tape_session()` always passes `home_before_following = false`; homing exists in `TapeFollowingSession` but has no way to be requested from the current command surface.
 ### Potential Concerns
 
 1. **Search-turn tuning requires hardware validation.** On line loss, `TapeFollower` turns in place toward the last-known side at the configured angular rate. The current 0.40 rad/s rate and 4.0 s timeout should be validated on the assembled robot.
@@ -342,11 +394,13 @@ The default PlatformIO environment compiles `src/main.cpp`, which does not use `
 
 ### Recommendations
 
-1. Build the production composition/state-machine layer before describing tape following as production-integrated. Make it the explicit owner of scan scheduling, travel requests, task events, follower status response, and drivetrain command arbitration.
+1. Build the production composition/course-manager layer before describing tape following as production-integrated. `TapeFollowingSession` now owns one run's homing/stop/correction, but something above it still needs to own scan scheduling, choosing/chaining sessions, task events, and drivetrain command arbitration — the `tape_session_action.c` caller implied by `tape_following_session_config.h` is a natural place to start.
 2. Integrate and test `TapeTaskDetector` only when the intended course-state transitions are defined; do not infer them from the event names.
 3. Add GPIO/delay fake tests for initialization, complete scans, shared-mux rejection, and failures.
 4. Add a sample snapshot validity/timestamp mechanism if production scheduling, concurrency, or fault detection requires freshness guarantees.
-5. Keep diagnostic-only centering, polarity experimentation, and RAM tuning in the harness; route production movement through one clearly owned follower/application path.
+5. Keep diagnostic-only centering, polarity experimentation, and RAM tuning in the harness; route production movement through one clearly owned follower/session/application path.
+6. Either wire `tape-align`/`tape-session` into `tools/drivetrain_test_dashboard.html` or document why they are console-only, so the newer commands don't stay effectively undiscoverable to operators.
+7. Have `start_tape_session()` read tuning from `TAPE_FOLLOWING_SESSION_CONFIG` (or otherwise reconcile the two) instead of maintaining a second hardcoded copy that can drift from the documented defaults.
 
 ## 15. Example Runtime Sequence
 
@@ -365,15 +419,19 @@ One complete forward-follow diagnostic cycle is:
 
 ## 16. Developer Reading Order
 
+0. If you only need to *run* tape following, skip straight to §4a ("Usage: diagnostic serial commands") for the `tape-center`/`tape-follow`/`tape-align`/`tape-session` command table, then come back here for how they work underneath.
 1. `include/control/tape_following/tape_follower.h` — learn the public behavior contract, direction convention, statuses, retained state, and drivetrain-compatible output before implementation details.
-2. `src/harnesses/drivetrain_test_main.cpp` — follow `initialize_tape_sensors()`, `sample_tape_sensors()`, `start_tape_center()`, `service_tape_center()`, and `loop()` to see the only real hardware composition and scheduling path.
+2. `src/harnesses/drivetrain_test_main.cpp` — follow `initialize_tape_sensors()`, `sample_tape_sensors()`, the three `start_tape_*()`/`service_tape_*()` pairs (center, alignment, session), and `loop()` to see the only real hardware composition and scheduling path.
 3. `include/config/tape_following/tape_following_config.h` and `src/config/tape_following/tape_following_config.c` — see the exact board bindings, channel geometry, gains, limits, search policy, and task thresholds supplied to the modules.
 4. `include/drivers/tape_sensor/tape_sensor_driver.h` — understand why one shared mux object and three per-module objects exist and what sample state crosses the hardware boundary.
 5. `src/drivers/tape_sensor/tape_sensor_driver.c` — trace the exact four-channel selection, settle, sampling, and packing cycle.
 6. `include/sensing/tape_following/tape_line_estimator.h` and `src/sensing/tape_following/tape_line_estimator.c` — learn how booleans become line error and recovery direction.
 7. `src/control/tape_following/tape_follower.c` — trace leading-sensor selection, direction resets, tracking, search, and lost behavior now that its inputs are clear.
 8. `tape_following_controller.*` and `tape_following_kinematics.*` — inspect the two focused mathematical transformations coordinated by the follower.
-9. `tape_task_detection.*` — understand the separate left-module debounce/event path and recognize that it currently has no application consumer.
-10. `include/control/drivetrain/drivetrain.h` and the `drivetrain_set_body_velocity()`/`drivetrain_update()` portions of `src/control/drivetrain/drivetrain.c` — see how a valid follower request becomes wheel control and how safety limits/errors are enforced.
-11. `test/test_tape_following/test_tape_following.cpp` and the native stubs — see what behavior is confirmed by tests and, equally important, what hardware/integration behavior is not covered.
-12. `platformio.ini`, `src/main.cpp`, and `tools/drivetrain_test_dashboard.html` — finish with build/image selection, the absence of default-firmware integration, and the diagnostic operator surface.
+9. `include/sensing/tape_following/tape_locating_detection.h` and `src/sensing/tape_following/tape_locating_detection.c` — learn how a debounced active-channel run becomes a single/double marker event with along-tape position.
+10. `include/control/tape_following/tape_following_session.h` and `src/control/tape_following/tape_following_session.c` — see how homing, the follower, the locating detector, controlled stop, and end correction are sequenced into one run, and compare against `tape_following_session_config.h`'s claim of a `tape_session_action.c` caller that does not yet exist.
+11. `include/control/tape_following/tape_alignment.h` and `src/control/tape_following/tape_alignment.c` — the simplest of the three behavior layers; useful for seeing bounded/settle-confirmed correction without a follower or session dependency.
+12. `tape_task_detection.*` — understand the separate left-module debounce/event path and recognize that it currently has no application consumer.
+13. `include/control/drivetrain/drivetrain.h` and the `drivetrain_set_body_velocity()`/`drivetrain_update()` portions of `src/control/drivetrain/drivetrain.c` — see how a valid follower/session/alignment request becomes wheel control and how safety limits/errors are enforced.
+14. `test/test_tape_following/test_tape_following.cpp` and the native stubs — see what behavior is confirmed by tests and, equally important, what hardware/integration behavior is not covered.
+15. `platformio.ini`, `src/main.cpp`, and `tools/drivetrain_test_dashboard.html` — finish with build/image selection, the absence of default-firmware integration, and the diagnostic operator surface (noting the dashboard's `tape-align`/`tape-session` gap).
