@@ -59,6 +59,17 @@ while a motion is active. `tools/jog_program_composer.html`'s "Reset
 world-frame reference" button sends this command (and only re-zeros its own
 plot once the firmware confirms the reset succeeded).
 
+`setpose <x_m> <y_m> <heading_deg>` (2026-07-23) is `zero`'s general case:
+re-anchors the world-frame pose to any known position/heading, not just the
+origin -- e.g. a marked field start point with known field coordinates,
+rather than always treating wherever the robot starts as (0,0,0). Backed by
+a new library function, `drivetrain_odometry_set_pose()`
+(`control/drivetrain/odometry.h`), which `drivetrain_odometry_reset()` is now
+describable as the `x=y=heading=0` special case of. Same rejected-while-
+active rule as `zero`. `tools/jog_program_composer.html`'s "Set pose"
+control (X/Y/heading fields + button next to "Zero pose") sends this and
+re-anchors its own plot to the given values once confirmed.
+
 `tools/drive_dashboard.html`, `tools/tuning_dashboard.html`, and
 `tools/odometry_plotter.html` are deprecated and moved to `tools/deprecated/`
 (2026-07-22): the first two are superseded by `jog_program_composer.html`'s

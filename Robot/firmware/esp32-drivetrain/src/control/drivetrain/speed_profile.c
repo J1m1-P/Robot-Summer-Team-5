@@ -19,6 +19,15 @@ void speed_profile_reset(SpeedProfile *profile, float initial_speed_mps)
     profile->commanded_accel_mps2 = 0.0f;
 }
 
+/* Ceiling on the simulation's internal step size -- see the "why" comment in
+ * speed_profile.h. A well-behaved caller's dt_s (every existing test uses
+ * <= 0.02s, matching realistic control periods) passes through unchanged, so
+ * this clamp changes nothing for the normal case; only a dt_s beyond this
+ * (a jittery real cycle, e.g. a blocking Serial print, up to whatever hard
+ * ceiling a primitive's own dt-fault check allows through) gets capped,
+ * preventing that one glitchy cycle from inflating the predicted distance. */
+static const float kMaxSimulationStepS = 0.02f;
+
 esp_err_t speed_profile_predict_stopping_distance(
     const SpeedProfile *profile,
     const SpeedProfileConfig *config,
@@ -37,6 +46,7 @@ esp_err_t speed_profile_predict_stopping_distance(
 
     SpeedProfile simulated = *profile;
     float distance_m = 0.0f;
+    const float simulation_dt_s = fminf(dt_s, kMaxSimulationStepS);
 
     /* This is deliberately a bounded simulation rather than an
      * instantaneous-acceleration formula: a primitive needs to know how far
@@ -57,9 +67,9 @@ esp_err_t speed_profile_predict_stopping_distance(
 
         float speed_mps = 0.0f;
         const esp_err_t error = speed_profile_update(
-            &simulated, config, 0.0f, max_accel_mps2, dt_s, &speed_mps);
+            &simulated, config, 0.0f, max_accel_mps2, simulation_dt_s, &speed_mps);
         if (error != ESP_OK) return error;
-        distance_m += fabsf(speed_mps) * dt_s;
+        distance_m += fabsf(speed_mps) * simulation_dt_s;
     }
 
     return ESP_ERR_INVALID_STATE;

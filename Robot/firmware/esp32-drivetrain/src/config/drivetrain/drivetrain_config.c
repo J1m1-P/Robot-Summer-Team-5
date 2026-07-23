@@ -50,7 +50,20 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
         .output_max = 0.8f,
         .integral_min = -0.8f,
         .integral_max = 0.8f,
-        .duty_slew_per_s = 2.0f,
+        /* No slew limiting needed on this hardware -- removed rather than
+         * left at a small value. A finite-but-large rate (not 0) is how this
+         * controller expresses "unlimited": duty_slew_per_s directly bounds
+         * the per-cycle duty change (maximum_delta = duty_slew_per_s * dt),
+         * so 0 would freeze duty at whatever it's already at, the opposite
+         * of unlimited. 1000/s lets duty cross its entire +-0.8 output range
+         * in under 2ms -- effectively instant against any control-loop dt
+         * used here, matching the wheel-controller tests' own "very high
+         * slew rate" convention for the unlimited case. This was capping
+         * endpoint-settle's corrective pulses (~50ms) at ~0.1 duty when the
+         * feedforward for their 0.08-0.12 m/s target wanted ~0.25-0.29 --
+         * likely well under breakaway duty, which is why the pulse couldn't
+         * reliably overcome static friction. */
+        .duty_slew_per_s = 1000.0f,
     },
     .max_duty = 0.8f,
     .max_vx_mps = 1.0f,

@@ -46,6 +46,15 @@ esp_err_t drivetrain_odometry_update(
 // Clears accumulated pose and all odometry fault state.
 void drivetrain_odometry_reset(DrivetrainOdometry *odometry);
 
+/* Re-anchors the world-frame pose to an arbitrary known value (e.g. a marked
+ * field start position/heading), clearing fault state the same as a reset --
+ * the general case reset() is the x=y=heading=0 special case of. Rejects a
+ * non-finite pose without changing existing state. */
+esp_err_t drivetrain_odometry_set_pose(
+    DrivetrainOdometry *odometry,
+    const DrivetrainPose *pose
+);
+
 #ifdef __cplusplus
 }
 #endif

@@ -98,6 +98,12 @@
 //                                motion is active. Every subsequent movep/
 //                                rotl target is then expressed relative to
 //                                this point, not whatever the old origin was.
+//   setpose <x_m> <y_m> <heading_deg>
+//                                -- general case of zero: re-anchors the
+//                                world-frame pose to any known position/
+//                                heading (e.g. a marked field start point),
+//                                not just the origin. Same rejection-while-
+//                                active rule as zero.
 //
 // All of the above live only in RAM here -- they reset to this file's
 // compiled-in defaults on reboot. jerk/accel/alpha/tol here mirror the
@@ -228,7 +234,7 @@ int64_t last_update_us = 0;
 unsigned long last_print_ms = 0;
 
 void print_usage() {
-    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | rotl <target_heading_deg> | arc <radius_m> <angle_deg> <speed_mps> | movel <distance_m> <heading_deg> <speed_mps> | movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps> | stop | brake | enable | zero");
+    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | rotl <target_heading_deg> | arc <radius_m> <angle_deg> <speed_mps> | movel <distance_m> <heading_deg> <speed_mps> | movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps> | stop | brake | enable | zero | setpose <x_m> <y_m> <heading_deg>");
 }
 
 void print_config() {
@@ -326,6 +332,36 @@ void zero_pose() {
     drivetrain_odometry_source_reset(&odom_source);
     drivetrain_odometry_reset(&odometry);
     Serial.println("# ZERO pose reset to origin (0, 0, 0)");
+}
+
+// General case of zero_pose(): re-anchors the world-frame pose to an
+// arbitrary known position/heading (e.g. a marked field start position)
+// instead of always the origin. Same two-reset requirement as zero_pose()
+// (see its comment) plus a set_pose() call for the non-zero target instead
+// of a hardcoded reset to zero.
+void set_pose(float x_m, float y_m, float heading_deg) {
+    if (motion_active()) {
+        Serial.println("# setpose rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    const DrivetrainPose pose = {
+        .x_mm = x_m * 1000.0f,
+        .y_mm = y_m * 1000.0f,
+        .heading_rad = heading_deg * kDegToRad,
+    };
+    const esp_err_t error = drivetrain_odometry_set_pose(&odometry, &pose);
+    if (error != ESP_OK) {
+        Serial.print("# setpose failed: ");
+        Serial.println(esp_err_to_name(error));
+        return;
+    }
+    drivetrain_odometry_source_reset(&odom_source);
+    Serial.print("# SETPOSE pose set to x_m=");
+    Serial.print(x_m, 4);
+    Serial.print(" y_m=");
+    Serial.print(y_m, 4);
+    Serial.print(" heading_deg=");
+    Serial.println(heading_deg, 2);
 }
 
 void start_move(float distance_m, float heading_deg, float speed_mps) {
@@ -617,6 +653,29 @@ void handle_serial_command() {
             return;
         }
         start_arc(tokens[0].toFloat(), tokens[1].toFloat(), tokens[2].toFloat());
+        return;
+    }
+
+    if (key == "setpose") {
+        String tokens[3];
+        int count = 0;
+        String remaining = rest;
+        while (count < 3 && remaining.length() > 0) {
+            const int space = remaining.indexOf(' ');
+            if (space < 0) {
+                tokens[count++] = remaining;
+                remaining = "";
+            } else {
+                tokens[count++] = remaining.substring(0, space);
+                remaining = remaining.substring(space + 1);
+                remaining.trim();
+            }
+        }
+        if (count < 3) {
+            Serial.println("# usage: setpose <x_m> <y_m> <heading_deg>");
+            return;
+        }
+        set_pose(tokens[0].toFloat(), tokens[1].toFloat(), tokens[2].toFloat());
         return;
     }
 

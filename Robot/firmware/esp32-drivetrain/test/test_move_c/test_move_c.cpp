@@ -152,14 +152,14 @@ void test_move_c_endpoint_radial_residual_pulses_above_deadband() {
                                     .heading_rad = 1.5707963f, .valid = true};
     MoveCOutput out = {};
 
-    // Pulse windows (0.05 s) survive the first three 0.02 s steps and command
+    // Pulse windows (0.08 s) survive the first four 0.02 s steps and command
     // a body speed clearly above the deadband, not the tiny continuous value.
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         TEST_ASSERT_EQUAL(ESP_OK, move_c_update(&m, &stalled, 0.02f, &out));
         TEST_ASSERT_EQUAL(MOVE_C_RUNNING, out.status);
         const float speed = hypotf(out.requested_velocity.vx, out.requested_velocity.vy);
-        TEST_ASSERT_TRUE(speed >= 0.08f - 1.0e-4f);
-        TEST_ASSERT_TRUE(speed <= 0.12f + 1.0e-4f);
+        TEST_ASSERT_TRUE(speed >= 0.10f - 1.0e-4f);
+        TEST_ASSERT_TRUE(speed <= 0.20f + 1.0e-4f);
     }
     // The pause window (0.10 s) then commands exact zero, not a residual
     // sub-deadband trickle.

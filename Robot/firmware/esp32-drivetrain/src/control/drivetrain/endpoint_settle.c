@@ -6,13 +6,18 @@
 
 #include <robot_common/math_utils.h>
 
-static const float kHoldGain = 1.5f;
+static const float kHoldGain = 2.0f;
 /* The characterized wheel loop has an effective floor near 0.05 m/s. Use a
- * slightly larger correction so the projected wheel targets clear that
- * deadband during endpoint adjustment. */
-static const float kHoldMinSpeed = 0.08f;
-static const float kHoldMaxSpeed = 0.12f;
-static const float kPulseDurationS = 0.05f;
+ * noticeably larger correction so the projected wheel targets clear that
+ * deadband during endpoint adjustment -- bumped up (was 0.08-0.12, 50ms
+ * pulse) now that duty_slew_per_s no longer caps the wheel loop's response
+ * within a pulse (see drivetrain_config.c): the pulse can actually reach a
+ * higher target within its duration instead of being slew-limited to a
+ * fraction of it, so there's no longer a reason to keep the hold speed and
+ * pulse duration this conservative. */
+static const float kHoldMinSpeed = 0.10f;
+static const float kHoldMaxSpeed = 0.20f;
+static const float kPulseDurationS = 0.08f;
 static const float kPulsePauseS = 0.10f;
 
 void endpoint_settle_reset(EndpointSettleState *state) {

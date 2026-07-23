@@ -37,6 +37,17 @@ void speed_profile_reset(SpeedProfile *profile, float initial_speed_mps);
  * update rule as speed_profile_update(), so it includes the profile's
  * current acceleration as well as max_accel_mps2 and max_jerk_mps3.
  *
+ * `dt_s` is used as the simulation's internal step size, same as
+ * speed_profile_update(), but clamped to a small ceiling first: a well-
+ * behaved caller's dt_s (a normal control period) passes through unchanged,
+ * but an anomalously large one is capped rather than fed straight into the
+ * simulation. Reusing a live dt_s uncapped directly biased the predicted
+ * distance on real hardware: desired_accel_mps2 in the underlying update is
+ * speed_error/dt_s, so one slow real cycle (e.g. a blocking Serial print)
+ * inflated the predicted stopping distance, and because braking is a one-way
+ * commitment (never re-evaluated once triggered), a single glitchy cycle
+ * could permanently lock a move into braking far too early.
+ *
  * The result is always a non-negative magnitude and is unit-agnostic: it is
  * metres for a linear profile and radians for RotS's angular profile.
  * `stopped_speed_mps` is the caller's zero-speed threshold. */

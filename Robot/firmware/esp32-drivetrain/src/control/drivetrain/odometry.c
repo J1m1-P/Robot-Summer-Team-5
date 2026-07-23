@@ -35,3 +35,19 @@ esp_err_t drivetrain_odometry_update(
 void drivetrain_odometry_reset(DrivetrainOdometry *odometry) {
     if (odometry != NULL) memset(odometry, 0, sizeof(*odometry));
 }
+
+// Re-anchors pose to an arbitrary value and clears fault state.
+esp_err_t drivetrain_odometry_set_pose(
+    DrivetrainOdometry *odometry,
+    const DrivetrainPose *pose
+) {
+    if (odometry == NULL || pose == NULL ||
+        !isfinite(pose->x_mm) || !isfinite(pose->y_mm) ||
+        !isfinite(pose->heading_rad)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    odometry->pose = *pose;
+    odometry->fault_latched = false;
+    odometry->last_fault = DRIVETRAIN_ODOMETRY_FAULT_NONE;
+    return ESP_OK;
+}
