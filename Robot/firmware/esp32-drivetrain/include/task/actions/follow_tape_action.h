@@ -8,7 +8,6 @@
 #include "control/drivetrain/odometry.h"
 #include "control/tape_following/tape_follower.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
-#include "task/drivetrain_action_handler.h"
 #include <robot_common/task/task_action_executor.h>
 
 #ifdef __cplusplus
@@ -45,7 +44,6 @@ void follow_tape_action_cancel(FollowTapeAction *action);
 bool follow_tape_action_report_succeeded(FollowTapeAction *action);
 bool follow_tape_action_report_failed(FollowTapeAction *action,
                                       TaskFailure failure);
-DrivetrainActionHandler follow_tape_action_handler(FollowTapeAction *action);
 
 #ifdef __cplusplus
 }

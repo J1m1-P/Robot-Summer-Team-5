@@ -8,7 +8,6 @@
 #include "drivers/tape_sensor/tape_sensor_driver.h"
 #include "task/actions/follow_tape_action.h"
 #include "task/actions/tape_alignment_action.h"
-#include "task/drivetrain_action_dispatcher.h"
 #include <robot_common/task/task_action_executor.h>
 
 #ifdef __cplusplus
@@ -17,7 +16,7 @@ extern "C" {
 
 typedef struct {
     Drivetrain *drivetrain;
-    DrivetrainActionDispatcher action_dispatcher;
+    TaskAction active_action;
 
     // Shared tape hardware used for route following and the two tower-picking
     // alignment actions.

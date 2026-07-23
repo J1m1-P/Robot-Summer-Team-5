@@ -5,6 +5,14 @@
 
 #include <robot_common/app_log.h>
 
+static bool is_alignment_action(TaskAction action) {
+    return action == TASK_ACTION_ALIGN_TO_PIECES ||
+           action == TASK_ACTION_FOLLOW_PIECES_TAPE ||
+           action == TASK_ACTION_FOLLOW_TASK_TAPE ||
+           action == TASK_ACTION_BACK_OFF_PIECES ||
+           action == TASK_ACTION_ALIGN_TO_TAPE;
+}
+
 esp_err_t drivetrain_manager_init(DrivetrainManager *manager,
                                   Drivetrain *drivetrain,
                                   const TapeSensorMuxConfig *tape_mux_config,
@@ -15,7 +23,7 @@ esp_err_t drivetrain_manager_init(DrivetrainManager *manager,
     if (manager == NULL) return ESP_ERR_INVALID_ARG;
     memset(manager, 0, sizeof(*manager));
     manager->drivetrain = drivetrain;
-    drivetrain_action_dispatcher_init(&manager->action_dispatcher);
+    manager->active_action = TASK_ACTION_COUNT;
 
     esp_err_t error = tape_sensor_mux_init(&manager->tape_mux, tape_mux_config);
     if (error == ESP_OK) {
@@ -53,39 +61,92 @@ esp_err_t drivetrain_manager_init(DrivetrainManager *manager,
         return error;
     }
 
-    const DrivetrainActionHandler follow_tape =
-        follow_tape_action_handler(&manager->follow_tape);
-    const DrivetrainActionHandler tape_alignment =
-        tape_alignment_action_handler(&manager->tape_alignment);
-    if (!drivetrain_action_dispatcher_register(
-            &manager->action_dispatcher, &follow_tape) ||
-        !drivetrain_action_dispatcher_register(
-            &manager->action_dispatcher, &tape_alignment)) {
-        APP_LOGE(LOG_TAG_DRIVETRAIN,
-                 "Drivetrain action registration failed");
-        manager->tape_hardware_ready = false;
-        return ESP_ERR_INVALID_STATE;
-    }
-
     manager->tape_hardware_ready = true;
     return ESP_OK;
 }
 
+static bool executor_start(void *context, const TaskStepCommand *command,
+                           uint32_t now_ms) {
+    DrivetrainManager *manager = (DrivetrainManager *)context;
+    if (manager == NULL || command == NULL || !manager->tape_hardware_ready ||
+        manager->active_action != TASK_ACTION_COUNT) {
+        return false;
+    }
+
+    bool started = false;
+    if (command->action == TASK_ACTION_FOLLOW_TAPE) {
+        started =
+            follow_tape_action_start(&manager->follow_tape, command, now_ms);
+    } else if (is_alignment_action(command->action)) {
+        started = tape_alignment_action_start(&manager->tape_alignment,
+                                              command, now_ms);
+    }
+    if (started) manager->active_action = command->action;
+    return started;
+}
+
+static TaskActionResult executor_update(void *context, uint32_t now_ms) {
+    DrivetrainManager *manager = (DrivetrainManager *)context;
+    if (manager == NULL) {
+        return (TaskActionResult){TASK_STEP_FAILED, TASK_FAILURE_PROTOCOL};
+    }
+
+    TaskActionResult result = {TASK_STEP_FAILED, TASK_FAILURE_PROTOCOL};
+    if (manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
+        result = follow_tape_action_update(&manager->follow_tape, now_ms);
+    } else if (is_alignment_action(manager->active_action)) {
+        result =
+            tape_alignment_action_update(&manager->tape_alignment, now_ms);
+    }
+    if (task_step_status_is_terminal(result.status)) {
+        manager->active_action = TASK_ACTION_COUNT;
+    }
+    return result;
+}
+
+static void executor_cancel(void *context, uint32_t now_ms) {
+    (void)now_ms;
+    DrivetrainManager *manager = (DrivetrainManager *)context;
+    if (manager == NULL) return;
+
+    if (manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
+        follow_tape_action_cancel(&manager->follow_tape);
+    } else if (is_alignment_action(manager->active_action)) {
+        tape_alignment_action_cancel(&manager->tape_alignment);
+    }
+    manager->active_action = TASK_ACTION_COUNT;
+}
+
 TaskActionExecutor drivetrain_manager_executor(DrivetrainManager *manager) {
     if (manager == NULL) return (TaskActionExecutor){0};
-    return drivetrain_action_dispatcher_executor(
-        &manager->action_dispatcher);
+    return (TaskActionExecutor){
+        .context = manager,
+        .start = executor_start,
+        .update = executor_update,
+        .cancel = executor_cancel,
+    };
 }
 
 bool drivetrain_manager_report_succeeded(DrivetrainManager *manager) {
     if (manager == NULL) return false;
-    return drivetrain_action_dispatcher_report_succeeded(
-        &manager->action_dispatcher);
+    if (manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
+        return follow_tape_action_report_succeeded(&manager->follow_tape);
+    }
+    return is_alignment_action(manager->active_action)
+               ? tape_alignment_action_report_succeeded(
+                     &manager->tape_alignment)
+               : false;
 }
 
 bool drivetrain_manager_report_failed(DrivetrainManager *manager,
-                                      TaskFailure failure) {
+                                       TaskFailure failure) {
     if (manager == NULL) return false;
-    return drivetrain_action_dispatcher_report_failed(
-        &manager->action_dispatcher, failure);
+    if (manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
+        return follow_tape_action_report_failed(&manager->follow_tape,
+                                                failure);
+    }
+    return is_alignment_action(manager->active_action)
+               ? tape_alignment_action_report_failed(
+                     &manager->tape_alignment, failure)
+               : false;
 }
