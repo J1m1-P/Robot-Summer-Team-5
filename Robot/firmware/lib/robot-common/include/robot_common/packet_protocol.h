@@ -16,8 +16,10 @@ extern "C" {
 // Identifies the kind of data carried by a packet.
 typedef enum {
     PACKET_TYPE_INVALID = 0,
-    PACKET_TYPE_ODOMETRY,
-    PACKET_TYPE_TASK_COMMAND,
+    PACKET_TYPE_ODOMETRY,      // arm -> Pi cumulative pose (odometry_packet.h)
+    PACKET_TYPE_COMMAND,       // Pi -> arm steering/mode commands (command_packet.h)
+    PACKET_TYPE_STATUS,        // arm -> Pi status reports (status_packet.h)
+    PACKET_TYPE_TASK_COMMAND,  // arm <-> drivetrain task coordination (task_protocol.h)
     PACKET_TYPE_TASK_STATUS,
     PACKET_TYPE_HEARTBEAT,
     PACKET_TYPE_MAX

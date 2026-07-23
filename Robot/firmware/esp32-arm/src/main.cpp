@@ -20,6 +20,7 @@ static UartLink drivetrain_uart = {};
 static PacketRouter drivetrain_packet_router = {};
 static ArmTaskServer task_server = {};
 static bool application_ready = false;
+static bool tof_ready = false;
 
 static uint32_t new_session_id() {
     uint32_t value = esp_random();
@@ -28,8 +29,16 @@ static uint32_t new_session_id() {
 
 void setup() {
     app_log_init();
-    ESP_ERROR_CHECK(tof_manager_init(&tof_manager, &ARM_TOF_CONFIG));
-    ESP_ERROR_CHECK(tof_manager_start(&tof_manager));
+
+    esp_err_t tof_error = tof_manager_init(&tof_manager, &ARM_TOF_CONFIG);
+    if (tof_error == ESP_OK) tof_error = tof_manager_start(&tof_manager);
+    if (tof_error != ESP_OK) {
+        APP_LOGE(LOG_TAG_MAIN, "Arm ToF init failed, continuing without it: %s",
+                 esp_err_to_name(tof_error));
+    } else {
+        tof_ready = true;
+    }
+
     ESP_ERROR_CHECK(uart_link_init(&drivetrain_uart,
                                    &DRIVETRAIN_UART_LINK_CONFIG));
 
@@ -54,12 +63,14 @@ void setup() {
 }
 
 void loop() {
-    const esp_err_t sensor_error = tof_manager_poll(&tof_manager);
-    if (sensor_error != ESP_OK && sensor_error != ESP_ERR_NOT_FINISHED) {
-        APP_LOGE(LOG_TAG_MAIN, "Arm ToF polling failed: %s",
-                 esp_err_to_name(sensor_error));
-        (void)arm_manager_report_failed(&arm_manager,
-                                        TASK_FAILURE_STEP_FAILED);
+    if (tof_ready) {
+        const esp_err_t sensor_error = tof_manager_poll(&tof_manager);
+        if (sensor_error != ESP_OK && sensor_error != ESP_ERR_NOT_FINISHED) {
+            APP_LOGE(LOG_TAG_MAIN, "Arm ToF polling failed: %s",
+                     esp_err_to_name(sensor_error));
+            (void)arm_manager_report_failed(&arm_manager,
+                                            TASK_FAILURE_STEP_FAILED);
+        }
     }
     if (application_ready) {
         const uint32_t now_ms = millis();

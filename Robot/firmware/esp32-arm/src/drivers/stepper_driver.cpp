@@ -103,10 +103,14 @@ void stepper_move_distanceMM(StepperDriver *driver, float distanceMM) {
         return;
     }
 
-    if (distanceMM > driver->config.motionlimitMM) {
-        distanceMM = driver->config.motionlimitMM;
+    const float limitMM = (float)driver->config.motionlimitMM;
+    if (distanceMM > limitMM) {
+        distanceMM = limitMM;
+    } else if (distanceMM < -limitMM) {
+        distanceMM = -limitMM;
     }
-    
+
+
     switch (driver->config.axis) {
         case X:
             stepper_x_move_distanceMM(driver, distanceMM);
