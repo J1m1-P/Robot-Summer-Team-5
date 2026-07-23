@@ -118,10 +118,10 @@
 // don't have a permanent home in src/config/ yet since nothing outside this
 // harness consumes them.
 //
-// Streams one CSV line at kTelemetryPeriodMs while a move/rotation is
-// active -- "millis,mode,pose_x_mm,pose_y_mm,heading_deg,remaining,vx,vy,omega"
-// (mode is "move" or "rotate"; remaining is meters for move, degrees for
-// rotate).
+// Streams one CSV line at kTelemetryPeriodMs, always -- during a move/
+// rotation and while idle alike -- "millis,mode,pose_x_mm,pose_y_mm,
+// heading_deg,remaining,vx,vy,omega" (mode is "move"/"rotate"/etc. during a
+// motion, "idle" otherwise; remaining/vx/vy/omega are all zero while idle).
 
 namespace {
 
@@ -759,7 +759,8 @@ void print_telemetry(unsigned long now_ms, float remaining, DrivetrainBodyVeloci
         cal_mode == CalMode::kRotate ? "rotate" :
         cal_mode == CalMode::kArc ? "arc" :
         cal_mode == CalMode::kMoveL ? "movel" :
-        cal_mode == CalMode::kMoveP ? "movep" : "rotl";
+        cal_mode == CalMode::kMoveP ? "movep" :
+        cal_mode == CalMode::kMoveR ? "rotl" : "idle";
     Serial.print(mode_name);
     Serial.print(',');
     Serial.print(odometry.pose.x_mm, 2);
@@ -1095,5 +1096,10 @@ void loop() {
         service_movep(now_ms, dt_s, should_print);
     } else if (cal_mode == CalMode::kMoveR) {
         service_mover(now_ms, dt_s, should_print);
+    } else if (should_print) {
+        // No move active -- still stream the fused pose at the same cadence
+        // so a passive pose reader (e.g. tools/pose_reader.html) has
+        // something to show between commands, not just mid-move.
+        print_telemetry(now_ms, 0.0f, DrivetrainBodyVelocity{});
     }
 }

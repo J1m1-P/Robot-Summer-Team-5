@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fused Pose Reader</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--surface:#0d1117;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#2ea043;--accent-strong:#238636;--red:#da3633;--red-strong:#f85149;--amber:#d29922;--optical:#3987e5;--encoder:#d29922}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:900px;margin:auto;padding:22px 20px 40px;display:grid;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+h1,h2{margin:0 0 12px;font-weight:600}
+h1{font-size:21px;letter-spacing:-.01em}
+h2{font-size:12px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+button{font:inherit;font-weight:600;font-size:13px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:9px 15px;background:#1c2128;color:var(--text);transition:background-color .15s ease,border-color .15s ease,transform .05s ease}
+button:hover{background:#232933;border-color:#3d4551}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--accent-strong);border-color:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent)}
+button.ghost{background:transparent;border-color:var(--line);color:var(--muted)}
+button.ghost:hover{color:var(--text);border-color:#3d4551}
+.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-size:12px}
+.dot{width:7px;height:7px;border-radius:50%;background:#6e7681;flex:none}
+.dot.on{background:var(--accent)}
+.dot.optical{background:var(--optical)}
+.dot.encoder{background:var(--encoder)}
+.dot.stale{background:var(--red-strong)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat .value{font-size:24px;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .value.small{font-size:16px}
+.diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;font-size:12px;color:var(--muted)}
+.diag b{color:var(--text);font-variant-numeric:tabular-nums}
+.chartWrap{position:relative}
+#trailSvg{width:100%;height:320px;display:block;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+#log{height:140px;overflow:auto;background:#010409;border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;font:12px/1.5 ui-monospace,monospace}
+.hint{color:var(--muted);font-size:12px;line-height:1.6;margin:10px 0 0}
+details summary{cursor:pointer;color:var(--muted);font-size:12px}
+</style></head>
+<body><main>
+
+<section class="panel">
+<h1>Fused Pose Reader</h1>
+<p class="hint">Read-only Web Serial viewer for the <code>calibration</code> firmware's fused pose. Sends nothing to the robot &mdash; safe to run alongside the jog dashboard or tape harness.</p>
+<div class="row" style="margin-top:12px">
+  <button id="connect" class="primary">Connect</button>
+  <button id="disconnect" class="ghost">Disconnect</button>
+  <span id="status" class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Disconnected</span></span>
+  <span id="sourcePill" class="pill"><span class="dot" id="sourceDot"></span><span id="sourceText">no data</span></span>
+</div>
+</section>
+
+<section class="panel">
+<h2>Pose</h2>
+<div class="stats">
+  <div class="stat"><div class="label">X</div><div class="value" id="statX">&mdash;</div></div>
+  <div class="stat"><div class="label">Y</div><div class="value" id="statY">&mdash;</div></div>
+  <div class="stat"><div class="label">Heading</div><div class="value" id="statH">&mdash;</div></div>
+  <div class="stat"><div class="label">Mode</div><div class="value small" id="statMode">&mdash;</div></div>
+  <div class="stat"><div class="label">Age</div><div class="value small" id="statAge">&mdash;</div></div>
+</div>
+</section>
+
+<section class="panel">
+<h2>Fusion link</h2>
+<div class="diag" id="diagGrid">
+  <div>arm_link_ready <b id="dArmReady">&mdash;</b></div>
+  <div>arm_packet <b id="dArmPacket">&mdash;</b></div>
+  <div>last_seq <b id="dSeq">&mdash;</b></div>
+  <div>received <b id="dReceived">&mdash;</b></div>
+  <div>checksum_err <b id="dChecksum">&mdash;</b></div>
+  <div>parse_err <b id="dParse">&mdash;</b></div>
+  <div>decode_fail <b id="dDecode">&mdash;</b></div>
+  <div>optical_updates <b id="dOptical">&mdash;</b></div>
+  <div>encoder_updates <b id="dEncoder">&mdash;</b></div>
+</div>
+</section>
+
+<section class="panel">
+<h2>Trail</h2>
+<div class="row" style="margin-bottom:10px"><button id="clearTrail" class="ghost">Clear trail</button></div>
+<div class="chartWrap"><svg id="trailSvg" viewBox="0 0 820 320" role="img" aria-label="Fused pose trail, in millimetres"></svg></div>
+</section>
+
+<section class="panel">
+<details><summary>Serial log</summary><pre id="log" style="margin-top:10px"></pre></details>
+</section>
+
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const COLOR_LINE="#30363d",COLOR_TRAIL="#3987e5",COLOR_SURFACE="#0d1117";
+let VIEW_W=820,VIEW_H=320;const PAD=36;
+let port=null,reader=null,rx="";
+let trail=[{x:0,y:0}],lastUpdateMs=0;
+
+function log(s){$("log").textContent+=s+"\n";$("log").scrollTop=$("log").scrollHeight}
+function setStatus(s,connected){$("statusDot").classList.toggle("on",!!connected);$("statusText").textContent=s}
+
+async function connect(){
+  if(!("serial"in navigator)){setStatus("Web Serial unavailable",false);return}
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    reader=port.readable.getReader();
+    setStatus("Connected · 115200",true);
+    log("# connected");
+    readLoop();
+  }catch(e){setStatus("Connection failed",false);log("# "+e.message)}
+}
+async function disconnect(){
+  try{if(reader)await reader.cancel();if(reader)reader.releaseLock();if(port)await port.close()}catch(e){}
+  reader=port=null;setStatus("Disconnected",false)
+}
+async function readLoop(){
+  try{
+    for(;;){
+      const{value,done}=await reader.read();
+      if(done)break;
+      if(value){
+        rx+=new TextDecoder().decode(value,{stream:true});
+        let n;
+        while((n=rx.indexOf("\n"))>=0){
+          const line=rx.slice(0,n).replace(/\r$/,"");
+          rx=rx.slice(n+1);
+          if(line)handleLine(line)
+        }
+      }
+    }
+  }catch(e){log("# read error: "+e.message)}
+}
+
+function handleLine(line){
+  log(line);
+  if(line.startsWith("# FUSION ")){handleFusionLine(line);return}
+  const fields=line.split(",");
+  if(fields.length===9&&/^\d+$/.test(fields[0]))handlePoseLine(fields)
+}
+
+function handlePoseLine(fields){
+  const x=parseFloat(fields[2]),y=parseFloat(fields[3]),h=parseFloat(fields[4]),mode=fields[1];
+  lastUpdateMs=Date.now();
+  $("statX").textContent=x.toFixed(1)+" mm";
+  $("statY").textContent=y.toFixed(1)+" mm";
+  $("statH").textContent=h.toFixed(1)+"°";
+  $("statMode").textContent=mode;
+  trail.push({x,y});
+  if(trail.length>2000)trail.shift();
+  renderTrail();
+}
+
+function handleFusionLine(line){
+  const kv={};
+  line.replace("# FUSION ","").split(" ").forEach(pair=>{
+    const i=pair.indexOf("=");
+    if(i>0)kv[pair.slice(0,i)]=pair.slice(i+1)
+  });
+  const source=kv.source||"";
+  $("sourceDot").className="dot"+(source==="optical"?" optical":source==="encoder"?" encoder":"");
+  $("sourceText").textContent=source||"no data";
+  $("dArmReady").textContent=kv.arm_link_ready??"—";
+  $("dArmPacket").textContent=kv.arm_packet??"—";
+  $("dSeq").textContent=kv.last_seq??"—";
+  $("dReceived").textContent=kv.received??"—";
+  $("dChecksum").textContent=kv.checksum_err??"—";
+  $("dParse").textContent=kv.parse_err??"—";
+  $("dDecode").textContent=kv.decode_fail??"—";
+  $("dOptical").textContent=kv.optical_updates??"—";
+  $("dEncoder").textContent=kv.encoder_updates??"—";
+}
+
+// ---- trail chart: same fixed-line/hairline-grid approach as the jog
+// dashboard's trajectory chart, reduced to a single series (dataviz skill) ----
+function computeTransform(){
+  const svg=$("trailSvg"),rect=svg.getBoundingClientRect();
+  VIEW_W=Math.max(rect.width,50);VIEW_H=Math.max(rect.height,50);
+  svg.setAttribute("viewBox",`0 0 ${VIEW_W} ${VIEW_H}`);
+  let minX=Math.min(...trail.map(p=>p.x)),maxX=Math.max(...trail.map(p=>p.x));
+  let minY=Math.min(...trail.map(p=>p.y)),maxY=Math.max(...trail.map(p=>p.y));
+  const span=Math.max(maxX-minX,maxY-minY,200),mx=(minX+maxX)/2,my=(minY+maxY)/2;
+  minX=mx-span/2;maxX=mx+span/2;minY=my-span/2;maxY=my+span/2;
+  return{sx:x=>PAD+(x-minX)/(maxX-minX)*(VIEW_W-2*PAD),sy:y=>VIEW_H-PAD-(y-minY)/(maxY-minY)*(VIEW_H-2*PAD)}
+}
+function pathFor(points,t){return points.map((p,i)=>`${i?"L":"M"}${t.sx(p.x).toFixed(1)} ${t.sy(p.y).toFixed(1)}`).join(" ")}
+function gridLines(t){
+  let s="";
+  for(let i=0;i<=8;i++){
+    const gx=PAD+i*(VIEW_W-2*PAD)/8,gy=PAD+i*(VIEW_H-2*PAD)/8;
+    s+=`<line x1="${gx.toFixed(1)}" y1="${PAD}" x2="${gx.toFixed(1)}" y2="${VIEW_H-PAD}"/><line x1="${PAD}" y1="${gy.toFixed(1)}" x2="${VIEW_W-PAD}" y2="${gy.toFixed(1)}"/>`
+  }
+  return s
+}
+function renderTrail(){
+  const t=computeTransform();
+  const end=trail[trail.length-1];
+  $("trailSvg").innerHTML=`<g stroke="${COLOR_LINE}" stroke-width="1">${gridLines(t)}</g><path d="${pathFor(trail,t)}" fill="none" stroke="${COLOR_TRAIL}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${t.sx(end.x).toFixed(1)}" cy="${t.sy(end.y).toFixed(1)}" r="5" fill="${COLOR_TRAIL}" stroke="${COLOR_SURFACE}" stroke-width="2"/>`
+}
+function clearTrail(){trail=[trail[trail.length-1]||{x:0,y:0}];renderTrail()}
+
+setInterval(()=>{
+  if(!lastUpdateMs){$("statAge").textContent="—";return}
+  const ageMs=Date.now()-lastUpdateMs;
+  $("statAge").textContent=ageMs+" ms";
+  $("statAge").parentElement.style.color=ageMs>1000?"var(--red-strong)":""
+},250);
+
+$("connect").onclick=connect;
+$("disconnect").onclick=disconnect;
+$("clearTrail").onclick=clearTrail;
+renderTrail();
+</script>
+</body></html>
