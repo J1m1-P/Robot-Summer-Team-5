@@ -105,8 +105,12 @@ esp32-drivetrain/
 |
 |-- tools/                           Developer-side browser tools
 |   |-- drivetrain_test_dashboard.html
-|   |-- drive_dashboard.html
-|   `-- tuning_dashboard.html
+|   |-- calibration_dashboard.html
+|   |-- jog_program_composer.html
+|   `-- deprecated/                  Superseded tools, kept for reference
+|       |-- drive_dashboard.html
+|       |-- tuning_dashboard.html
+|       `-- odometry_plotter.html
 |
 `-- lib/
     `-- README                       Placeholder for private local libraries

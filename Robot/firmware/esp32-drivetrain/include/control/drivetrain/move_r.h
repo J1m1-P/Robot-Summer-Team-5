@@ -20,6 +20,7 @@ typedef struct {
     float heading_tolerance_rad;
     float max_alpha_rad_s2;
     float max_omega_rad_s;
+    float controller_dt_max_s;
 } MoveRConfig;
 
 typedef enum {

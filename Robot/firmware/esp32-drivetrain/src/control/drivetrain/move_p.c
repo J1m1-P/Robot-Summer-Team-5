@@ -8,14 +8,6 @@
 #include <robot_common/math_utils.h>
 
 static const float kStoppedSpeed = 0.005f;
-static const float kSettleHoldGain = 1.5f;
-/* The characterized wheel loop has an effective floor near 0.05 m/s.
- * Use a slightly larger body-frame correction so the projected wheel targets
- * clear that deadband during endpoint adjustment. */
-static const float kSettleHoldMinSpeed = 0.08f;
-static const float kSettleHoldMaxSpeed = 0.12f;
-static const float kSettlePulseDurationS = 0.05f;
-static const float kSettlePulsePauseS = 0.10f;
 static const float kHeadingBrakeMargin = 1.25f;
 
 bool move_p_config_is_valid(const MovePConfig *c) {
@@ -126,8 +118,7 @@ esp_err_t move_p_update(MoveP *m, const MotionEstimate *estimate, float dt, Move
              * when the along-track residual is larger than tolerance; the
              * position-hold correction below closes that final gap. */
             tape_following_controller_reset(&m->heading_controller);
-            m->settle_pulse_remaining_s = 0.0f;
-            m->settle_pause_remaining_s = 0.0f;
+            endpoint_settle_reset(&m->settle);
             m->status = MOVE_P_SETTLE_HEADING;
         }
     }
@@ -161,27 +152,11 @@ esp_err_t move_p_update(MoveP *m, const MotionEstimate *estimate, float dt, Move
         const float hold_x = target_x - estimate->x_m;
         const float hold_y = target_y - estimate->y_m;
         const float hold_distance = hypotf(hold_x, hold_y);
-        if (hold_distance > m->config->distance_tolerance_m) {
-            if (m->settle_pulse_remaining_s <= 0.0f &&
-                m->settle_pause_remaining_s <= 0.0f) {
-                m->settle_pulse_remaining_s = kSettlePulseDurationS;
-            }
-            const bool pulse_active = m->settle_pulse_remaining_s > 0.0f;
-            if (pulse_active) {
-                const float hold_speed = clamp(hold_distance * kSettleHoldGain,
-                                               kSettleHoldMinSpeed,
-                                               kSettleHoldMaxSpeed);
-                world_x = hold_x / hold_distance * hold_speed;
-                world_y = hold_y / hold_distance * hold_speed;
-                m->settle_pulse_remaining_s = fmaxf(
-                    0.0f, m->settle_pulse_remaining_s - dt);
-                if (m->settle_pulse_remaining_s <= 0.0f) {
-                    m->settle_pause_remaining_s = kSettlePulsePauseS;
-                }
-            } else {
-                m->settle_pause_remaining_s = fmaxf(
-                    0.0f, m->settle_pause_remaining_s - dt);
-            }
+        const float hold_speed = endpoint_settle_update(
+            &m->settle, hold_distance, m->config->distance_tolerance_m, dt);
+        if (hold_speed > 0.0f) {
+            world_x = hold_x / hold_distance * hold_speed;
+            world_y = hold_y / hold_distance * hold_speed;
         }
     }
     omega_target = clamp(omega_target, -m->config->max_omega_rad_s, m->config->max_omega_rad_s);

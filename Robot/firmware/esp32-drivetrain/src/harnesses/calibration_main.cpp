@@ -92,6 +92,12 @@
 //   brake                       -- engages the hardware brake and disables
 //                                the drivetrain; use "enable" to resume.
 //   enable                      -- re-enables the drivetrain after a brake.
+//   zero                        -- re-anchors the world-frame pose to the
+//                                robot's current physical position (e.g. a
+//                                known tape datum): 0,0,0. Rejected while a
+//                                motion is active. Every subsequent movep/
+//                                rotl target is then expressed relative to
+//                                this point, not whatever the old origin was.
 //
 // All of the above live only in RAM here -- they reset to this file's
 // compiled-in defaults on reboot. jerk/accel/alpha/tol here mirror the
@@ -196,6 +202,7 @@ MoveRConfig move_r_config = {
     .heading_tolerance_rad = 2.0f * kDegToRad,
     .max_alpha_rad_s2 = kDefaultMaxAlphaDegS2 * kDegToRad,
     .max_omega_rad_s = 1.0f,
+    .controller_dt_max_s = 0.05f,
 };
 
 MoveS move_s_state = {};
@@ -221,7 +228,7 @@ int64_t last_update_us = 0;
 unsigned long last_print_ms = 0;
 
 void print_usage() {
-    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | rotl <target_heading_deg> | arc <radius_m> <angle_deg> <speed_mps> | movel <distance_m> <heading_deg> <speed_mps> | movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps> | stop | brake | enable");
+    Serial.println("# usage: show | tol <m> | angtol <deg> | accel <mps2> | alpha <deg_s2> | jerk <value> | move <distance_m> <heading_deg> <speed_mps> | rotate <angle_deg> <max_omega_deg_s> | rotl <target_heading_deg> | arc <radius_m> <angle_deg> <speed_mps> | movel <distance_m> <heading_deg> <speed_mps> | movep <target_x_m> <target_y_m> <final_heading_deg> <speed_mps> | stop | brake | enable | zero");
 }
 
 void print_config() {
@@ -300,6 +307,25 @@ void enable_drivetrain() {
 
 bool motion_active() {
     return cal_mode != CalMode::kIdle;
+}
+
+// Re-anchors the world-frame pose to wherever the robot physically is right
+// now -- e.g. at a known tape datum -- so every subsequent absolute-target
+// call (movep/rotl) is expressed in a small local map relative to this point
+// instead of one long-lived global map accumulating drift across the whole
+// course. Both resets are required together: drivetrain_odometry_reset()
+// zeros the pose itself, while drivetrain_odometry_source_reset() clears the
+// previous-count baseline the source diffs against -- without it, the next
+// update would compute a delta against stale pre-reset counts and instantly
+// reintroduce whatever position the robot was actually at.
+void zero_pose() {
+    if (motion_active()) {
+        Serial.println("# zero rejected: another motion is active; use 'stop' first");
+        return;
+    }
+    drivetrain_odometry_source_reset(&odom_source);
+    drivetrain_odometry_reset(&odometry);
+    Serial.println("# ZERO pose reset to origin (0, 0, 0)");
 }
 
 void start_move(float distance_m, float heading_deg, float speed_mps) {
@@ -522,6 +548,7 @@ void handle_serial_command() {
     if (line == "stop") { stop_motion(); return; }
     if (line == "brake") { brake_drivetrain(); return; }
     if (line == "enable") { enable_drivetrain(); return; }
+    if (line == "zero") { zero_pose(); return; }
 
     const int firstSpace = line.indexOf(' ');
     if (firstSpace < 0) { print_usage(); return; }

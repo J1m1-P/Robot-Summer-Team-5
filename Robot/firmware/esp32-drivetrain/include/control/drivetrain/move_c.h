@@ -1,6 +1,7 @@
 /* Declares MoveC: a source-agnostic closed-loop circular-arc primitive. */
 #pragma once
 
+#include "control/drivetrain/endpoint_settle.h"
 #include "control/drivetrain/off_tape_motion.h"
 #include "control/drivetrain/speed_profile.h"
 #include "control/drivetrain/path_planner.h"
@@ -47,8 +48,7 @@ typedef struct {
     bool initialized_phase;
     bool braking;
     bool settling;
-    float settle_pulse_remaining_s;
-    float settle_pause_remaining_s;
+    EndpointSettleState settle;
     MoveCStatus status;
     OffTapeMotion off_tape_motion;
     SpeedProfile translation_profile;

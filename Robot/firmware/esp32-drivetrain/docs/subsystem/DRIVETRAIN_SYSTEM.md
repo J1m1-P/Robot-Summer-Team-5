@@ -95,8 +95,8 @@ Motor- and encoder-specific files are deliberately excluded from this map.
 | `src/harnesses/drive_main.cpp` | Best facade usage example | Provides timed serial/WebSocket motion, live shared PI tuning, and 50 Hz telemetry. |
 | `src/harnesses/tuning_main.cpp` | Wheel-loop calibration harness | Runs selected wheel loops independently for feedforward and PI identification. |
 | `src/harnesses/drivetrain_test_main.cpp` | Full acceptance harness | Provides open/closed-loop tests, encoder-relative goals, ramps, sequencing, tuning, tape tests, and telemetry. |
-| `tools/drive_dashboard.html` | Drive UI | Controls and plots the `drive` harness protocol. |
-| `tools/tuning_dashboard.html` | Tuning UI | Controls and plots the tuning harness protocol. |
+| `tools/deprecated/drive_dashboard.html` | Drive UI (deprecated) | Controls and plots the `drive` harness protocol; superseded by `tools/jog_program_composer.html`. |
+| `tools/deprecated/tuning_dashboard.html` | Tuning UI (deprecated) | Controls and plots the tuning harness protocol; gains are locked in, kept only for re-tuning after a mechanical change. |
 | `tools/drivetrain_test_dashboard.html` | Acceptance-test UI | Exposes the large USB acceptance command surface. |
 | `test/test_x_drive_kinematics/test_x_drive_kinematics.cpp` | Kinematics tests | Covers exact motions, linearity, round-trip conversion, and invalid geometry/input. |
 | `test/test_wheel_velocity_controller/test_wheel_velocity_controller.cpp` | Wheel-controller tests | Covers integral behavior, safe stopping, slew limits, and invalid limits. |
@@ -436,8 +436,9 @@ Without listing the excluded motor/encoder files, their cleanup opportunities ar
    feedforward, integral, slew, saturation, and zero-target behavior.
 7. The X-drive kinematics and wheel-controller native tests — treat them as executable statements of
    current math behavior.
-8. `src/harnesses/tuning_main.cpp` and `tools/tuning_dashboard.html` — understand
-   how calibration bypasses normal facade ownership.
+8. `src/harnesses/tuning_main.cpp` and `tools/deprecated/tuning_dashboard.html`
+   (deprecated, gains now locked in) — understand how calibration bypasses
+   normal facade ownership.
 9. `src/harnesses/drivetrain_test_main.cpp`, its dashboard, and command reference
    — read last because it combines nearly every diagnostic feature.
 10. `odometry.*` and its test — review as a tested but disconnected future

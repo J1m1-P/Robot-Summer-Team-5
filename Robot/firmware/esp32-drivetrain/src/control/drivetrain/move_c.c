@@ -9,14 +9,6 @@
 
 static const float kPi = 3.14159265358979323846f;
 static const float kStoppedSpeed = 0.005f;
-static const float kSettleHoldGain = 1.5f;
-/* The characterized wheel loop has an effective floor near 0.05 m/s. Use a
- * slightly larger body-frame correction so the projected wheel targets clear
- * that deadband during endpoint adjustment (matches MoveP's settle-hold). */
-static const float kSettleHoldMinSpeed = 0.08f;
-static const float kSettleHoldMaxSpeed = 0.12f;
-static const float kSettlePulseDurationS = 0.05f;
-static const float kSettlePulsePauseS = 0.10f;
 
 bool move_c_config_is_valid(const MoveCConfig *c) {
     return c != NULL && off_tape_motion_config_is_valid(&c->off_tape_motion) &&
@@ -187,28 +179,11 @@ esp_err_t move_c_update(MoveC *m, const MotionEstimate *estimate, float dt,
     if (translation_stopped) {
         if (!m->settling) {
             m->settling = true;
-            m->settle_pulse_remaining_s = 0.0f;
-            m->settle_pause_remaining_s = 0.0f;
+            endpoint_settle_reset(&m->settle);
         }
-        if (fabsf(radial_error) > m->config->radial_tolerance_m) {
-            if (m->settle_pulse_remaining_s <= 0.0f && m->settle_pause_remaining_s <= 0.0f) {
-                m->settle_pulse_remaining_s = kSettlePulseDurationS;
-            }
-            if (m->settle_pulse_remaining_s > 0.0f) {
-                const float hold_speed = clamp(fabsf(radial_error) * kSettleHoldGain,
-                                               kSettleHoldMinSpeed, kSettleHoldMaxSpeed);
-                radial_component = copysignf(hold_speed, -turn_sign * radial_error);
-                m->settle_pulse_remaining_s = fmaxf(0.0f, m->settle_pulse_remaining_s - dt);
-                if (m->settle_pulse_remaining_s <= 0.0f) {
-                    m->settle_pause_remaining_s = kSettlePulsePauseS;
-                }
-            } else {
-                radial_component = 0.0f;
-                m->settle_pause_remaining_s = fmaxf(0.0f, m->settle_pause_remaining_s - dt);
-            }
-        } else {
-            radial_component = 0.0f;
-        }
+        const float hold_speed = endpoint_settle_update(
+            &m->settle, fabsf(radial_error), m->config->radial_tolerance_m, dt);
+        radial_component = copysignf(hold_speed, -turn_sign * radial_error);
     }
 
     const float tangent_heading = desired_heading;

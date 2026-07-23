@@ -33,7 +33,7 @@
 // dashboard's chart freezes. Streams one CSV line per enabled motor at
 // kPrintPeriodMs (50 Hz) the whole time (including the tail) --
 // "millis,motor,target_mps,measured_mps,duty" (motor is 1..4) -- plottable
-// with tools/tuning_dashboard.html. In Duty mode the "target_mps" column
+// with tools/deprecated/tuning_dashboard.html. In Duty mode the "target_mps" column
 // is repurposed to show the commanded duty (signed, see "turn" below), not
 // a speed -- there's no target speed in open-loop duty mode.
 //
@@ -115,7 +115,7 @@
 // mode, run a few different duties, and read each run's peak_mps -- kff is
 // roughly duty / peak_mps once the wheel has settled.
 //
-// Also usable headlessly from tools/tuning_dashboard.html (Web Serial API
+// Also usable headlessly from tools/deprecated/tuning_dashboard.html (Web Serial API
 // browser page) for live charting and point-and-click gain entry instead
 // of typing raw commands -- same protocol, same commands, that page just
 // sends these same lines and parses the same CSV output.

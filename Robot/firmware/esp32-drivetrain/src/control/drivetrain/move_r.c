@@ -17,7 +17,8 @@ bool move_r_config_is_valid(const MoveRConfig *config)
            isfinite(config->heading_tolerance_rad) &&
            config->heading_tolerance_rad >= 0.0f &&
            isfinite(config->max_alpha_rad_s2) && config->max_alpha_rad_s2 > 0.0f &&
-           isfinite(config->max_omega_rad_s) && config->max_omega_rad_s > 0.0f;
+           isfinite(config->max_omega_rad_s) && config->max_omega_rad_s > 0.0f &&
+           isfinite(config->controller_dt_max_s) && config->controller_dt_max_s > 0.0f;
 }
 
 static float wrap_heading_error(float error)
@@ -60,7 +61,7 @@ esp_err_t move_r_update(
         output->status = move->status;
         return move->status == MOVE_R_COMPLETE ? ESP_OK : ESP_ERR_INVALID_STATE;
     }
-    if (dt_s > 0.05f) {
+    if (dt_s > move->config->controller_dt_max_s) {
         move->status = MOVE_R_FAULT;
         output->status = MOVE_R_FAULT;
         return ESP_ERR_INVALID_STATE;

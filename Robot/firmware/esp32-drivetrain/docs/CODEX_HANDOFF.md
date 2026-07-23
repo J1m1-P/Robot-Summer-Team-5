@@ -35,11 +35,11 @@ command rotl <target_heading_deg> uses an absolute world-frame heading.
 All harness motion commands reject a new command while another motion is
 active; use stop before replacing an active command.
 
-MoveP's final endpoint adjustment is pulse-based: it commands the minimum
-effective body correction for a short pulse, waits for odometry to settle, and
-repeats only if the endpoint remains outside tolerance. This is intentional;
-the wheel velocity loop has a practical low-speed deadband, so a continuous
-sub-deadband command cannot provide precise correction.
+Final endpoint adjustment for both `MoveP` and `MoveC` is pulse-based
+(shared `endpoint_settle.h`/`.c`): commands the minimum effective correction
+for a short pulse, waits for odometry to settle, repeats only if still outside
+tolerance. Intentional: the wheel velocity loop has a practical low-speed
+deadband, so a continuous sub-deadband command cannot correct precisely.
 
 `esp32-drivetrain` is PlatformIO firmware for a 4-wheel X-drive (mecanum-style)
 robot. The `tuning` branch's current goal is calibrating out systematic

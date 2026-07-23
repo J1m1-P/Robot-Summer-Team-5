@@ -1,6 +1,7 @@
 /* Declares MoveP: closed-loop point-to-point motion with final heading. */
 #pragma once
 
+#include "control/drivetrain/endpoint_settle.h"
 #include "control/drivetrain/off_tape_motion.h"
 #include "control/drivetrain/path_planner.h"
 #include "control/drivetrain/speed_profile.h"
@@ -41,8 +42,7 @@ typedef struct {
     float final_heading_rad;
     float heading_delta_rad;
     float max_speed_mps;
-    float settle_pulse_remaining_s;
-    float settle_pause_remaining_s;
+    EndpointSettleState settle;
     bool braking_translation;
     MovePStatus status;
 } MoveP;

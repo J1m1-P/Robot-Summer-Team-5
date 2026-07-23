@@ -30,15 +30,42 @@ rotl <target_heading_deg>, using an absolute world-frame heading. Harness
 commands reject replacement motions while another motion is active; use stop
 first.
 
-Remaining validation work includes native MoveR tests, fresh hardware
-validation of the directional factors, smooth diagonal calibration blending,
-and stale-estimate or maximum-duration safety handling.
+Native MoveR tests are in `test/test_move_r/` (2026-07-22) -- config
+validation (including the `controller_dt_max_s` field), sign/wrap behavior
+across the +-pi seam, the dt-fault path, and a full simulated convergence run.
+That pass also surfaced a real inconsistency worth reconciling: `move_r_update`
+folds its never-started (`config == NULL`) case into general argument
+validation, returning `ESP_ERR_INVALID_ARG` and marking `MOVE_R_FAULT`, where
+MoveP/MoveC/MoveL check that case separately and return
+`ESP_ERR_INVALID_STATE` without touching status. Remaining validation work:
+fresh hardware validation of the directional factors, smooth diagonal
+calibration blending, and stale-estimate or maximum-duration safety handling.
 
-MoveP endpoint refinement now uses a minimum-speed pulse controller during the
-final settle phase. It applies a short correction pulse, pauses for fresh
-odometry, and repeats only while outside the endpoint tolerance. This avoids
-commanding below the characterized wheel deadband while still permitting
-millimetre-scale average corrections.
+Endpoint settling (`endpoint_settle.h`/`.c`) is a shared minimum-speed pulse
+controller used by both `MoveP` and `MoveC`'s final settle phase: pulse, pause
+for fresh odometry, repeat only while outside tolerance. This avoids
+commanding below the characterized wheel deadband while still allowing
+millimetre-scale average correction. Was duplicated per-primitive; extracted
+2026-07-22.
+
+The harness's `zero` command (2026-07-22) re-anchors the world-frame pose
+(`drivetrain_odometry_reset` + `drivetrain_odometry_source_reset`) to wherever
+the robot physically is when it's issued. Intended use: call it while the
+robot sits at a known physical reference point (e.g. a tape datum) so every
+subsequent `movep`/`rotl` absolute target is expressed in a small local map
+relative to that point, instead of one global map accumulating dead-reckoning
+drift across an entire course with only two or three such datums. Rejected
+while a motion is active. `tools/jog_program_composer.html`'s "Reset
+world-frame reference" button sends this command (and only re-zeros its own
+plot once the firmware confirms the reset succeeded).
+
+`tools/drive_dashboard.html`, `tools/tuning_dashboard.html`, and
+`tools/odometry_plotter.html` are deprecated and moved to `tools/deprecated/`
+(2026-07-22): the first two are superseded by `jog_program_composer.html`'s
+jog/program/trajectory workflow, and wheel-PI gains are already locked in; the
+plotter's live view is likewise superseded, though it's kept for offline
+analysis of a pasted serial dump. All three carry an in-page banner rather
+than being deleted.
 
 ## 0. Context for implementers
 
@@ -92,6 +119,7 @@ every existing module (`drivetrain`, `encoder_driver`, `tape_follower`,
 | **Wheel-delta → body-delta bridge** | `include/control/drivetrain/drivetrain_odometry_source.h` / `src/control/drivetrain/drivetrain_odometry_source.c` | **Implemented, unit-tested, and used by the calibration harness.** | Takes plain `DrivetrainWheelCounts`, diffs successive samples, and feeds `drivetrain_odometry_update()` without a hardware dependency. The final controls program still needs to schedule the same adapter. |
 | **Off-tape motion PID** | `include/control/drivetrain/off_tape_motion.h` / `src/control/drivetrain/off_tape_motion.c` | **Implemented, unit-tested, and consumed by `MoveL`/`MoveP`/`MoveC`.** | Reuses the generic bounded PID with caller-computed path error; `MoveP`/`MoveC` add heading control separately. |
 | **Jerk-bounded speed ramp** | `include/control/drivetrain/speed_profile.h` / `src/control/drivetrain/speed_profile.c` | **Implemented, unit-tested, and used by `MoveS`/`RotS`/`MoveL`/`MoveP`/`MoveC`.** | Simplified jerk-bounded ramp shared by all motion primitives. |
+| **Endpoint settle (pulse/pause hold)** | `include/control/drivetrain/endpoint_settle.h` / `src/control/drivetrain/endpoint_settle.c` | **Implemented, covered by `MoveP`/`MoveC`'s existing settle-phase tests.** | Shared by `MoveP` and `MoveC`'s final settle phase; do not re-duplicate this per-primitive. |
 | **`MoveS`** | `include/control/drivetrain/move_s.h` / `src/control/drivetrain/move_s.c` | **Implemented, unit-tested, and wired into the calibration harness.** | Open-loop, self-integrated calibration primitive with one-way jerk-aware braking. It deliberately bypasses advanced calibration. |
 | **`RotS`** | `include/control/drivetrain/rot_s.h` / `src/control/drivetrain/rot_s.c` | **Implemented, unit-tested, and wired into the calibration harness.** | `MoveS`'s in-place rotation counterpart; self-integrated, one-way braking, and deliberately outside the advanced calibration path. |
 | **Encoder velocity + position** | `src/drivers/encoder/encoder_driver.c` | Implemented (includes the SM/T quadrature-grouping + low-speed-timeout work already merged to `tuning`) | `drivetrain_get_encoder_accumulated_count()` gives exact raw ticks (unaffected by the SM/T velocity smoothing); `encoder_driver_get_velocity_mps()` gives smoothed velocity. Use accumulated count for odometry, not velocity. |
@@ -855,11 +883,18 @@ defaults to the §5c-note values above; overridable live via `jerk`/`accel`.
 
 ## 6. Post-tuning jog + program-builder webpage (end goal)
 
-- [ ] Webpage to **jog** the robot manually (direct velocity/vector commands).
-- [ ] Webpage support for composing **simple predefined paths** out of the
-      `MoveS` / `MoveL` / `MoveP` / `MoveC` primitives (§2).
-- [ ] Output should be easily **copyable into the main loop** (i.e. generates
-      code/config the firmware can consume directly, not just a visualization).
+- [x] Webpage to **jog** the robot manually — `tools/jog_program_composer.html`.
+      One-shot nudges (`movel`/`rotate`) over the same Web Serial protocol as
+      `calibration_dashboard.html`, not continuous held-key velocity streaming;
+      the firmware has no raw jog command, and one-shot nudges reuse the
+      already-implemented, already-tested primitives instead of adding one.
+- [x] Webpage support for composing **simple predefined paths** out of the
+      `MoveS` / `MoveL` / `MoveP` / `MoveC` / `RotS` / `MoveR` primitives (§2) —
+      same file, program composer panel with reorder/remove and sequential run.
+- [x] Output should be easily **copyable into the main loop** — export panel
+      dumps the composed program as its exact serial command lines (one per
+      line, copy or download), the same text the firmware's serial parser
+      already consumes directly.
 - [ ] This is the overall end goal of this roadmap — depends on §2–§5 being done
       first.
 
