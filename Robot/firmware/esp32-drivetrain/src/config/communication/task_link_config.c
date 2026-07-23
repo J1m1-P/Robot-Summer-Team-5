@@ -30,5 +30,5 @@ const TaskLinkClientConfig TOP_TASK_CLIENT_CONFIG = {
 
 // One action must finish within this duration unless cancelled or failed sooner.
 const TaskCoordinatorConfig TASK_COORDINATOR_CONFIG = {
-    .step_timeout_ms = 30000U,
+    .step_timeout_ms = 15000U,
 };
