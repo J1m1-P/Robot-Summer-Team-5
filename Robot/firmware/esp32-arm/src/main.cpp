@@ -1,4 +1,11 @@
-/* Production composition root for top sensing and remote task execution. */
+/**
+ * @file main.cpp
+ * @brief Composes the arm ESP32's local and forwarded task execution paths.
+ *
+ * The drivetrain-facing server delegates commands to TopActionDispatcher,
+ * which selects either ArmManager or the Raspberry Pi task client. The loop
+ * services both UART links and optional ToF sensing without sequencing tasks.
+ */
 #include <Arduino.h>
 
 #include "esp_random.h"
@@ -16,23 +23,25 @@
 #include "task/arm_manager.h"
 #include "task/top_action_dispatcher.h"
 
-static TofManager tof_manager = {};
-static ArmManager arm_manager = {};
-static UartLink drivetrain_uart = {};
-static PacketRouter drivetrain_router = {};
-static UartLink pi_uart = {};
-static PacketRouter pi_router = {};
-static TaskLinkClient pi_scan_client = {};
-static TopActionDispatcher top_dispatcher = {};
-static TaskLinkServer drivetrain_task_server = {};
-static bool application_ready = false;
-static bool tof_ready = false;
+static TofManager tof_manager = {}; /**< Independent arm distance sensing. */
+static ArmManager arm_manager = {}; /**< Local servo/stepper task executor. */
+static UartLink drivetrain_uart = {}; /**< Physical link to drivetrain ESP32. */
+static PacketRouter drivetrain_router = {}; /**< Routes incoming top commands. */
+static UartLink pi_uart = {}; /**< Physical link to Raspberry Pi. */
+static PacketRouter pi_router = {}; /**< Routes Pi status and heartbeats. */
+static TaskLinkClient pi_scan_client = {}; /**< Remote scan executor. */
+static TopActionDispatcher top_dispatcher = {}; /**< Arm-versus-Pi router. */
+static TaskLinkServer drivetrain_task_server = {}; /**< Top command endpoint. */
+static bool application_ready = false; /**< True after both task links initialize. */
+static bool tof_ready = false; /**< False disables optional ToF polling. */
 
+// Generates a nonzero boot-session identity for both arm task-link roles.
 static uint32_t new_session_id() {
     const uint32_t value = esp_random();
     return value == 0U ? 1U : value;
 }
 
+// Initializes sensing, both UART links, executors, dispatcher, and task server.
 void setup() {
     app_log_init();
 
@@ -92,6 +101,7 @@ void setup() {
     application_ready = true;
 }
 
+// Polls optional sensing and advances both task links without blocking.
 void loop() {
     if (tof_ready) {
         const esp_err_t sensor_error = tof_manager_poll(&tof_manager);

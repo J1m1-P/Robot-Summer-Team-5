@@ -1,5 +1,10 @@
-/** @file task.c
- *  @brief Validates task requests and shared task enum values.
+/**
+ * @file task.c
+ * @brief Implements transport-independent validation for shared task values.
+ *
+ * These checks protect coordinator, dispatcher, and wire-protocol boundaries
+ * from malformed requests or sentinel enum values. No hardware or mutable
+ * runtime behavior belongs in this module.
  */
 #include <robot_common/task/task.h>
 

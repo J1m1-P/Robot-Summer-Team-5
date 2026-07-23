@@ -1,18 +1,29 @@
+/**
+ * @file task_link_client.c
+ * @brief Implements reliable remote execution behind TaskActionExecutor.
+ *
+ * This requester-side state machine correlates commands and status messages,
+ * retries active work, detects peer resets/timeouts, and makes a UART-connected
+ * executor look local to its caller.
+ */
 #include <robot_common/task/task_link_client.h>
 
 #include <stddef.h>
 #include <string.h>
 
+// Performs wrap-safe elapsed-time checks for heartbeat and retry deadlines.
 static bool elapsed_at_least(uint32_t now, uint32_t then, uint32_t duration) {
     return (uint32_t)(now - then) >= duration;
 }
 
+// Sends one already encoded task frame through the configured UART transport.
 static bool send_frame(UartLink *link, const PacketFrame *frame) {
     return link != NULL && frame != NULL &&
            uart_link_send(link, (PacketMessageType)frame->message_type,
                           frame->payload, frame->payload_len) == ESP_OK;
 }
 
+// Advertises the requester's endpoint and current boot session.
 static bool send_heartbeat(TaskLinkClient *client) {
     const TaskHeartbeatMessage heartbeat = {
         .sender = client->config.requester_endpoint,
@@ -23,6 +34,7 @@ static bool send_heartbeat(TaskLinkClient *client) {
            send_frame(client->link, &frame);
 }
 
+// Sends the tracked command as either a start or cancellation request.
 static bool send_command(TaskLinkClient *client, TaskCommandType type) {
     TaskCommandMessage message = client->command;
     message.type = type;
@@ -31,6 +43,7 @@ static bool send_command(TaskLinkClient *client, TaskCommandType type) {
            send_frame(client->link, &frame);
 }
 
+// Records a peer-level fault and fails any command currently in progress.
 static void record_peer_failure(TaskLinkClient *client, TaskFailure failure) {
     client->peer_failure = failure;
     if (client->command_active) {
@@ -39,8 +52,9 @@ static void record_peer_failure(TaskLinkClient *client, TaskFailure failure) {
     }
 }
 
+// Accepts a peer session, reporting a reset when a known peer identity changes.
 static bool accept_executor_session(TaskLinkClient *client,
-                                    uint32_t session_id, uint32_t now_ms) {
+                                     uint32_t session_id, uint32_t now_ms) {
     const bool reset = client->executor_session_id != 0U &&
                        client->executor_session_id != session_id;
     if (reset) {
@@ -57,6 +71,7 @@ static bool accept_executor_session(TaskLinkClient *client,
     return reset;
 }
 
+// Applies status only when all session, execution, and command IDs match.
 static void process_status(TaskLinkClient *client,
                            const TaskStatusMessage *status,
                            uint32_t now_ms) {
@@ -81,6 +96,7 @@ static void process_status(TaskLinkClient *client,
     }
 }
 
+// Validates timing/endpoint policy and prepares an idle remote executor.
 bool task_link_client_init(TaskLinkClient *client, UartLink *link,
                            uint32_t requester_session_id,
                            const TaskLinkClientConfig *config) {
@@ -103,6 +119,7 @@ bool task_link_client_init(TaskLinkClient *client, UartLink *link,
     return true;
 }
 
+// Decodes routed heartbeat or status packets and updates link state.
 void task_link_client_process_packet(void *context, const PacketFrame *frame,
                                      uint32_t now_ms) {
     TaskLinkClient *client = (TaskLinkClient *)context;
@@ -120,6 +137,7 @@ void task_link_client_process_packet(void *context, const PacketFrame *frame,
     }
 }
 
+// Maintains heartbeat, timeout, and retry behavior without blocking the caller.
 void task_link_client_update(TaskLinkClient *client, uint32_t now_ms) {
     if (client == NULL || client->link == NULL) return;
 
@@ -147,10 +165,12 @@ void task_link_client_update(TaskLinkClient *client, uint32_t now_ms) {
     }
 }
 
+// Treats a lower-level UART error as loss of the remote executor.
 void task_link_client_handle_link_error(TaskLinkClient *client) {
     if (client != NULL) record_peer_failure(client, TASK_FAILURE_LINK_TIMEOUT);
 }
 
+// Starts a permitted remote action and assigns its next command identity.
 static bool client_start(void *context, const TaskStepCommand *command,
                          uint32_t now_ms) {
     TaskLinkClient *client = (TaskLinkClient *)context;
@@ -185,6 +205,7 @@ static bool client_start(void *context, const TaskStepCommand *command,
     return true;
 }
 
+// Returns the latest remote result while preserving executor polling semantics.
 static TaskActionResult client_update(void *context, uint32_t now_ms) {
     (void)now_ms;
     TaskLinkClient *client = (TaskLinkClient *)context;
@@ -201,6 +222,7 @@ static TaskActionResult client_update(void *context, uint32_t now_ms) {
     return result;
 }
 
+// Requests remote cancellation; update() continues tracking its acknowledgement.
 static void client_cancel(void *context, uint32_t now_ms) {
     TaskLinkClient *client = (TaskLinkClient *)context;
     if (client == NULL || !client->command_active) return;
@@ -211,6 +233,7 @@ static void client_cancel(void *context, uint32_t now_ms) {
     client->cancel_pending = true;
 }
 
+// Exposes this client through the same callback interface as a local manager.
 TaskActionExecutor task_link_client_executor(TaskLinkClient *client) {
     const TaskActionExecutor executor = {
         .context = client,
@@ -221,6 +244,7 @@ TaskActionExecutor task_link_client_executor(TaskLinkClient *client) {
     return executor;
 }
 
+// Delivers one pending reset/timeout failure and clears it after consumption.
 bool task_link_client_take_peer_failure(TaskLinkClient *client,
                                         TaskFailure *failure_out) {
     if (client == NULL || failure_out == NULL ||

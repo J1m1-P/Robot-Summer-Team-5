@@ -1,5 +1,10 @@
-/** @file task_coordinator.c
- *  @brief Implements deterministic task and step state transitions.
+/**
+ * @file task_coordinator.c
+ * @brief Implements authoritative workflows and deterministic step sequencing.
+ *
+ * Workflow arrays in this file are the single source of truth for step order,
+ * ownership, and default parameters. The update state machine invokes one
+ * executor at a time and owns every task-level terminal transition.
  */
 #include "task/task_coordinator.h"
 
@@ -7,20 +12,22 @@
 #include <string.h>
 
 typedef struct {
-    TaskAction action;
-    TaskOwner owner;
-    TaskStepParameters parameters;
+    TaskAction action; /**< Executor behavior for this workflow position. */
+    TaskOwner owner; /**< Board/subsystem responsible for the action. */
+    TaskStepParameters parameters; /**< Default action tuning values. */
 } TaskStepDefinition;
 
 typedef struct {
-    const TaskStepDefinition *steps;
-    uint8_t count;
+    const TaskStepDefinition *steps; /**< Immutable ordered step array. */
+    uint8_t count; /**< Number of valid entries in steps. */
 } WorkflowDefinition;
 
+// Single-step route-following workflow used by the production startup request.
 static const TaskStepDefinition TAPE_WORKFLOW[] = {
     {TASK_ACTION_FOLLOW_TAPE, TASK_OWNER_DRIVETRAIN, {0}},
 };
 
+// Full drivetrain/top sequence for acquiring a tower and returning to route.
 static const TaskStepDefinition PICKING_WORKFLOW[] = {
     // Tower picking 1: turn 70 degrees clockwise, find the left tape, align.
     {TASK_ACTION_ALIGN_TO_PIECES, TASK_OWNER_DRIVETRAIN,
@@ -60,10 +67,12 @@ static const TaskStepDefinition PICKING_WORKFLOW[] = {
      {0.0f, 0.30f, 0U}},
 };
 
+// Placeholder top-owned tower-building workflow.
 static const TaskStepDefinition BUILDING_WORKFLOW[] = {
     {TASK_ACTION_BUILD_TOWER, TASK_OWNER_TOP, {0}},
 };
 
+// Top-owned scan forwarded through the arm ESP32 to the Raspberry Pi.
 static const TaskStepDefinition SCAN_WORKFLOW[] = {
     {TASK_ACTION_SCAN_TELETUBBIES, TASK_OWNER_TOP, {0}},
 };

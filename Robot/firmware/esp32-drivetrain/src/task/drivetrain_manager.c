@@ -1,3 +1,12 @@
+/**
+ * @file drivetrain_manager.c
+ * @brief Initializes shared tape hardware and directly routes drive actions.
+ *
+ * This manager is the coordinator-facing boundary for all drivetrain-owned
+ * task actions. It selects an independent action module from the command,
+ * forwards update/cancel/result hooks, and rejects work when hardware is busy
+ * or unavailable.
+ */
 #include "task/drivetrain_manager.h"
 
 #include <stddef.h>
@@ -5,6 +14,7 @@
 
 #include <robot_common/app_log.h>
 
+// Groups the five picking-route action IDs handled by TapeAlignmentAction.
 static bool is_alignment_action(TaskAction action) {
     return action == TASK_ACTION_ALIGN_TO_PIECES ||
            action == TASK_ACTION_FOLLOW_PIECES_TAPE ||
@@ -13,6 +23,7 @@ static bool is_alignment_action(TaskAction action) {
            action == TASK_ACTION_ALIGN_TO_TAPE;
 }
 
+// Initializes shared hardware and idle action instances; failure disables routing.
 esp_err_t drivetrain_manager_init(DrivetrainManager *manager,
                                   Drivetrain *drivetrain,
                                   const TapeSensorMuxConfig *tape_mux_config,
@@ -65,6 +76,7 @@ esp_err_t drivetrain_manager_init(DrivetrainManager *manager,
     return ESP_OK;
 }
 
+// Selects and starts the one local action matching command->action.
 static bool executor_start(void *context, const TaskStepCommand *command,
                            uint32_t now_ms) {
     DrivetrainManager *manager = (DrivetrainManager *)context;
@@ -85,6 +97,7 @@ static bool executor_start(void *context, const TaskStepCommand *command,
     return started;
 }
 
+// Polls the selected action and releases it after a terminal result.
 static TaskActionResult executor_update(void *context, uint32_t now_ms) {
     DrivetrainManager *manager = (DrivetrainManager *)context;
     if (manager == NULL) {
@@ -104,6 +117,7 @@ static TaskActionResult executor_update(void *context, uint32_t now_ms) {
     return result;
 }
 
+// Cancels the selected action, using now_ms only to match the executor contract.
 static void executor_cancel(void *context, uint32_t now_ms) {
     (void)now_ms;
     DrivetrainManager *manager = (DrivetrainManager *)context;
@@ -117,6 +131,7 @@ static void executor_cancel(void *context, uint32_t now_ms) {
     manager->active_action = TASK_ACTION_COUNT;
 }
 
+// Wraps this manager in the generic interface required by TaskCoordinator.
 TaskActionExecutor drivetrain_manager_executor(DrivetrainManager *manager) {
     if (manager == NULL) return (TaskActionExecutor){0};
     return (TaskActionExecutor){
@@ -127,6 +142,7 @@ TaskActionExecutor drivetrain_manager_executor(DrivetrainManager *manager) {
     };
 }
 
+// Routes manual success injection to whichever action is currently active.
 bool drivetrain_manager_report_succeeded(DrivetrainManager *manager) {
     if (manager == NULL) return false;
     if (manager->active_action == TASK_ACTION_FOLLOW_TAPE) {
@@ -138,6 +154,7 @@ bool drivetrain_manager_report_succeeded(DrivetrainManager *manager) {
                : false;
 }
 
+// Routes a non-NONE manual failure reason to the currently active action.
 bool drivetrain_manager_report_failed(DrivetrainManager *manager,
                                        TaskFailure failure) {
     if (manager == NULL) return false;

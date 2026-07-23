@@ -1,11 +1,21 @@
+/**
+ * @file follow_tape_action.c
+ * @brief Implements closed-loop tape following for a requested path length.
+ *
+ * The action combines tape-sensor guidance with drivetrain body-velocity
+ * control and wheel-encoder odometry. All work is advanced from update(), so
+ * the coordinator remains responsive to cancellation and timeouts.
+ */
 #include "task/actions/follow_tape_action.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
 
+// Small lower bound prevents a zero controller timestep on fast loop cycles.
 static const float kMinControlDtS = 0.0005f;
 
+// Samples accumulated quadrature counts for all four drivetrain wheels.
 static DrivetrainWheelCounts capture_encoder_counts(
     const FollowTapeAction *action) {
     return (DrivetrainWheelCounts){
@@ -20,6 +30,7 @@ static DrivetrainWheelCounts capture_encoder_counts(
     };
 }
 
+// Builds odometry conversion parameters from the live drivetrain configuration.
 static bool configure_odometry_source(FollowTapeAction *action) {
     if (action == NULL || action->drivetrain == NULL ||
         action->drivetrain->config == NULL) {
@@ -50,6 +61,7 @@ static bool configure_odometry_source(FollowTapeAction *action) {
         &action->odometry_source_config);
 }
 
+// Integrates one encoder sample and accumulates curved path length in metres.
 static esp_err_t integrate_odometry_step(FollowTapeAction *action) {
     const DrivetrainPose previous_pose = action->odometry.pose;
     const DrivetrainWheelCounts counts = capture_encoder_counts(action);
@@ -69,6 +81,7 @@ static esp_err_t integrate_odometry_step(FollowTapeAction *action) {
     return ESP_OK;
 }
 
+// Brakes motion and stores a terminal failed result.
 static TaskActionResult fail(FollowTapeAction *action, TaskFailure failure) {
     (void)drivetrain_brake(action->drivetrain);
     action->result.status = TASK_STEP_FAILED;
@@ -76,6 +89,7 @@ static TaskActionResult fail(FollowTapeAction *action, TaskFailure failure) {
     return action->result;
 }
 
+// Binds borrowed hardware/controller objects and resets per-run state.
 void follow_tape_action_init(FollowTapeAction *action, Drivetrain *drivetrain,
                              TapeSensor *front_sensor,
                              TapeSensor *back_sensor,
@@ -91,6 +105,7 @@ void follow_tape_action_init(FollowTapeAction *action, Drivetrain *drivetrain,
     action->result.status = TASK_STEP_NOT_STARTED;
 }
 
+// Validates direction/speed/distance, enables motion, and captures odometry baseline.
 bool follow_tape_action_start(FollowTapeAction *action,
                               const TaskStepCommand *command,
                               uint32_t now_ms) {
@@ -127,6 +142,7 @@ bool follow_tape_action_start(FollowTapeAction *action,
     return true;
 }
 
+// Runs one sensing/control/odometry cycle and succeeds at target distance.
 TaskActionResult follow_tape_action_update(FollowTapeAction *action,
                                            uint32_t now_ms) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
@@ -173,6 +189,7 @@ TaskActionResult follow_tape_action_update(FollowTapeAction *action,
     return action->result;
 }
 
+// Immediately brakes and publishes a cancelled terminal result.
 void follow_tape_action_cancel(FollowTapeAction *action) {
     if (action == NULL) return;
     if (action->drivetrain != NULL &&
@@ -183,6 +200,7 @@ void follow_tape_action_cancel(FollowTapeAction *action) {
         (TaskActionResult){TASK_STEP_CANCELLED, TASK_FAILURE_NONE};
 }
 
+// Allows the supervised test harness to force successful completion.
 bool follow_tape_action_report_succeeded(FollowTapeAction *action) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
         return false;
@@ -192,6 +210,7 @@ bool follow_tape_action_report_succeeded(FollowTapeAction *action) {
     return true;
 }
 
+// Allows the supervised test harness to inject a specific action failure.
 bool follow_tape_action_report_failed(FollowTapeAction *action,
                                       TaskFailure failure) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING ||

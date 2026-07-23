@@ -1,23 +1,35 @@
+/**
+ * @file task_link_server.c
+ * @brief Implements the executor side of a reliable UART task link.
+ *
+ * This server validates remote commands, protects the local executor from
+ * duplicates and overlapping work, monitors requester health, and publishes
+ * correlated action status until the command reaches a terminal result.
+ */
 #include <robot_common/task/task_link_server.h>
 
 #include <stddef.h>
 #include <string.h>
 
+// Performs wrap-safe elapsed-time checks for heartbeat and status deadlines.
 static bool elapsed_at_least(uint32_t now, uint32_t then, uint32_t duration) {
     return (uint32_t)(now - then) >= duration;
 }
 
+// Ensures the local implementation supplies every required executor callback.
 static bool executor_is_valid(const TaskActionExecutor *executor) {
     return executor != NULL && executor->start != NULL &&
            executor->update != NULL && executor->cancel != NULL;
 }
 
+// Sends one already encoded task frame through the configured UART transport.
 static bool send_frame(UartLink *link, const PacketFrame *frame) {
     return link != NULL && frame != NULL &&
            uart_link_send(link, (PacketMessageType)frame->message_type,
                           frame->payload, frame->payload_len) == ESP_OK;
 }
 
+// Advertises the executor's endpoint and current boot session.
 static bool send_heartbeat(TaskLinkServer *server) {
     const TaskHeartbeatMessage heartbeat = {
         .sender = server->config.executor_endpoint,
@@ -28,6 +40,7 @@ static bool send_heartbeat(TaskLinkServer *server) {
            send_frame(server->link, &frame);
 }
 
+// Sends a result correlated to the requester, execution, and command IDs.
 static bool send_status_for(TaskLinkServer *server,
                             const TaskCommandMessage *command,
                             TaskActionResult result) {
@@ -44,6 +57,7 @@ static bool send_status_for(TaskLinkServer *server,
            send_frame(server->link, &frame);
 }
 
+// Cancels running local work and releases the current command slot.
 static void cancel_active(TaskLinkServer *server, uint32_t now_ms) {
     if (server->has_command && server->result.status == TASK_STEP_RUNNING) {
         server->executor.cancel(server->executor.context, now_ms);
@@ -51,6 +65,7 @@ static void cancel_active(TaskLinkServer *server, uint32_t now_ms) {
     server->has_command = false;
 }
 
+// Switches requester sessions, cancelling work left by the previous requester.
 static void reset_for_requester(TaskLinkServer *server,
                                 uint32_t requester_session_id,
                                 uint32_t now_ms) {
@@ -65,6 +80,7 @@ static void reset_for_requester(TaskLinkServer *server,
     server->last_receive_ms = now_ms;
 }
 
+// Validates ordering and starts, cancels, or re-acknowledges one command.
 static void process_command(TaskLinkServer *server,
                             const TaskCommandMessage *command,
                             uint32_t now_ms) {
@@ -135,6 +151,7 @@ static void process_command(TaskLinkServer *server,
     (void)send_status_for(server, command, server->result);
 }
 
+// Validates configuration and wraps one local executor in an idle server.
 bool task_link_server_init(TaskLinkServer *server, UartLink *link,
                            const TaskActionExecutor *executor,
                            uint32_t executor_session_id,
@@ -159,6 +176,7 @@ bool task_link_server_init(TaskLinkServer *server, UartLink *link,
     return true;
 }
 
+// Decodes routed requester heartbeats and task commands.
 void task_link_server_process_packet(void *context, const PacketFrame *frame,
                                      uint32_t now_ms) {
     TaskLinkServer *server = (TaskLinkServer *)context;
@@ -186,6 +204,7 @@ void task_link_server_process_packet(void *context, const PacketFrame *frame,
     }
 }
 
+// Polls work, sends periodic state, and cancels on requester timeout.
 void task_link_server_update(TaskLinkServer *server, uint32_t now_ms) {
     if (server == NULL || server->link == NULL) return;
     if (server->last_heartbeat_ms == 0U ||
@@ -219,6 +238,7 @@ void task_link_server_update(TaskLinkServer *server, uint32_t now_ms) {
     }
 }
 
+// Converts a lower-level UART failure into cancellation and link failure.
 void task_link_server_handle_link_error(TaskLinkServer *server,
                                         uint32_t now_ms) {
     if (server == NULL) return;

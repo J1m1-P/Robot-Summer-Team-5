@@ -1,11 +1,17 @@
-/** @file arm_manager.c
- *  @brief Dispatches arm-owned actions without implementing their mechanics.
+/**
+ * @file arm_manager.c
+ * @brief Routes arm-owned commands while keeping mechanism logic separate.
+ *
+ * Pickup-related action IDs share PickUpBlockAction, while BUILD_TOWER uses its
+ * own implementation. This module provides the generic executor adapter and
+ * never contains workflow sequencing or direct servo/stepper commands.
  */
 #include "task/arm_manager.h"
 
 #include <stddef.h>
 #include <string.h>
 
+// Groups the discrete tower-pickup steps handled by PickUpBlockAction.
 static bool is_pickup_action(TaskAction action) {
     return action == TASK_ACTION_PICK_UP_BLOCK ||
            action == TASK_ACTION_POSITION_TOWER_X ||
@@ -17,6 +23,7 @@ static bool is_pickup_action(TaskAction action) {
            action == TASK_ACTION_TOWER_FACE_FRONT;
 }
 
+// Reads the result belonging to active_action without advancing hardware.
 static TaskActionResult current_result(const ArmManager *manager) {
     if (manager == NULL) {
         return (TaskActionResult){TASK_STEP_FAILED, TASK_FAILURE_PROTOCOL};
@@ -30,6 +37,7 @@ static TaskActionResult current_result(const ArmManager *manager) {
     return (TaskActionResult){TASK_STEP_NOT_STARTED, TASK_FAILURE_NONE};
 }
 
+// Initializes each mechanism implementation and marks the manager idle.
 void arm_manager_init(ArmManager *manager) {
     if (manager == NULL) return;
     memset(manager, 0, sizeof(*manager));
@@ -38,6 +46,7 @@ void arm_manager_init(ArmManager *manager) {
     build_tower_action_init(&manager->build_tower);
 }
 
+// Selects and starts the implementation matching command->action.
 bool arm_manager_start(ArmManager *manager, const TaskStepCommand *command,
                        uint32_t now_ms) {
     if (manager == NULL || command == NULL ||
@@ -59,6 +68,7 @@ bool arm_manager_start(ArmManager *manager, const TaskStepCommand *command,
     return started;
 }
 
+// Advances only the currently selected arm implementation.
 void arm_manager_update(ArmManager *manager, uint32_t now_ms) {
     if (manager == NULL) return;
     if (is_pickup_action(manager->active_action)) {
@@ -68,6 +78,7 @@ void arm_manager_update(ArmManager *manager, uint32_t now_ms) {
     }
 }
 
+// Forwards cancellation to the active implementation.
 bool arm_manager_cancel(ArmManager *manager) {
     if (manager == NULL) return false;
     if (is_pickup_action(manager->active_action)) {
@@ -78,6 +89,7 @@ bool arm_manager_cancel(ArmManager *manager) {
                : false;
 }
 
+// Routes supervised success injection to the active implementation.
 bool arm_manager_report_succeeded(ArmManager *manager) {
     if (manager == NULL) return false;
     if (is_pickup_action(manager->active_action)) {
@@ -89,6 +101,7 @@ bool arm_manager_report_succeeded(ArmManager *manager) {
                : false;
 }
 
+// Routes a non-NONE supervised failure to the active implementation.
 bool arm_manager_report_failed(ArmManager *manager, TaskFailure failure) {
     if (manager == NULL) return false;
     if (is_pickup_action(manager->active_action)) {
@@ -101,6 +114,7 @@ bool arm_manager_report_failed(ArmManager *manager, TaskFailure failure) {
                : false;
 }
 
+// Returns the current action status and optionally its failure code.
 TaskStepStatus arm_manager_get_status(const ArmManager *manager,
                                       TaskFailure *failure_out) {
     const TaskActionResult result = current_result(manager);
@@ -108,22 +122,26 @@ TaskStepStatus arm_manager_get_status(const ArmManager *manager,
     return result.status;
 }
 
+// Executor adapter: starts an action using the manager stored in context.
 static bool executor_start(void *context, const TaskStepCommand *command,
                            uint32_t now_ms) {
     return arm_manager_start((ArmManager *)context, command, now_ms);
 }
 
+// Executor adapter: advances the manager and returns the resulting state.
 static TaskActionResult executor_update(void *context, uint32_t now_ms) {
     ArmManager *manager = (ArmManager *)context;
     arm_manager_update(manager, now_ms);
     return current_result(manager);
 }
 
+// Executor adapter: cancels active work; now_ms is unused by arm mechanisms.
 static void executor_cancel(void *context, uint32_t now_ms) {
     (void)now_ms;
     (void)arm_manager_cancel((ArmManager *)context);
 }
 
+// Wraps ArmManager callbacks for use by TopActionDispatcher.
 TaskActionExecutor arm_manager_executor(ArmManager *manager) {
     return (TaskActionExecutor){
         .context = manager,

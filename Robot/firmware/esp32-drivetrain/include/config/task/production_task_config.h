@@ -1,4 +1,10 @@
-/* Defines the fixed workflow the production coordinator auto-starts at boot. */
+/**
+ * @file production_task_config.h
+ * @brief Declares the fixed task request automatically started in production.
+ *
+ * This configuration chooses startup timing and request parameters only; the
+ * authoritative workflow steps remain in task_coordinator.c.
+ */
 #pragma once
 
 #include <stdint.h>
@@ -13,7 +19,7 @@ extern "C" {
 // giving time to place the robot on the field before it moves.
 extern const uint32_t PRODUCTION_TASK_START_DELAY_MS;
 
-// Initial tape-following travel target. Tune this value on the assembled robot.
+// Initial tape-following travel target in metres; tune on assembled hardware.
 #define PRODUCTION_TAPE_FOLLOW_DISTANCE_M 3.0f
 
 // Fixed request auto-started once at boot. Placeholder speed/distance --

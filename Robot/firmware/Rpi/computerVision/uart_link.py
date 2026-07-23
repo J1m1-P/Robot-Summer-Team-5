@@ -1,4 +1,9 @@
-"""Framed UART task protocol used by the Raspberry Pi scan executor."""
+"""Implement the Raspberry Pi endpoint of the robot's framed task protocol.
+
+This module mirrors the ESP32 command, status, heartbeat, and packet layouts.
+PiTaskServer accepts only scan actions, detects stale/reset requesters, emits
+start/cancel events for the scanner, and reports correlated terminal results.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +12,12 @@ import struct
 import time
 from dataclasses import dataclass
 
+# Framed packet constants shared with robot-common/packet_protocol.h.
 MAGIC = b"\xAA\x55"
 VERSION = 0x01
 PACKET_MAX_PAYLOAD_SIZE = 64
 
+# Packet message identifiers; only task command/status/heartbeat are handled.
 PACKET_TYPE_INVALID = 0
 PACKET_TYPE_ODOMETRY = 1
 PACKET_TYPE_RESERVED_COMMAND = 2
@@ -20,14 +27,17 @@ PACKET_TYPE_TASK_STATUS = 5
 PACKET_TYPE_HEARTBEAT = 6
 PACKET_TYPE_MAX = 7
 
+# Task command operations and endpoint identities.
 TASK_COMMAND_START = 0
 TASK_COMMAND_CANCEL = 1
 
 TASK_ENDPOINT_TOP = 1
 TASK_ENDPOINT_PI = 2
 
+# The single physical task action implemented on the Raspberry Pi.
 TASK_ACTION_SCAN_TELETUBBIES = 6
 
+# Step lifecycle and failure values mirrored from task.h.
 TASK_STEP_RUNNING = 1
 TASK_STEP_SUCCEEDED = 2
 TASK_STEP_CANCELLED = 3
@@ -42,12 +52,14 @@ TASK_FAILURE_PROTOCOL = 9
 TASK_FAILURE_EXECUTOR_UNAVAILABLE = 12
 TASK_FAILURE_TARGET_NOT_FOUND = 13
 
+# Fixed little-endian payload layouts shared with task_protocol.c.
 COMMAND_FORMAT = "<IIIBBBBff"
 STATUS_FORMAT = "<IIIIBB"
 HEARTBEAT_FORMAT = "<BI"
 
 
 def encode_frame(message_type: int, payload: bytes = b"") -> bytes:
+    """Encode one validated message type and payload as a checksummed frame."""
     if not 0 < message_type < PACKET_TYPE_MAX:
         raise ValueError("invalid packet type")
     if len(payload) > PACKET_MAX_PAYLOAD_SIZE:
@@ -63,9 +75,11 @@ class PacketParser:
     """Incrementally reconstructs checksum-validated UART frames."""
 
     def __init__(self) -> None:
+        """Create an incremental parser with an empty receive buffer."""
         self.buffer = bytearray()
 
     def feed(self, data: bytes) -> list[tuple[int, bytes]]:
+        """Consume serial bytes and return all complete, checksum-valid packets."""
         self.buffer.extend(data)
         packets: list[tuple[int, bytes]] = []
         while True:
@@ -97,18 +111,21 @@ class PacketParser:
 
 @dataclass(frozen=True)
 class TaskCommand:
-    requester_session_id: int
-    execution_id: int
-    command_id: int
-    command_type: int
-    action: int
-    step: int
-    tape_direction: int
-    tape_speed_mps: float
-    tape_distance_m: float
+    """Immutable command fields decoded from one ESP32 task payload."""
+
+    requester_session_id: int  # Arm ESP32 boot-session identity.
+    execution_id: int  # Coordinator task-run identity.
+    command_id: int  # Monotonic command identity within the session.
+    command_type: int  # Start or cancel operation.
+    action: int  # Physical task action requested by the top dispatcher.
+    step: int  # Zero-based coordinator workflow index.
+    tape_direction: int  # Shared payload field; unused by scan.
+    tape_speed_mps: float  # Shared payload field; unused by scan.
+    tape_distance_m: float  # Shared payload field; unused by scan.
 
 
 def decode_command(payload: bytes) -> TaskCommand | None:
+    """Decode a command payload, returning None for invalid size or identity."""
     if len(payload) != struct.calcsize(COMMAND_FORMAT):
         return None
     values = struct.unpack(COMMAND_FORMAT, payload)
@@ -121,39 +138,44 @@ def decode_command(payload: bytes) -> TaskCommand | None:
 
 
 def sequence_is_newer(candidate: int, reference: int) -> bool:
+    """Compare wrapping unsigned 32-bit command sequence numbers."""
     difference = (candidate - reference) & 0xFFFFFFFF
     return difference != 0 and difference < 0x80000000
 
 
 class PiTaskServer:
-    """Idempotent task endpoint; it never sequences robot workflows."""
+    """Serve scan commands idempotently without sequencing robot workflows."""
 
     def __init__(self, port: str, baud: int = 115200) -> None:
+        """Open ``port`` at ``baud`` and initialize an idle Pi task session."""
         import serial
 
-        self.serial = serial.Serial(port, baud, timeout=0)
-        self.parser = PacketParser()
-        self.session_id = secrets.randbits(32) or 1
-        self.requester_session_id = 0
-        self.previous_requester_session_id = 0
-        self.last_receive = time.monotonic()
-        self.last_heartbeat = 0.0
-        self.last_status = 0.0
-        self.command: TaskCommand | None = None
-        self.link_timed_out = False
-        self.status = TASK_STEP_CANCELLED
-        self.failure = TASK_FAILURE_NONE
+        self.serial = serial.Serial(port, baud, timeout=0)  # Nonblocking UART.
+        self.parser = PacketParser()  # Incremental framed-packet decoder.
+        self.session_id = secrets.randbits(32) or 1  # This Pi boot session.
+        self.requester_session_id = 0  # Current arm ESP32 session.
+        self.previous_requester_session_id = 0  # Session rejected as stale.
+        self.last_receive = time.monotonic()  # Last accepted requester traffic.
+        self.last_heartbeat = 0.0  # Last heartbeat transmit time.
+        self.last_status = 0.0  # Last status transmit time.
+        self.command: TaskCommand | None = None  # Current correlated command.
+        self.link_timed_out = False  # Suppresses repeated timeout transitions.
+        self.status = TASK_STEP_CANCELLED  # Latest command lifecycle state.
+        self.failure = TASK_FAILURE_NONE  # Failure paired with ``status``.
 
     def _send(self, message_type: int, payload: bytes) -> None:
+        """Frame and write one protocol payload to the arm ESP32."""
         self.serial.write(encode_frame(message_type, payload))
 
     def _send_heartbeat(self) -> None:
+        """Advertise the Pi endpoint and its current boot-session identity."""
         self._send(PACKET_TYPE_HEARTBEAT,
                    struct.pack(HEARTBEAT_FORMAT, TASK_ENDPOINT_PI,
                                self.session_id))
 
     def _send_status(self, command: TaskCommand, status: int | None = None,
                      failure: int | None = None) -> None:
+        """Send status correlated to ``command``, optionally overriding state."""
         self._send(
             PACKET_TYPE_TASK_STATUS,
             struct.pack(
@@ -169,6 +191,7 @@ class PiTaskServer:
         self.last_status = time.monotonic()
 
     def complete(self, status: int, failure: int = TASK_FAILURE_NONE) -> None:
+        """Finish the active command with a validated terminal status/failure."""
         if self.command is None or self.status != TASK_STEP_RUNNING:
             return
         if status not in (TASK_STEP_SUCCEEDED, TASK_STEP_CANCELLED,
@@ -182,6 +205,7 @@ class PiTaskServer:
 
     def _reset_requester(self, session_id: int,
                          remember_previous: bool = True) -> bool:
+        """Adopt ``session_id`` and report whether running work was cancelled."""
         cancelled = self.command is not None and self.status == TASK_STEP_RUNNING
         if (remember_previous and self.requester_session_id and
                 self.requester_session_id != session_id):
@@ -195,6 +219,7 @@ class PiTaskServer:
         return cancelled
 
     def _handle_command(self, command: TaskCommand) -> str | None:
+        """Validate command ordering and return a scanner start/cancel event."""
         if command.requester_session_id == self.previous_requester_session_id:
             self._send_status(command, TASK_STEP_FAILED,
                               TASK_FAILURE_STALE_MESSAGE)
@@ -243,6 +268,7 @@ class PiTaskServer:
         return "start"
 
     def update(self) -> list[str]:
+        """Process UART traffic and timers, returning scanner control events."""
         now = time.monotonic()
         events: list[str] = []
         for message_type, payload in self.parser.feed(self.serial.read(256)):
@@ -279,4 +305,5 @@ class PiTaskServer:
         return events
 
     def close(self) -> None:
+        """Close the serial transport owned by this task server."""
         self.serial.close()

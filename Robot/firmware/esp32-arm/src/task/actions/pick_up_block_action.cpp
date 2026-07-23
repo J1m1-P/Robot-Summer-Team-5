@@ -1,3 +1,11 @@
+/**
+ * @file pick_up_block_action.cpp
+ * @brief Implements the discrete servo and stepper steps for tower pickup.
+ *
+ * The action owns statically allocated mechanism drivers, applies one physical
+ * command in start(), and polls only completion state in update(). This keeps
+ * every pickup step nonblocking and independently sequenced by the coordinator.
+ */
 #include "task/actions/pick_up_block_action.h"
 
 #include <math.h>
@@ -12,16 +20,18 @@
 namespace {
 
 struct PickupHardware {
-    ServoDriver rotate;
-    ServoDriver left;
-    ServoDriver middle;
-    ServoDriver right;
-    StepperDriver tower_x;
-    StepperDriver tower_z;
+    ServoDriver rotate; /**< Rotates the claw between front and down. */
+    ServoDriver left; /**< Left small-claw servo. */
+    ServoDriver middle; /**< Middle small-claw servo. */
+    ServoDriver right; /**< Right small-claw servo. */
+    StepperDriver tower_x; /**< Horizontal tower positioning axis. */
+    StepperDriver tower_z; /**< Vertical tower lifting axis. */
 };
 
+// One hardware instance is shared across sequential pickup action commands.
 PickupHardware hardware = {};
 
+// Returns true for every discrete action implemented by this module.
 bool pickup_action(TaskAction action) {
     return action == TASK_ACTION_PICK_UP_BLOCK ||
            action == TASK_ACTION_POSITION_TOWER_X ||
@@ -33,12 +43,14 @@ bool pickup_action(TaskAction action) {
            action == TASK_ACTION_TOWER_FACE_FRONT;
 }
 
+// Commands all three small claw servos to the same configured endpoint.
 void set_claws(ServoPosition position) {
     servo_set_position(&hardware.left, position);
     servo_set_position(&hardware.middle, position);
     servo_set_position(&hardware.right, position);
 }
 
+// Identifies commands completed by elapsed settling time rather than a stepper.
 bool servo_step(TaskAction action) {
     return action == TASK_ACTION_OPEN_TOWER_CLAWS ||
            action == TASK_ACTION_TOWER_FACE_DOWN ||
@@ -48,6 +60,7 @@ bool servo_step(TaskAction action) {
 
 }  // namespace
 
+// Initializes every mechanism driver and records whether the full set is usable.
 void pick_up_block_action_init(PickUpBlockAction *action) {
     if (action == NULL) return;
     memset(action, 0, sizeof(*action));
@@ -62,6 +75,7 @@ void pick_up_block_action_init(PickUpBlockAction *action) {
     action->result.status = TASK_STEP_NOT_STARTED;
 }
 
+// Applies one command and stores amount/settling parameters for update().
 bool pick_up_block_action_start(PickUpBlockAction *action,
                                 const TaskStepCommand *command,
                                 uint32_t now_ms) {
@@ -117,6 +131,7 @@ bool pick_up_block_action_start(PickUpBlockAction *action,
     return true;
 }
 
+// Advances steppers and detects stepper-stop or servo-settle completion.
 void pick_up_block_action_update(PickUpBlockAction *action, uint32_t now_ms) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) return;
     stepper_update(&hardware.tower_x);
@@ -138,6 +153,7 @@ void pick_up_block_action_update(PickUpBlockAction *action, uint32_t now_ms) {
     }
 }
 
+// Stops moving axes and publishes a cancelled terminal result.
 bool pick_up_block_action_cancel(PickUpBlockAction *action) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
         return false;
@@ -149,6 +165,7 @@ bool pick_up_block_action_cancel(PickUpBlockAction *action) {
     return true;
 }
 
+// Allows a supervised test harness to force successful completion.
 bool pick_up_block_action_report_succeeded(PickUpBlockAction *action) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
         return false;
@@ -158,6 +175,7 @@ bool pick_up_block_action_report_succeeded(PickUpBlockAction *action) {
     return true;
 }
 
+// Allows a supervised test harness to inject a mechanism failure.
 bool pick_up_block_action_report_failed(PickUpBlockAction *action,
                                         TaskFailure failure) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING ||

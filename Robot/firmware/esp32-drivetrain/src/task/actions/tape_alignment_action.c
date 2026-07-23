@@ -1,18 +1,30 @@
+/**
+ * @file tape_alignment_action.c
+ * @brief Implements the drivetrain phases used around tower acquisition.
+ *
+ * A command action selects one of five nonblocking behaviors: initial
+ * alignment, approach following, task-tape travel, backing away, or main-route
+ * reacquisition. Shared sensor, controller, and odometry primitives keep those
+ * related behaviors in one editable module.
+ */
 #include "task/actions/tape_alignment_action.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
 
+// Control-loop floor and number of centered readings required for alignment.
 static const float kMinControlDtS = 0.0005f;
 static const uint8_t kStableSamplesRequired = 3U;
 
+// Internal phases used by seek-and-center alignment behaviors.
 enum {
     PHASE_PRIMARY = 0,
     PHASE_SEEK_TAPE,
     PHASE_ALIGN_TAPE,
 };
 
+// Brakes motion and stores a terminal failed result.
 static TaskActionResult fail(TapeAlignmentAction *action,
                              TaskFailure failure) {
     (void)drivetrain_brake(action->drivetrain);
@@ -21,6 +33,7 @@ static TaskActionResult fail(TapeAlignmentAction *action,
     return action->result;
 }
 
+// Returns true for action IDs intentionally owned by this implementation.
 static bool supported_action(TaskAction action) {
     return action == TASK_ACTION_ALIGN_TO_PIECES ||
            action == TASK_ACTION_FOLLOW_PIECES_TAPE ||
@@ -29,17 +42,20 @@ static bool supported_action(TaskAction action) {
            action == TASK_ACTION_ALIGN_TO_TAPE;
 }
 
+// Treats any active channel as tape presence for seek/edge detection.
 static bool tape_present(const TapeSensor *sensor) {
     return sensor != NULL &&
            (sensor->channel_0 || sensor->channel_1 ||
             sensor->channel_2 || sensor->channel_3);
 }
 
+// Requires the two center channels, and no outer channels, for alignment.
 static bool tape_centered(const TapeSensor *sensor) {
     return sensor != NULL && !sensor->channel_0 && sensor->channel_1 &&
            sensor->channel_2 && !sensor->channel_3;
 }
 
+// Samples accumulated quadrature counts for all four drivetrain wheels.
 static DrivetrainWheelCounts wheel_counts(
     const TapeAlignmentAction *action) {
     return (DrivetrainWheelCounts){
@@ -54,6 +70,7 @@ static DrivetrainWheelCounts wheel_counts(
     };
 }
 
+// Builds odometry conversion parameters from the live drivetrain configuration.
 static bool configure_odometry(TapeAlignmentAction *action) {
     if (action->drivetrain == NULL || action->drivetrain->config == NULL) {
         return false;
@@ -81,6 +98,7 @@ static bool configure_odometry(TapeAlignmentAction *action) {
         &action->odometry_source_config);
 }
 
+// Integrates one encoder sample and accumulates path length in metres.
 static esp_err_t update_odometry(TapeAlignmentAction *action) {
     const DrivetrainPose previous = action->odometry.pose;
     const DrivetrainWheelCounts counts = wheel_counts(action);
@@ -97,6 +115,7 @@ static esp_err_t update_odometry(TapeAlignmentAction *action) {
     return ESP_OK;
 }
 
+// Stops commanded motion and stores a successful terminal result.
 static TaskActionResult succeed(TapeAlignmentAction *action) {
     (void)drivetrain_stop(action->drivetrain);
     action->result =
@@ -104,6 +123,7 @@ static TaskActionResult succeed(TapeAlignmentAction *action) {
     return action->result;
 }
 
+// Centers the left module using the line estimator and bounded angular control.
 static TaskActionResult align_with_left_sensor(TapeAlignmentAction *action,
                                                float dt_s) {
     if (tape_centered(action->left_sensor)) {
@@ -137,6 +157,7 @@ static TaskActionResult align_with_left_sensor(TapeAlignmentAction *action,
     return action->result;
 }
 
+// Binds borrowed hardware/controller objects and resets per-run state.
 void tape_alignment_action_init(TapeAlignmentAction *action,
                                 Drivetrain *drivetrain,
                                 TapeSensor *front_sensor,
@@ -153,6 +174,7 @@ void tape_alignment_action_init(TapeAlignmentAction *action,
     action->result.status = TASK_STEP_NOT_STARTED;
 }
 
+// Validates generic parameters and initializes state for the selected behavior.
 bool tape_alignment_action_start(TapeAlignmentAction *action,
                                  const TaskStepCommand *command,
                                  uint32_t now_ms) {
@@ -195,6 +217,7 @@ bool tape_alignment_action_start(TapeAlignmentAction *action,
     return true;
 }
 
+// Reads sensors/odometry and advances the active behavior by one loop cycle.
 TaskActionResult tape_alignment_action_update(TapeAlignmentAction *action,
                                               uint32_t now_ms) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
@@ -329,6 +352,7 @@ TaskActionResult tape_alignment_action_update(TapeAlignmentAction *action,
     return align_with_left_sensor(action, dt_s);
 }
 
+// Immediately brakes and publishes a cancelled terminal result.
 void tape_alignment_action_cancel(TapeAlignmentAction *action) {
     if (action == NULL) return;
     if (action->drivetrain != NULL &&
@@ -339,6 +363,7 @@ void tape_alignment_action_cancel(TapeAlignmentAction *action) {
         (TaskActionResult){TASK_STEP_CANCELLED, TASK_FAILURE_NONE};
 }
 
+// Allows the supervised test harness to force successful completion.
 bool tape_alignment_action_report_succeeded(TapeAlignmentAction *action) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING) {
         return false;
@@ -348,6 +373,7 @@ bool tape_alignment_action_report_succeeded(TapeAlignmentAction *action) {
     return true;
 }
 
+// Allows the supervised test harness to inject a specific action failure.
 bool tape_alignment_action_report_failed(TapeAlignmentAction *action,
                                          TaskFailure failure) {
     if (action == NULL || action->result.status != TASK_STEP_RUNNING ||

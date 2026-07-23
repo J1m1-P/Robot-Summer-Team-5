@@ -1,5 +1,10 @@
-/** @file task_protocol.c
- *  @brief Implements portable little-endian task message serialization.
+/**
+ * @file task_protocol.c
+ * @brief Implements validated, portable serialization for task-link messages.
+ *
+ * Every payload uses an explicit fixed-size little-endian layout so ESP32 and
+ * Raspberry Pi endpoints agree without relying on compiler struct packing.
+ * Encoding and decoding both enforce identity and status invariants.
  */
 #include <robot_common/task/task_protocol.h>
 

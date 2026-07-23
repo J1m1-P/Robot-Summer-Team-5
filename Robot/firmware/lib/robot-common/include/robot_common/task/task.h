@@ -1,5 +1,11 @@
-/** @file task.h
- *  @brief Shared task requests, workflow definitions, and runtime state.
+/**
+ * @file task.h
+ * @brief Defines the shared language used by every task-system endpoint.
+ *
+ * These enums and data structures describe task requests, individual action
+ * commands, lifecycle results, and the coordinator's authoritative runtime.
+ * Keep this file transport-independent so the same values work locally and
+ * across the ESP32 and Raspberry Pi task links.
  */
 #pragma once
 
@@ -95,9 +101,9 @@ typedef enum {
 
 /** Immutable inputs for one tape-following action. */
 typedef struct {
-    TapeDirection direction;
-    float speed_mps;
-    float distance_m;
+    TapeDirection direction; /**< Forward or reverse travel along the tape. */
+    float speed_mps;         /**< Positive commanded travel speed. */
+    float distance_m;        /**< Positive path length that completes the step. */
 } TapeFollowingTaskParams;
 
 /** Type-specific request parameters. */
@@ -109,40 +115,43 @@ typedef union {
  *  amount is radians or metres according to the action; speed is rad/s or
  *  m/s; settle_ms is the post-command mechanism settling time. */
 typedef struct {
-    float amount;
-    float speed;
-    uint32_t settle_ms;
+    float amount;       /**< Action-specific angle or linear distance. */
+    float speed;        /**< Action-specific angular or linear speed. */
+    uint32_t settle_ms; /**< Time allowed for a mechanism to settle. */
 } TaskStepParameters;
 
 /** Minimal immutable request submitted to the coordinator. */
 typedef struct {
-    TaskType type;
-    TaskParams params;
-    TaskStepParameters step_parameters[TASK_MAX_STEPS];
-    bool step_parameter_overrides[TASK_MAX_STEPS];
+    TaskType type; /**< Workflow selected by the caller. */
+    TaskParams params; /**< Parameters used by the selected workflow type. */
+    TaskStepParameters step_parameters[TASK_MAX_STEPS]; /**< Optional values by step. */
+    bool step_parameter_overrides[TASK_MAX_STEPS]; /**< True when the matching value overrides the workflow default. */
 } TaskRequest;
 
 /** Command passed from the coordinator to a local or remote manager. */
 typedef struct {
-    uint32_t execution_id;
-    uint8_t step;
-    TaskAction action;
-    TapeFollowingTaskParams tape_following;
-    TaskStepParameters parameters;
+    uint32_t execution_id; /**< Identity shared by every step in one run. */
+    uint8_t step;          /**< Zero-based workflow step index. */
+    TaskAction action;     /**< Physical behavior the executor must run. */
+    TapeFollowingTaskParams tape_following; /**< Tape-specific input when applicable. */
+    TaskStepParameters parameters; /**< Generic action tuning values. */
 } TaskStepCommand;
 
 /** The coordinator's single authoritative mutable task record. */
 typedef struct {
-    uint32_t execution_id;
-    TaskRequest request;
-    uint8_t current_step;
-    TaskStatus status;
-    TaskStepStatus step_status;
-    TaskFailure failure;
+    uint32_t execution_id; /**< Nonzero identity for the active or last run. */
+    TaskRequest request;   /**< Immutable request copied at task start. */
+    uint8_t current_step;  /**< Zero-based authoritative step position. */
+    TaskStatus status;     /**< Overall task lifecycle state. */
+    TaskStepStatus step_status; /**< Lifecycle state of current_step. */
+    TaskFailure failure;   /**< Stable reason when the task has failed. */
 } TaskRuntime;
 
+/** Validates a request and the parameters required by its selected type. */
 bool task_request_is_valid(const TaskRequest *request);
+/** Returns true only for defined, executable TaskAction values. */
 bool task_action_is_valid(TaskAction action);
+/** Reports whether a step result can no longer return to running. */
 bool task_step_status_is_terminal(TaskStepStatus status);
 
 #ifdef __cplusplus

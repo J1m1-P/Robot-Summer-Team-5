@@ -1,4 +1,12 @@
-/* Production composition root for drivetrain task coordination. */
+/**
+ * @file main.cpp
+ * @brief Composes and runs the production drivetrain task application.
+ *
+ * Setup wires local drivetrain actions and the remote top task client into the
+ * authoritative coordinator. The loop starts the configured production task,
+ * services UART reliability, advances task state, and runs low-level drive
+ * control without blocking.
+ */
 #include <Arduino.h>
 
 #include "esp_random.h"
@@ -18,21 +26,23 @@
 #include "task/drivetrain_manager.h"
 #include "task/task_coordinator.h"
 
-static Drivetrain drivetrain = {};
-static DrivetrainManager drivetrain_manager = {};
-static UartLink arm_uart = {};
-static PacketRouter arm_packet_router = {};
-static TaskLinkClient top_client = {};
-static TaskCoordinator task_coordinator = {};
-static bool application_ready = false;
-static bool production_task_started = false;
-static uint32_t ready_since_ms = 0;
+static Drivetrain drivetrain = {}; /**< Low-level motors, encoders, and control. */
+static DrivetrainManager drivetrain_manager = {}; /**< Local task executor. */
+static UartLink arm_uart = {}; /**< Framed physical link to the arm ESP32. */
+static PacketRouter arm_packet_router = {}; /**< Routes task status/heartbeats. */
+static TaskLinkClient top_client = {}; /**< Remote top-owned action executor. */
+static TaskCoordinator task_coordinator = {}; /**< Authoritative workflow state. */
+static bool application_ready = false; /**< True after all required setup succeeds. */
+static bool production_task_started = false; /**< Enforces one startup request. */
+static uint32_t ready_since_ms = 0; /**< Start of the placement-delay window. */
 
+// Generates a nonzero boot/execution identity used for stale-message detection.
 static uint32_t new_session_id() {
     uint32_t value = esp_random();
     return value == 0U ? 1U : value;
 }
 
+// Brakes and verifies the drivetrain whenever a task reaches a terminal state.
 static bool enter_safe_drivetrain_state(void *context) {
     Drivetrain *safe_drivetrain = static_cast<Drivetrain *>(context);
     if (drivetrain_brake(safe_drivetrain) != ESP_OK) return false;
@@ -40,6 +50,7 @@ static bool enter_safe_drivetrain_state(void *context) {
            safe_drivetrain->status.brake_engaged;
 }
 
+// Initializes hardware, task transport, local/remote executors, and coordinator.
 void setup() {
     Serial.begin(115200);
     app_log_init();
@@ -101,6 +112,7 @@ void setup() {
              "Task coordinator ready; drivetrain remains safely braked");
 }
 
+// Starts production work once, services links/tasks, and updates drive control.
 void loop() {
     if (!application_ready) {
         delay(100);

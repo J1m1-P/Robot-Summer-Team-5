@@ -1,5 +1,13 @@
+/**
+ * @file production_task_config.c
+ * @brief Selects and parameterizes the task automatically run after boot.
+ *
+ * The current production policy waits briefly and then requests forward tape
+ * following. Changing this object selects inputs, not workflow step logic.
+ */
 #include "config/task/production_task_config.h"
 
+// Placement delay measured from completion of drivetrain setup.
 const uint32_t PRODUCTION_TASK_START_DELAY_MS = 3000U;
 
 // Conservative placeholder -- verify direction and tune speed/distance on
