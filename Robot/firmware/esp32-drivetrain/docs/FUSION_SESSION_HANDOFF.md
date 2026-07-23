@@ -5,9 +5,24 @@ Written for a fresh session with no prior context. Read this before touching
 `esp32-arm/src/drivers/pmw3610_driver.c`, `esp32-arm/src/sensing/pmw3610_pose.c`,
 `control/drivetrain/move_r.c`, or `control/drivetrain/rotational_settle.c`.
 
-Branch: `fusion`, HEAD `168288f`. **Everything in this document is
-uncommitted, local-only** as of this handoff — see `git status`. Commit
-before considering any of it "saved."
+> **Status update**: the work this document describes was done on the
+> `fusion` branch, which also carried RobotManager (`task/`,
+> `robot_common/task/*`, `DrivetrainManager`, `TaskCoordinator`, arm task
+> dispatch). RobotManager has since been abandoned project-wide. The
+> RobotManager-independent subset of this document's work — everything
+> in §2/§4, plus the tape-follower rewrite this document doesn't cover —
+> was ported forward onto a fresh `fusion-on-main` branch (commits
+> `799eb90`, `59d0f9f`), which is where this file now lives. §5's
+> feasibility question is therefore resolved (done, not just scoped) and
+> §1's item 1 (the RobotManager/TAPE_SESSION dispatch reconciliation) no
+> longer applies to this branch. The rest of this document — the
+> debugging narrative, the two real bugs, the settle-fix derivation — is
+> accurate history and still the right context for touching these files.
+> Stale specifics are corrected inline below rather than rewritten, so
+> the "what actually happened and why" record stays intact.
+
+Original branch: `fusion`, HEAD `168288f` at time of writing (since
+snapshotted as commit `37dd36c` on `fusion`, superseded here).
 
 ## 1. What this session did
 
@@ -28,9 +43,9 @@ Three broad threads, in order:
    root-caused, and fixed with a new rotational analog of the existing
    linear `endpoint_settle` mechanism.
 
-Also investigated (not executed): feasibility of merging just the
-PMW3610-fusion-related changes to `main` while leaving tape-following
-untouched. Concluded feasible — see §5.
+Also investigated at the time (not yet executed then): feasibility of
+merging just the PMW3610-fusion-related changes to `main` while leaving
+tape-following untouched. Concluded feasible, and later done — see §5.
 
 ## 2. PMW3610 fusion verification — what's new
 
@@ -43,14 +58,24 @@ untouched. Concluded feasible — see §5.
 - **Drivetrain side**: `control/drivetrain/pmw3610_odometry_source.c/h`
   (new) — de-integrates the arm's cumulative pose packets into body-frame
   deltas, sequence-deduped. `comm/odometry_link.c/h` (new) — caches the
-  latest decoded packet via a `PacketRouter` handler. `calibration_main.cpp`
-  extended with the arm UART link + optical/encoder fusion, mirroring
-  `drivetrain_manager_update_odometry()`'s optical-preferred/
-  encoder-fallback logic exactly, plus an extensive `# FUSION ...`
-  diagnostic line (see the file for the full field list: `source`,
-  `arm_link_ready`, `arm_packet`, `last_seq`, `routed`, `received`,
+  latest decoded packet. `calibration_main.cpp` extended with the arm
+  UART link + optical/encoder fusion (optical-preferred, encoder-fallback:
+  each cycle prefers a fresh optical delta when one arrived, otherwise
+  falls back to that cycle's encoder delta), plus an extensive
+  `# FUSION ...` diagnostic line (see the file for the full field list:
+  `source`, `arm_link_ready`, `arm_packet`, `last_seq`, `received`,
   `checksum_err`, `parse_err`, `decode_fail`, `latest_valid`,
   `optical_updates`, `encoder_updates`).
+  > On `fusion-on-main`, `odometry_link.c` was adapted off `PacketRouter`
+  > (RobotManager-only, doesn't exist there) onto a direct
+  > `uart_link_update()`/`uart_link_take_packet()` poll — see
+  > `odometry_link_poll()`. The `# FUSION` line's `routed=` field (a
+  > `PacketRouter` counter) was dropped along with it; everything else
+  > listed above is unchanged. The "mirrors `drivetrain_manager_update_
+  > odometry()`" framing in the original session no longer applies —
+  > that function was RobotManager-only and doesn't exist on this
+  > branch; the fusion logic itself is unchanged, just no longer named
+  > after a function that got removed.
 
 ## 3. Debugging thread — what looked like a bug and wasn't
 
@@ -167,10 +192,14 @@ Two related problems, one fixed, one flagged but not yet fixed:
   hard cutoff — no unverified hardware constants needed, unlike 4b. **Not
   yet implemented.**
 
-## 5. `main`-merge feasibility (investigated, not executed)
+## 5. `main`-merge feasibility (investigated, then executed on `fusion-on-main`)
 
 Checked whether the PMW3610-fusion-specific pieces (§2) could merge to
-`main` while leaving tape-following untouched. Findings:
+`main` while leaving tape-following untouched. Findings below are from
+the original investigation; the merge itself was done afterward as
+`fusion-on-main` (commits `799eb90`, `59d0f9f`) — the tape-following
+rewrite was brought along too, per a later scoping decision, rather than
+left out.
 
 - `main` already has, byte-identical: the arm-side PMW3610 driver/fusion/
   pose files, `odometry.c/h`, `move_l.c/h`, `drivetrain_odometry_source.c/h`,
@@ -199,15 +228,19 @@ Checked whether the PMW3610-fusion-specific pieces (§2) could merge to
 
 1. **4b (GPIO speed fix) unverified on real hardware.** Re-flash
    `odometry-link-test`, compare `seq=` cadence against the pre-fix
-   baseline.
+   baseline. Still true on `fusion-on-main` — no hardware was available
+   during the port either.
 2. **4c's second cause (target_omega boundary discontinuity) not fixed.**
-   See above — needs a taper/soften fix, no blocked-on-hardware-numbers
-   excuse this time.
-3. **`main`-merge (§5) not started**, just scoped.
-4. Everything in this session is **uncommitted**. `git status` on the repo
-   root shows ~50 changed paths spanning both boards, `lib/robot-common`,
-   and this doc. Review and commit in logical chunks rather than one giant
-   commit — the three threads in §1 are reasonably separable.
+   See above — needs a taper/soften fix. Still open on `fusion-on-main`.
+3. ~~`main`-merge (§5) not started, just scoped.~~ **Done** — see §5.
+4. ~~Everything in this session is uncommitted.~~ **Committed.** The
+   original session's full working tree was snapshotted as commit
+   `37dd36c` on `fusion` (superseded, not further developed); the wanted
+   subset was ported and committed on `fusion-on-main` as `799eb90` and
+   `59d0f9f`.
+5. Full-system hardware smoke test on `fusion-on-main` (flash both
+   boards, confirm `# FUSION` diagnostics and `seq=` cadence) not yet
+   run — no hardware connected during the port session either.
 
 ## 7. Quick reference
 
@@ -217,16 +250,17 @@ pio run -e calibration -t upload          # esp32-drivetrain: fusion + MOTION AP
 pio device monitor                        # watch either board's diagnostics
 ```
 
-Key new/changed files this session (non-exhaustive, see `git status` for
-the full list):
+Key files from this work, as they now live on `fusion-on-main` (see that
+branch's `git log` for the exact commits, not "this session" — the
+original uncommitted-session framing above no longer applies):
 
-- `esp32-arm/src/comm/odometry_link_producer.c/h` (new)
-- `esp32-arm/src/harnesses/odometry_link_test_main.cpp` (new)
+- `esp32-arm/src/comm/odometry_link_producer.c/h`
+- `esp32-arm/src/harnesses/odometry_link_test_main.cpp`
 - `esp32-arm/src/sensing/pmw3610_pose.c` (bugfix)
 - `esp32-arm/src/drivers/pmw3610_driver.c` (perf fix)
-- `esp32-drivetrain/src/comm/odometry_link.c/h` (new)
-- `esp32-drivetrain/include/control/drivetrain/pmw3610_odometry_source.c/h` (new)
+- `esp32-drivetrain/src/comm/odometry_link.c/h` (adapted off `PacketRouter`, see §2)
+- `esp32-drivetrain/include/control/drivetrain/pmw3610_odometry_source.c/h`
 - `esp32-drivetrain/src/harnesses/calibration_main.cpp` (fusion wiring + diagnostics)
-- `esp32-drivetrain/include|src/control/drivetrain/rotational_settle.c/h` (new)
+- `esp32-drivetrain/include|src/control/drivetrain/rotational_settle.c/h`
 - `esp32-drivetrain/src/control/drivetrain/move_r.c` (settle fix)
-- `esp32-drivetrain/platformio.ini` (new env + `rotational_settle.c` added to 2 envs)
+- `esp32-drivetrain/platformio.ini` (`rotational_settle.c` added to `native`/`calibration` envs)
