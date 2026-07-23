@@ -4,58 +4,68 @@
 #include <stddef.h>
 #include <string.h>
 
-static const float kTwoPi = 6.283185307179586f;
 static const float kMinControlDtS = 0.0005f;
 
-static void capture_encoder_counts(const FollowTapeAction *action,
-                                   int32_t counts_out[DRIVETRAIN_MOTOR_MAX]) {
-    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
-        counts_out[i] = drivetrain_get_encoder_accumulated_count(
-            action->drivetrain, (DrivetrainMotorId)i);
+static DrivetrainWheelCounts capture_encoder_counts(
+    const FollowTapeAction *action) {
+    return (DrivetrainWheelCounts){
+        .fl = drivetrain_get_encoder_accumulated_count(
+            action->drivetrain, DRIVETRAIN_MOTOR_FL),
+        .fr = drivetrain_get_encoder_accumulated_count(
+            action->drivetrain, DRIVETRAIN_MOTOR_FR),
+        .bl = drivetrain_get_encoder_accumulated_count(
+            action->drivetrain, DRIVETRAIN_MOTOR_BL),
+        .br = drivetrain_get_encoder_accumulated_count(
+            action->drivetrain, DRIVETRAIN_MOTOR_BR),
+    };
+}
+
+static bool configure_odometry_source(FollowTapeAction *action) {
+    if (action == NULL || action->drivetrain == NULL ||
+        action->drivetrain->config == NULL) {
+        return false;
     }
+
+    const DrivetrainConfig *drivetrain_config = action->drivetrain->config;
+    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
+        if (drivetrain_config->encoder_configs[i] == NULL) return false;
+    }
+
+    action->odometry_source_config = (DrivetrainOdometrySourceConfig){
+        .x_drive_kinematics = drivetrain_config->x_drive_kinematics,
+        .counts_per_revolution_fl =
+            drivetrain_config->encoder_configs[DRIVETRAIN_MOTOR_FL]
+                ->counts_per_revolution,
+        .counts_per_revolution_fr =
+            drivetrain_config->encoder_configs[DRIVETRAIN_MOTOR_FR]
+                ->counts_per_revolution,
+        .counts_per_revolution_bl =
+            drivetrain_config->encoder_configs[DRIVETRAIN_MOTOR_BL]
+                ->counts_per_revolution,
+        .counts_per_revolution_br =
+            drivetrain_config->encoder_configs[DRIVETRAIN_MOTOR_BR]
+                ->counts_per_revolution,
+    };
+    return drivetrain_odometry_source_config_is_valid(
+        &action->odometry_source_config);
 }
 
 static esp_err_t integrate_odometry_step(FollowTapeAction *action) {
-    int32_t new_counts[DRIVETRAIN_MOTOR_MAX];
-    capture_encoder_counts(action, new_counts);
-
-    float wheel_angle_delta_rad[DRIVETRAIN_MOTOR_MAX];
-    for (int i = 0; i < DRIVETRAIN_MOTOR_MAX; ++i) {
-        const int32_t delta_counts =
-            new_counts[i] - action->last_encoder_counts[i];
-        const uint32_t counts_per_rev =
-            action->drivetrain->config->encoder_configs[i]
-                ->counts_per_revolution;
-        wheel_angle_delta_rad[i] =
-            (float)delta_counts * kTwoPi / (float)counts_per_rev;
+    const DrivetrainPose previous_pose = action->odometry.pose;
+    const DrivetrainWheelCounts counts = capture_encoder_counts(action);
+    const esp_err_t error = drivetrain_odometry_source_update(
+        &action->odometry_source, &action->odometry_source_config, &counts,
+        &action->odometry);
+    if (error != ESP_OK || action->odometry.fault_latched) {
+        return error != ESP_OK ? error : ESP_FAIL;
     }
-    const XDriveWheelVelocity wheel_delta = {
-        .fl = wheel_angle_delta_rad[DRIVETRAIN_MOTOR_FL],
-        .fr = wheel_angle_delta_rad[DRIVETRAIN_MOTOR_FR],
-        .bl = wheel_angle_delta_rad[DRIVETRAIN_MOTOR_BL],
-        .br = wheel_angle_delta_rad[DRIVETRAIN_MOTOR_BR],
-    };
-
-    DrivetrainBodyVelocity body_delta = {0};
-    const esp_err_t error = x_drive_kinematics_wheel_to_body_velocities(
-        &action->drivetrain->config->x_drive_kinematics, &wheel_delta,
-        &body_delta);
-    if (error != ESP_OK) return error;
-
-    memcpy(action->last_encoder_counts, new_counts, sizeof(new_counts));
-    const DrivetrainOdometryDelta delta = {
-        .forward_mm = body_delta.vx * 1000.0f,
-        .lateral_mm = body_delta.vy * 1000.0f,
-        .heading_delta_rad = body_delta.omega,
-    };
-    const esp_err_t odometry_error =
-        drivetrain_odometry_update(&action->odometry, &delta, true);
-    if (odometry_error != ESP_OK) return odometry_error;
 
     // Accumulate path length rather than start-to-current displacement so
     // bends in the tape count toward the requested travel distance.
+    const float delta_x_mm = action->odometry.pose.x_mm - previous_pose.x_mm;
+    const float delta_y_mm = action->odometry.pose.y_mm - previous_pose.y_mm;
     action->traveled_distance_m +=
-        hypotf(delta.forward_mm, delta.lateral_mm) / 1000.0f;
+        hypotf(delta_x_mm, delta_y_mm) / 1000.0f;
     return ESP_OK;
 }
 
@@ -91,7 +101,8 @@ bool follow_tape_action_start(FollowTapeAction *action,
     }
     const TapeFollowingTaskParams *params = &command->tape_following;
     if (!isfinite(params->speed_mps) || params->speed_mps <= 0.0f ||
-        !isfinite(params->distance_m) || params->distance_m <= 0.0f) {
+        !isfinite(params->distance_m) || params->distance_m <= 0.0f ||
+        !configure_odometry_source(action)) {
         return false;
     }
     if (action->drivetrain != NULL &&
@@ -103,10 +114,11 @@ bool follow_tape_action_start(FollowTapeAction *action,
 
     (void)tape_follower_reset(action->tape_follower);
     drivetrain_odometry_reset(&action->odometry);
-    capture_encoder_counts(action, action->last_encoder_counts);
+    drivetrain_odometry_source_reset(&action->odometry_source);
+    action->traveled_distance_m = 0.0f;
+    if (integrate_odometry_step(action) != ESP_OK) return false;
     action->last_update_ms = now_ms;
     action->target_distance_m = params->distance_m;
-    action->traveled_distance_m = 0.0f;
     action->signed_travel_speed_mps =
         params->direction == TAPE_DIRECTION_FORWARD ? params->speed_mps
                                                      : -params->speed_mps;

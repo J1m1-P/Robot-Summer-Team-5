@@ -4,6 +4,7 @@
 #pragma once
 
 #include "control/drivetrain/drivetrain.h"
+#include "control/drivetrain/drivetrain_odometry_source.h"
 #include "control/drivetrain/odometry.h"
 #include "control/tape_following/tape_follower.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
@@ -22,7 +23,8 @@ typedef struct {
     TapeFollower *tape_follower;
     TaskActionResult result;
     DrivetrainOdometry odometry;
-    int32_t last_encoder_counts[DRIVETRAIN_MOTOR_MAX];
+    DrivetrainOdometrySource odometry_source;
+    DrivetrainOdometrySourceConfig odometry_source_config;
     uint32_t last_update_ms;
     float signed_travel_speed_mps;
     float target_distance_m;
