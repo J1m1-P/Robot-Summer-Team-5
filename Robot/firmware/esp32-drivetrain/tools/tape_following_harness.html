@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tape Following Harness</title>
+<style>
+body{font:15px system-ui,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;background:#101318;color:#e8edf2}
+button,select,input{font:inherit;padding:7px;margin:3px;background:#202832;color:inherit;border:1px solid #485565;border-radius:5px}
+button{cursor:pointer}button.primary{background:#1769aa;border-color:#3195dc}.danger{background:#922f35;border-color:#d65b62}
+.card{border:1px solid #34404d;border-radius:8px;padding:16px;margin:12px 0;background:#171d24}.grid{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+label{display:flex;flex-direction:column;color:#aeb9c5;font-size:12px}#status{font-size:18px;color:#7dd3a7;margin:10px 0}#sensors{font-family:monospace;font-size:20px;letter-spacing:5px}pre{height:260px;overflow:auto;background:#0a0d10;padding:10px;white-space:pre-wrap}
+</style>
+<h1>Tape Following Harness</h1>
+<p>Serial diagnostic surface for the reusable tape APIs. Connect at 115200 baud. Lift the robot before commanding motion.</p>
+<div class="card">
+  <button id="connect" class="primary">Connect USB</button>
+  <button id="disconnect">Disconnect</button>
+  <button id="stop" class="danger">STOP</button>
+  <span id="port">not connected</span>
+</div>
+<div class="card">
+  <h2>Session</h2>
+  <div class="grid">
+    <label>Direction<select id="direction"><option>px</option><option>mx</option><option>py</option></select></label>
+    <label>Locating side<select id="side"><option>ccw</option><option>cw</option></select></label>
+    <label>Marker<select id="marker"><option>none</option><option>one</option><option>two</option></select></label>
+    <label>Distance (m)<input id="distance" type="number" min="0" step="0.01" value="0.5"></label>
+    <label>Speed (m/s)<input id="speed" type="number" min="0.01" max="0.5" step="0.01" value="0.25"></label>
+    <label>Timeout (ms)<input id="timeout" type="number" min="1" value="10000"></label>
+    <button id="session" class="primary">Start session</button>
+  </div>
+  <p>Use marker <b>none</b> for distance-only operation. A session must have a distance or marker stop condition.</p>
+</div>
+<div class="card">
+  <h2>Alignment</h2>
+  <button id="ialign" class="primary">I-align (+x / -x)</button>
+  <button id="lalign" class="primary">L-align (+y / -x)</button>
+  <label style="display:inline-flex">Timeout (ms)<input id="alignTimeout" type="number" value="5000"></label>
+</div>
+<div class="card">
+  <div id="status">idle</div>
+  <div id="sensors">----  ----  ----</div>
+  <div id="details">No telemetry yet.</div>
+</div>
+<div class="card"><h2>Serial log</h2><pre id="log"></pre></div>
+<script>
+let port,reader,writer,rx="";const enc=new TextEncoder(),dec=new TextDecoder();
+const $=id=>document.getElementById(id);
+function log(s){$('log').textContent+=(s+'\n');$('log').scrollTop=$('log').scrollHeight}
+async function send(s){if(!writer){log('# not connected');return}await writer.write(enc.encode(s+'\n'));log('> '+s)}
+async function readLoop(){try{while(reader){const r=await reader.read();if(r.done)break;rx+=dec.decode(r.value,{stream:true});let i;while((i=rx.indexOf('\n'))>=0){const line=rx.slice(0,i).trim();rx=rx.slice(i+1);if(line)consume(line)}}}catch(e){log('# '+e.message)}}
+function consume(line){log(line);const p=line.split(',');if(p[0]==='TAPE'&&p.length>=5){$('sensors').textContent=p.slice(2,5).join('   ')}if(p[0]==='TAPE_SESSION'){ $('status').textContent=p[2];$('details').textContent='progress '+p[3]+' m · marker '+p[4]}if(p[0]==='TAPE_ALIGNMENT'){$('status').textContent=p[2];$('details').textContent='mode '+p[2]+' · status '+p[3]}}
+async function connect(){try{port=await navigator.serial.requestPort();await port.open({baudRate:115200});reader=port.readable.getReader();writer=port.writable.getWriter();$('port').textContent='connected';readLoop();log('# connected')}catch(e){log('# '+e.message)}}
+async function disconnect(){try{if(writer)await send('stop');if(reader)await reader.cancel();if(writer)writer.releaseLock();if(reader)reader.releaseLock();if(port)await port.close()}catch(e){log('# '+e.message)}finally{port=reader=writer=null;$('port').textContent='not connected'}}
+$('connect').onclick=connect;$('disconnect').onclick=disconnect;$('stop').onclick=()=>send('stop');
+$('session').onclick=()=>send(`tape-session ${$('direction').value} ${$('side').value} ${$('marker').value} ${$('distance').value} ${$('speed').value} ${$('timeout').value}`);
+$('ialign').onclick=()=>send(`tape-align i ${$('alignTimeout').value}`);$('lalign').onclick=()=>send(`tape-align l ${$('alignTimeout').value}`);
+</script>
