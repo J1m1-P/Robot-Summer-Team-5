@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drivetrain Odometry Plotter</title>
+<style>
+:root{color-scheme:light dark;--bg:#101214;--panel:#191c20;--text:#e8eaed;--muted:#9aa3ad;--grid:#39414a}
+body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:20px}
+textarea{width:100%;min-height:180px;box-sizing:border-box;background:var(--panel);color:var(--text);border:1px solid #48515b;border-radius:8px;padding:10px;font:12px ui-monospace,monospace}
+button{margin:8px 8px 12px 0;padding:7px 12px;border:0;border-radius:6px;background:#2d7fd3;color:white;cursor:pointer}
+canvas{width:100%;height:560px;background:var(--panel);border:1px solid #48515b;border-radius:8px}pre{background:var(--panel);padding:10px;border-radius:8px;overflow:auto;font-size:12px}.note{color:var(--muted);line-height:1.45}
+</style>
+</head>
+<body><main>
+<p style="background:rgba(210,153,34,.15);border:1px solid rgba(210,153,34,.5);border-radius:6px;padding:8px 12px;font-size:13px;margin:0 0 14px">Deprecated -- live trajectory is now in <a href="../jog_program_composer.html" style="color:#58a6ff">jog_program_composer.html</a>; this stays only for offline analysis of a pasted serial dump.</p>
+<h1>Drivetrain Odometry Plotter</h1>
+<p class="note">Paste serial output below. Telemetry must use
+<code>millis,mode,pose_x_mm,pose_y_mm,heading_deg,remaining,vx,vy,omega</code>.
+Blue lines are odometry; orange lines/points are commanded paths or targets.</p>
+<textarea id="input" placeholder="Paste serial output here..."></textarea><br>
+<button id="plot">Plot dump</button><button id="clear">Clear</button>
+<canvas id="plotCanvas" width="1060" height="560"></canvas><pre id="summary">No dump parsed.</pre>
+</main>
+<script>
+(() => {
+  const input=document.getElementById('input'), canvas=document.getElementById('plotCanvas');
+  const ctx=canvas.getContext('2d'), summary=document.getElementById('summary');
+  const colors={move:'#55aaff',rotate:'#d48aff',movel:'#49d17d',movep:'#ffb347',arc:'#ff7474',rotl:'#d48aff'};
+  const num=v=>{const n=Number(v);return Number.isFinite(n)?n:NaN;};
+  function parse(text){
+    const runs=[]; let run=null;
+    const ensure=mode=>{if(!run||run.mode!==mode){run={mode,points:[],start:null,target:null};runs.push(run);}return run;};
+    for(const raw of text.split(/\r?\n/)){
+      const line=raw.trim(); let m;
+      if((m=line.match(/^#\s+(MOVE|MOVEL|MOVEP|ARC|ROTL|ROTATE) START\b(.*)$/i))){
+        const mode=m[1].toLowerCase()==='move'?'move':(m[1].toLowerCase()==='rotate'?'rotate':m[1].toLowerCase());
+        run={mode,points:[],start:null,target:null,meta:{}}; runs.push(run);
+        for(const pair of m[2].matchAll(/([a-z_]+)=(-?[\d.]+)/gi))run.meta[pair[1].toLowerCase()]=num(pair[2]);
+        continue;
+      }
+      if(!/^\d+,/.test(line))continue;
+      const p=line.split(','); if(p.length<9)continue;
+      const point={t:num(p[0]),mode:p[1].toLowerCase(),x:num(p[2]),y:num(p[3]),h:num(p[4]),rem:num(p[5]),vx:num(p[6]),vy:num(p[7]),omega:num(p[8])};
+      if(![point.t,point.x,point.y,point.h].every(Number.isFinite))continue;
+      const current=ensure(point.mode); current.points.push(point); if(!current.start)current.start=point;
+    }
+    for(const r of runs){const q=r.meta||{};
+      if(r.start&&r.mode==='movep'&&Number.isFinite(q.target_x_m)&&Number.isFinite(q.target_y_m))r.target={x:q.target_x_m*1000,y:q.target_y_m*1000};
+      if(r.start&&(r.mode==='move'||r.mode==='movel')&&Number.isFinite(q.commanded_distance_m)&&Number.isFinite(q.heading_deg)){
+        const a=(r.start.h-q.heading_deg)*Math.PI/180;r.target={x:r.start.x+q.commanded_distance_m*1000*Math.cos(a),y:r.start.y+q.commanded_distance_m*1000*Math.sin(a)};
+      }
+    }
+    return runs.filter(r=>r.points.length);
+  }
+  function draw(runs){
+    const w=canvas.width,h=canvas.height,pad=55;ctx.clearRect(0,0,w,h);
+    const all=runs.flatMap(r=>r.points.map(p=>({x:p.x,y:p.y})).concat(r.target?[r.target]:[]));
+    if(!all.length){summary.textContent='No telemetry rows found.';return;}
+    let minX=Math.min(...all.map(p=>p.x)),maxX=Math.max(...all.map(p=>p.x)),minY=Math.min(...all.map(p=>p.y)),maxY=Math.max(...all.map(p=>p.y));
+    const span=Math.max(maxX-minX,maxY-minY,100),mx=(minX+maxX)/2,my=(minY+maxY)/2;minX=mx-span/2;maxX=mx+span/2;minY=my-span/2;maxY=my+span/2;
+    const sx=x=>pad+(x-minX)/(maxX-minX)*(w-2*pad),sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-2*pad);
+    ctx.strokeStyle='#39414a';ctx.lineWidth=1;
+    for(let i=0;i<=10;i++){const x=pad+i*(w-2*pad)/10,y=pad+i*(h-2*pad)/10;ctx.beginPath();ctx.moveTo(x,pad);ctx.lineTo(x,h-pad);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke();}
+    ctx.fillStyle='#9aa3ad';ctx.font='12px system-ui';ctx.fillText('x (mm)',w-70,h-12);ctx.fillText('y (mm)',8,22);
+    const lines=[];
+    for(const r of runs){
+      ctx.strokeStyle=colors[r.mode]||'#55aaff';ctx.lineWidth=2;ctx.beginPath();r.points.forEach((p,i)=>i?ctx.lineTo(sx(p.x),sy(p.y)):ctx.moveTo(sx(p.x),sy(p.y)));ctx.stroke();
+      if(r.target&&r.start){ctx.strokeStyle='#ffb347';ctx.setLineDash([6,5]);ctx.beginPath();ctx.moveTo(sx(r.start.x),sy(r.start.y));ctx.lineTo(sx(r.target.x),sy(r.target.y));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#ffb347';ctx.beginPath();ctx.arc(sx(r.target.x),sy(r.target.y),5,0,Math.PI*2);ctx.fill();}
+      const a=r.points[0],z=r.points[r.points.length-1];lines.push(r.mode+': '+r.points.length+' samples | start=('+a.x.toFixed(1)+', '+a.y.toFixed(1)+') mm | final=('+z.x.toFixed(1)+', '+z.y.toFixed(1)+') mm | heading='+z.h.toFixed(2)+'°');
+    }
+    let ly=28;for(const r of runs){ctx.fillStyle=colors[r.mode]||'#55aaff';ctx.fillRect(w-180,ly-10,12,12);ctx.fillStyle='#e8eaed';ctx.fillText(r.mode,w-162,ly);ly+=18;}summary.textContent=lines.join('\n');
+  }
+  document.getElementById('plot').onclick=()=>draw(parse(input.value));
+  document.getElementById('clear').onclick=()=>{input.value='';ctx.clearRect(0,0,canvas.width,canvas.height);summary.textContent='No dump parsed.';};
+})();
+</script></body></html>

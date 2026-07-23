@@ -35,10 +35,11 @@ esp_err_t x_drive_kinematics_body_to_wheel_velocities(
                       config->chassis_half_width_m * cosine;
     const float radius = config->wheel_radius_m;
 
-    wheels_out->fl = (cosine * body->vx + sine * body->vy - arm * body->omega) / radius;
-    wheels_out->fr = (cosine * body->vx - sine * body->vy + arm * body->omega) / radius;
-    wheels_out->bl = (cosine * body->vx - sine * body->vy - arm * body->omega) / radius;
-    wheels_out->br = (cosine * body->vx + sine * body->vy + arm * body->omega) / radius;
+    /* Right-handed body frame: +x forward, +y left, +omega CCW. */
+    wheels_out->fl = (cosine * body->vx - sine * body->vy - arm * body->omega) / radius;
+    wheels_out->fr = (cosine * body->vx + sine * body->vy + arm * body->omega) / radius;
+    wheels_out->bl = (cosine * body->vx + sine * body->vy - arm * body->omega) / radius;
+    wheels_out->br = (cosine * body->vx - sine * body->vy + arm * body->omega) / radius;
 
     if (!isfinite(wheels_out->fl) || !isfinite(wheels_out->fr) ||
         !isfinite(wheels_out->bl) || !isfinite(wheels_out->br)) {
@@ -73,7 +74,7 @@ esp_err_t x_drive_kinematics_wheel_to_body_velocities(
     const float radius = config->wheel_radius_m;
     body_out->vx = radius * (wheels->fl + wheels->fr + wheels->bl + wheels->br) /
                    (4.0f * cosine);
-    body_out->vy = radius * (wheels->fl - wheels->fr - wheels->bl + wheels->br) /
+    body_out->vy = -radius * (wheels->fl - wheels->fr - wheels->bl + wheels->br) /
                    (4.0f * sine);
     body_out->omega = radius * (-wheels->fl + wheels->fr - wheels->bl + wheels->br) /
                       (4.0f * arm);

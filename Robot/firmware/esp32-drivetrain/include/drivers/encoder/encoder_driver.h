@@ -42,6 +42,10 @@ typedef struct {
     int16_t low_limit;
 
     uint32_t glitch_filter_ns;
+
+    // Max time to wait for a full quadrature group (see ENCODER_QUADRATURE_GROUP_SIZE
+    // in encoder_driver.c) before falling back to a partial-count velocity update.
+    uint32_t low_speed_timeout_us;
 } EncoderDriverConfig;
 
 // Holds accumulated count, velocity estimates, and encoder lifecycle state.
@@ -50,6 +54,11 @@ typedef struct {
 
     int32_t accumulated_count;
     int64_t last_timestamp_us;
+
+    // Signed counts (magnitude 0-3) carried over until a full quadrature
+    // group completes or low_speed_timeout_us elapses.
+    int32_t velocity_remainder_count;
+    int64_t velocity_window_start_us;
 
     float velocity_mps;
     float velocity_rps;

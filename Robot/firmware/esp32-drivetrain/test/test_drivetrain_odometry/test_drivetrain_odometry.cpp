@@ -23,6 +23,11 @@ void drivetrain_odometry_reset(DrivetrainOdometry &odometry) {
     ::drivetrain_odometry_reset(&odometry);
 }
 
+// Keeps set_pose assertions concise while exercising the pointer-based C API.
+esp_err_t drivetrain_odometry_set_pose(DrivetrainOdometry &odometry, const DrivetrainPose &pose) {
+    return ::drivetrain_odometry_set_pose(&odometry, &pose);
+}
+
 // Compares all fields of a pose against expected values.
 void assert_pose(float x, float y, float heading, const DrivetrainPose &pose) {
     TEST_ASSERT_FLOAT_WITHIN(kTolerance, x, pose.x_mm);
@@ -35,7 +40,10 @@ void assert_pose(float x, float y, float heading, const DrivetrainPose &pose) {
 void setUp() {}
 void tearDown() {}
 
-// Confirms a body-frame delta is accumulated at zero heading.
+// Confirms a body-frame delta is accumulated at zero heading. lateral=25 is
+// a leftward strafe (DrivetrainBodyVelocity.vy's convention), which at
+// heading=0 (facing world +X) moves toward world +Y -- see
+// test_rotates_lateral_delta_into_world_frame for the full derivation.
 void test_integrates_delta_at_origin() {
     DrivetrainOdometry odometry = {};
     const DrivetrainOdometryDelta delta{100.0f, 25.0f, 0.2f};
@@ -45,13 +53,26 @@ void test_integrates_delta_at_origin() {
 }
 
 // Confirms translation is rotated by the pose heading before accumulation.
+// At heading=+90deg (a 90-degree CCW turn from facing world +X, matching
+// DrivetrainBodyVelocity.omega's positive-CCW convention), the robot now
+// faces world +Y, so moving "forward" moves it toward +Y.
 void test_rotates_body_delta_into_world_frame() {
     DrivetrainOdometry odometry = {};
     odometry.pose.heading_rad = 3.14159265358979323846f / 2.0f;
     const DrivetrainOdometryDelta delta{100.0f, 0.0f, 0.0f};
 
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
-    assert_pose(0.0f, -100.0f, 3.14159265358979323846f / 2.0f, odometry.pose);
+    assert_pose(0.0f, 100.0f, 3.14159265358979323846f / 2.0f, odometry.pose);
+}
+
+// Confirms lateral (left-strafe) motion is projected consistently with
+// DrivetrainBodyVelocity.vy's positive-left convention at heading=0.
+void test_rotates_lateral_delta_into_world_frame() {
+    DrivetrainOdometry odometry = {};
+    const DrivetrainOdometryDelta delta{0.0f, 100.0f, 0.0f};
+
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(odometry, delta, true));
+    assert_pose(0.0f, 100.0f, 0.0f, odometry.pose);
 }
 
 // Confirms invalid sensor cycles hold pose and record a recoverable fault.
@@ -90,12 +111,50 @@ void test_reset_restores_defaults() {
     TEST_ASSERT_FALSE(odometry.fault_latched);
 }
 
+// Confirms set_pose re-anchors to an arbitrary value, not just zero, and
+// also clears any latched fault -- the general case reset() specializes.
+void test_set_pose_reanchors_to_arbitrary_value_and_clears_fault() {
+    DrivetrainOdometry odometry = {};
+    drivetrain_odometry_update(
+        odometry, DrivetrainOdometryDelta{1.0f, 2.0f, 0.3f}, false);
+    TEST_ASSERT_TRUE(odometry.fault_latched);
+
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_set_pose(
+        odometry, DrivetrainPose{500.0f, -200.0f, 0.7f}));
+
+    assert_pose(500.0f, -200.0f, 0.7f, odometry.pose);
+    TEST_ASSERT_EQUAL(
+        static_cast<int>(DRIVETRAIN_ODOMETRY_FAULT_NONE),
+        static_cast<int>(odometry.last_fault));
+    TEST_ASSERT_FALSE(odometry.fault_latched);
+
+    // A subsequent valid update accumulates from the newly-set pose, not
+    // from wherever it was before -- confirms the whole struct was
+    // reassigned, not just individual fields left partially stale.
+    TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_update(
+        odometry, DrivetrainOdometryDelta{10.0f, 0.0f, 0.0f}, true));
+    TEST_ASSERT_TRUE(odometry.pose.x_mm > 500.0f);
+}
+
+// Confirms a non-finite pose is rejected without changing existing state.
+void test_set_pose_rejects_non_finite_pose() {
+    DrivetrainOdometry odometry = {};
+    odometry.pose = {10.0f, 20.0f, 0.3f};
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, drivetrain_odometry_set_pose(
+        odometry, DrivetrainPose{NAN, 0.0f, 0.0f}));
+    assert_pose(10.0f, 20.0f, 0.3f, odometry.pose);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_integrates_delta_at_origin);
     RUN_TEST(test_rotates_body_delta_into_world_frame);
+    RUN_TEST(test_rotates_lateral_delta_into_world_frame);
     RUN_TEST(test_invalid_cycle_holds_pose);
     RUN_TEST(test_rejects_non_finite_delta);
     RUN_TEST(test_reset_restores_defaults);
+    RUN_TEST(test_set_pose_reanchors_to_arbitrary_value_and_clears_fault);
+    RUN_TEST(test_set_pose_rejects_non_finite_pose);
     return UNITY_END();
 }

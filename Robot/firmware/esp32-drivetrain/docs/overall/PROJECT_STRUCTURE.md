@@ -105,8 +105,12 @@ esp32-drivetrain/
 |
 |-- tools/                           Developer-side browser tools
 |   |-- drivetrain_test_dashboard.html
-|   |-- drive_dashboard.html
-|   `-- tuning_dashboard.html
+|   |-- calibration_dashboard.html
+|   |-- jog_program_composer.html
+|   `-- deprecated/                  Superseded tools, kept for reference
+|       |-- drive_dashboard.html
+|       |-- tuning_dashboard.html
+|       `-- odometry_plotter.html
 |
 `-- lib/
     `-- README                       Placeholder for private local libraries
@@ -200,7 +204,7 @@ Contains native unit tests arranged one suite per folder. `native_stubs/` replac
 
 ### `tools/`
 
-Contains host-side HTML dashboards rather than embedded code. `drivetrain_test_dashboard.html` is the USB-only button interface for the drivetrain acceptance harness. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
+Contains host-side HTML dashboards rather than embedded code. `drivetrain_test_dashboard.html` is the USB-only button interface for the drivetrain acceptance harness; `calibration_dashboard.html` is the Web Serial trial runner for the calibration harness; and `calibration_helper.html` computes calibration factors from recorded measurements. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
 
 ### `lib/`
 

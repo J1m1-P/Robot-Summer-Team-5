@@ -10,7 +10,7 @@ extern "C" {
 // Represents a commanded velocity in the robot body frame.
 typedef struct {
     float vx;     // m/s, positive forward
-    float vy;     // m/s, positive strafe right
+    float vy;     // m/s, positive strafe left
     float omega;  // rad/s, positive counterclockwise
 } DrivetrainBodyVelocity;
 
