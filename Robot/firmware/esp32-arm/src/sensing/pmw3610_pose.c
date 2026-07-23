@@ -20,6 +20,7 @@ void pmw3610_pose_update(Pmw3610PoseManager *pm, const DeltaPose *delta, bool l_
         return;
     }
     pm->output_killed = false;
+    pm->last_fault = FAULT_NONE;
 
     // The fused delta is measured over the same cycle as dtheta. Rotate it
     // through the cycle's midpoint heading rather than the final heading,

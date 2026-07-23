@@ -6,8 +6,8 @@
 
 #include "esp_err.h"
 
+#include "control/drivetrain/off_tape_motion.h"
 #include "control/drivetrain/x_drive_kinematics.h"
-#include "control/tape_following/tape_following_controller.h"
 #include "control/tape_following/tape_following_kinematics.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
 #include "sensing/tape_following/tape_line_estimator.h"
@@ -29,8 +29,19 @@ typedef enum {
 typedef enum {
     TAPE_FOLLOWER_FRONT = 0,
     TAPE_FOLLOWER_BACK,
+    TAPE_FOLLOWER_SIDE,
     TAPE_FOLLOWER_SENSOR_COUNT,
 } TapeFollowerSensor;
+
+/* Robot-relative tape travel directions. The side sensor is +y and is the
+ * py leading sensor; its channel polarity matches px after a 90-degree CCW
+ * rotation of the sensor frame. */
+typedef enum {
+    TAPE_FOLLOWER_PX = 0,
+    TAPE_FOLLOWER_MX,
+    TAPE_FOLLOWER_PY,
+    TAPE_FOLLOWER_DIRECTION_COUNT,
+} TapeFollowerDirection;
 
 /* Behavior used after a previously acquired line disappears. */
 typedef struct {
@@ -45,20 +56,37 @@ typedef struct {
  */
 typedef struct {
     const TapeLineEstimatorConfig *estimators[TAPE_FOLLOWER_SENSOR_COUNT];
-    TapeFollowingControllerConfig controller;
+    /* Source-agnostic lateral error controller. Tape line error is only one
+     * possible error source; the controller itself is shared with motion. */
+    OffTapeMotionConfig lateral_motion;
     TapeFollowingKinematicsConfig heading;
     TapeFollowerSearchConfig search;
 
     /* Upper bound used for PID integration and differentiation after loop stalls. */
-    float controller_dt_max_s;
+
+    /* Rate-limits how fast the commanded lateral velocity itself may change,
+     * mirroring heading.max_acceleration_rad_s2's existing slew limit on
+     * omega. line_error is a coarse, quantized signal (each tape module is 4
+     * boolean channels, not a continuous sensor -- see
+     * tape_line_estimator.c), so it steps rather than varies smoothly; a
+     * derivative term on it would react to those steps as sharp spikes
+     * instead of damping real oscillation. This limits the *output's* rate
+     * of change directly instead, which damps the same jumpiness without
+     * differentiating the noisy input. */
+    float max_lateral_accel_mps2;
 } TapeFollowerConfig;
 
-/* Supplies both guidance modules and the requested signed travel velocity.
- * Positive travel uses the front sensor; negative travel uses the back sensor.
- * Sensor sampling remains outside this module so it can be tested without GPIO. */
+/* Supplies all guidance modules and an explicit px/mx/py travel direction.
+ * travel_velocity_mps is a positive speed magnitude. Sensor sampling remains
+ * outside this module so it can be tested without GPIO. */
 typedef struct {
     const TapeSensor *sensors[TAPE_FOLLOWER_SENSOR_COUNT];
+    TapeFollowerDirection direction;
     float travel_velocity_mps;
+    /* Net odometry delta projected onto the selected tape axis since the
+     * previous update, in m. Positive means progress in the selected
+     * direction. The caller may use encoders, optical flow, or another source. */
+    float along_tape_delta_m;
 } TapeFollowerInput;
 
 /* Returns a command compatible with drivetrain_set_body_velocity plus useful
@@ -67,6 +95,10 @@ typedef struct {
     DrivetrainBodyVelocity requested_velocity;
     TapeFollowerStatus status;
     float line_error;
+    /* Net progress along the tape during this follower session. It is signed
+     * in the requested travel direction and therefore does not accumulate
+     * lateral/steering oscillations as distance. */
+    float along_tape_distance_m;
     bool motion_valid;
 } TapeFollowerOutput;
 
@@ -74,10 +106,14 @@ typedef struct {
 typedef struct {
     const TapeFollowerConfig *config;
     TapeLineEstimatorState estimator_states[TAPE_FOLLOWER_SENSOR_COUNT];
-    TapeFollowingControllerState controller_state;
+    OffTapeMotion lateral_motion;
+    float along_tape_distance_m;
     float lost_elapsed_s;
     float requested_omega_rad_s;
-    int8_t active_direction;
+    /* Last slew-limited lateral velocity commanded -- see
+     * TapeFollowerConfig.max_lateral_accel_mps2. */
+    float requested_lateral_velocity_mps;
+    TapeFollowerDirection active_direction;
     bool ever_tracked[TAPE_FOLLOWER_SENSOR_COUNT];
 } TapeFollower;
 

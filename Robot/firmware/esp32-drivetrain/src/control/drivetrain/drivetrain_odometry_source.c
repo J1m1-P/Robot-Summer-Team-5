@@ -28,13 +28,16 @@ void drivetrain_odometry_source_reset(DrivetrainOdometrySource *source)
     if (source != NULL) memset(source, 0, sizeof(*source));
 }
 
-esp_err_t drivetrain_odometry_source_update(
+esp_err_t drivetrain_odometry_source_compute_delta(
     DrivetrainOdometrySource *source,
     const DrivetrainOdometrySourceConfig *config,
     const DrivetrainWheelCounts *counts,
-    DrivetrainOdometry *odometry)
+    DrivetrainOdometryDelta *delta_out,
+    bool *has_delta_out,
+    bool *valid_out)
 {
-    if (source == NULL || counts == NULL || odometry == NULL ||
+    if (source == NULL || counts == NULL || delta_out == NULL ||
+        has_delta_out == NULL || valid_out == NULL ||
         !drivetrain_odometry_source_config_is_valid(config)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -42,6 +45,7 @@ esp_err_t drivetrain_odometry_source_update(
     if (!source->has_previous_counts) {
         source->previous_counts = *counts;
         source->has_previous_counts = true;
+        *has_delta_out = false;
         return ESP_OK;
     }
 
@@ -65,10 +69,30 @@ esp_err_t drivetrain_odometry_source_update(
     const esp_err_t kinematics_error = x_drive_kinematics_wheel_to_body_velocities(
         &config->x_drive_kinematics, &wheel_angle_delta_rad, &body_delta_m_rad);
 
-    const DrivetrainOdometryDelta delta = {
+    *delta_out = (DrivetrainOdometryDelta){
         .forward_mm = body_delta_m_rad.vx * 1000.0f,
         .lateral_mm = body_delta_m_rad.vy * 1000.0f,
         .heading_delta_rad = body_delta_m_rad.omega,
     };
-    return drivetrain_odometry_update(odometry, &delta, kinematics_error == ESP_OK);
+    *has_delta_out = true;
+    *valid_out = kinematics_error == ESP_OK;
+    return ESP_OK;
+}
+
+esp_err_t drivetrain_odometry_source_update(
+    DrivetrainOdometrySource *source,
+    const DrivetrainOdometrySourceConfig *config,
+    const DrivetrainWheelCounts *counts,
+    DrivetrainOdometry *odometry)
+{
+    if (odometry == NULL) return ESP_ERR_INVALID_ARG;
+
+    DrivetrainOdometryDelta delta = {0};
+    bool has_delta = false;
+    bool valid = false;
+    const esp_err_t error = drivetrain_odometry_source_compute_delta(
+        source, config, counts, &delta, &has_delta, &valid);
+    if (error != ESP_OK || !has_delta) return error;
+
+    return drivetrain_odometry_update(odometry, &delta, valid);
 }

@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 
+#include "control/drivetrain/endpoint_settle.h"
 #include "control/drivetrain/off_tape_motion.h"
 #include "control/drivetrain/speed_profile.h"
 
@@ -50,6 +51,12 @@ typedef struct {
     float body_direction_y;
     float max_speed_mps;
     bool braking;
+    /* Once the one-way along-track profile has stopped within tolerance, a
+     * small residual cross-track error may need a corrective speed below the
+     * real wheel-velocity floor to close -- see endpoint_settle.h. Mirrors
+     * MoveC's settling/settle fields. */
+    bool settling;
+    EndpointSettleState settle;
     MoveLStatus status;
 } MoveL;
 

@@ -140,6 +140,30 @@ esp_err_t move_l_update(
             output->requested_velocity.vx = 0.0f;
             output->requested_velocity.vy = 0.0f;
             output->requested_velocity.omega = 0.0f;
+        } else {
+            /* Along-track is done; a residual cross-track error remains but
+             * the PID's continuous correction for it may be physically
+             * inert below the wheel-velocity floor (never shrinks -> sits
+             * in RUNNING forever). Same pulse-and-measure pattern MoveC's
+             * radial settle uses: a short burst clearly above the deadband,
+             * then a pause for a fresh estimate, repeated only while still
+             * outside tolerance. */
+            if (!move->settling) {
+                move->settling = true;
+                endpoint_settle_reset(&move->settle);
+            }
+            const float hold_speed = endpoint_settle_update(
+                &move->settle, fabsf(input->cross_track_error_m),
+                move->config->distance_tolerance_m, dt_s);
+            /* Path-frame pulse (vx=0, vy=signed hold), rotated into body
+             * frame the same way the main-phase correction is above --
+             * heading_rad may be nonzero, so body +y is not necessarily the
+             * path's lateral direction. */
+            const float signed_hold_mps =
+                copysignf(hold_speed, input->cross_track_error_m);
+            output->requested_velocity.vx = signed_hold_mps * lateral_x;
+            output->requested_velocity.vy = signed_hold_mps * lateral_y;
+            output->requested_velocity.omega = 0.0f;
         }
     }
     output->status = move->status;

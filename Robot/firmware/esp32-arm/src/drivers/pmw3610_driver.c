@@ -38,11 +38,17 @@
 static uint8_t s_sdio_pin = 0;
 static uint8_t s_sclk_pin = 0;
 
-// Reconfigures a bus pin as an output without pulls or interrupts.
-static void pmw3610_gpio_set_output(uint8_t pin) {
+// Fully configures a pin (pulls, interrupt type, initial direction) --
+// meant to run once per pin during init. gpio_config() re-validates and
+// rewrites all of that every call, which is unnecessary work for a pin
+// whose pulls/interrupt type never change after startup; measured as the
+// dominant cost in the bit-banged burst-read path when called there
+// instead (each SDIO direction flip was going through the full config,
+// four times per dual-sensor poll cycle).
+static void pmw3610_gpio_configure_once(uint8_t pin, gpio_mode_t mode) {
     gpio_config_t config = {
         .pin_bit_mask = (1ULL << pin),
-        .mode = GPIO_MODE_OUTPUT,
+        .mode = mode,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
@@ -50,16 +56,16 @@ static void pmw3610_gpio_set_output(uint8_t pin) {
     gpio_config(&config);
 }
 
-// Reconfigures a bus pin as an input without pulls or interrupts.
+// Flips a bus pin's direction mid-transaction (SDIO alternates
+// output/input within a single burst read). Pulls/interrupt type were
+// already fixed once by pmw3610_gpio_configure_once() during init, so this
+// only needs the lighter gpio_set_direction() -- not a full gpio_config().
+static void pmw3610_gpio_set_output(uint8_t pin) {
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+}
+
 static void pmw3610_gpio_set_input(uint8_t pin) {
-    gpio_config_t config = {
-        .pin_bit_mask = (1ULL << pin),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&config);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
 }
 
 // Clocks one byte to the sensor most-significant bit first.
@@ -110,7 +116,8 @@ bool pmw3610_status_valid(const Pmw3610Status *status) {
 void pmw3610_bus_init(uint8_t sdio_pin, uint8_t sclk_pin) {
     s_sdio_pin = sdio_pin;
     s_sclk_pin = sclk_pin;
-    pmw3610_gpio_set_output(s_sclk_pin);
+    pmw3610_gpio_configure_once(s_sclk_pin, GPIO_MODE_OUTPUT);
+    pmw3610_gpio_configure_once(s_sdio_pin, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)s_sclk_pin, 0);
 }
 
@@ -239,7 +246,12 @@ void pmw3610_bus_update_smart_surface_mode(uint8_t ncs_pin, bool *smart_disabled
 
 // Resets, verifies, configures, and reports one sensor during startup.
 void pmw3610_bus_init_sensor(uint8_t ncs_pin, const char *label) {
-    pmw3610_gpio_set_output(ncs_pin);
+    // Not hot-path (init, and the rare mid-run reset_triggered case in
+    // dual_pmw3610_poll()) -- NCS direction never flips during normal
+    // operation, so the one-time full config is used here for correctness
+    // (explicitly disabling pulls) rather than the lightweight direction-only
+    // helper above.
+    pmw3610_gpio_configure_once(ncs_pin, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)ncs_pin, 1);
 
     // SPI port reset sequence (per datasheet).

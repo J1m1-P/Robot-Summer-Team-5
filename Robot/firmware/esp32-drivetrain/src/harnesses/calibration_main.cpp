@@ -4,6 +4,11 @@
 #include <math.h>
 #include <esp_timer.h>
 
+#include <robot_common/odometry_packet.h>
+#include <robot_common/uart_link.h>
+
+#include "comm/odometry_link.h"
+#include "config/communication/uart_link_config.h"
 #include "config/drivetrain/drivetrain_config.h"
 #include "control/drivetrain/drivetrain.h"
 #include "control/drivetrain/drivetrain_odometry_source.h"
@@ -13,6 +18,7 @@
 #include "control/drivetrain/move_p.h"
 #include "control/drivetrain/move_r.h"
 #include "control/drivetrain/move_s.h"
+#include "control/drivetrain/pmw3610_odometry_source.h"
 #include "control/drivetrain/rot_s.h"
 
 // -----------------------------------------------------------------------------
@@ -146,6 +152,25 @@ bool drivetrain_ready = false;
 DrivetrainOdometrySourceConfig odom_source_config = {};
 DrivetrainOdometrySource odom_source = {};
 DrivetrainOdometry odometry = {};
+
+// PMW3610 fusion: optical-preferred, encoder-fallback. Requires the arm
+// board running esp32-arm's odometry-link-test env (or full production)
+// over the same physical UART link production main.cpp uses.
+UartLink arm_uart = {};
+Pmw3610OdometryLink arm_odometry_link = {};
+Pmw3610OdometrySource pmw3610_source = {};
+bool arm_link_ready = false;
+const char *last_fusion_source = "";
+// Cumulative counts, unlike last_fusion_source: the control loop runs far
+// faster than optical packets arrive over UART, so on the vast majority of
+// cycles optical_ok is simply false (no *new* packet yet, correctly falling
+// back to that cycle's encoder delta) even while optical is being
+// incorporated regularly overall. A periodic print of last_fusion_source
+// alone will almost always land on an encoder cycle purely because they
+// outnumber optical ones, making it look like optical is never used even
+// when it is. These totals show whether optical is contributing at all.
+uint32_t optical_update_count = 0U;
+uint32_t encoder_update_count = 0U;
 
 MoveSConfig move_s_config = {
     .speed_profile = {.max_jerk_mps3 = kDefaultMaxJerkMps3},
@@ -921,6 +946,13 @@ void setup() {
         Serial.println(esp_err_to_name(error));
     }
 
+    // PMW3610 fusion: arm-board UART link, same config production main.cpp uses.
+    arm_link_ready = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG) == ESP_OK;
+    if (!arm_link_ready) {
+        Serial.println("# arm UART link init failed -- fusion disabled, "
+                       "encoder-only odometry");
+    }
+
     print_usage();
     print_config();
     Serial.println("millis,mode,pose_x_mm,pose_y_mm,heading_deg,remaining,vx,vy,omega");
@@ -978,17 +1010,78 @@ void loop() {
         }
     }
 
+    if (arm_link_ready) {
+        odometry_link_poll(&arm_odometry_link, &arm_uart);
+    }
+
+    // PMW3610 fusion: optical-preferred, encoder-fallback.
     const DrivetrainWheelCounts counts = {
         .fl = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_FL),
         .fr = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_FR),
         .bl = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_BL),
         .br = drivetrain_get_encoder_accumulated_count(&drivetrain, DRIVETRAIN_MOTOR_BR),
     };
-    drivetrain_odometry_source_update(&odom_source, &odom_source_config, &counts, &odometry);
+    DrivetrainOdometryDelta encoder_delta = {};
+    bool encoder_has_delta = false;
+    bool encoder_valid = false;
+    drivetrain_odometry_source_compute_delta(&odom_source, &odom_source_config,
+                                             &counts, &encoder_delta,
+                                             &encoder_has_delta, &encoder_valid);
+
+    DrivetrainOdometryDelta optical_delta = {};
+    const bool optical_ok =
+        arm_odometry_link.has_packet &&
+        pmw3610_odometry_source_update(&pmw3610_source, &arm_odometry_link.latest,
+                                       &optical_delta);
+
+    if (optical_ok || encoder_has_delta) {
+        const DrivetrainOdometryDelta *chosen =
+            optical_ok ? &optical_delta : &encoder_delta;
+        const bool valid = optical_ok || encoder_valid;
+        drivetrain_odometry_update(&odometry, chosen, valid);
+        last_fusion_source = optical_ok ? "optical" : "encoder";
+        if (optical_ok) {
+            optical_update_count++;
+        } else {
+            encoder_update_count++;
+        }
+    }
 
     const unsigned long now_ms = millis();
     const bool should_print = (now_ms - last_print_ms >= kTelemetryPeriodMs);
     if (should_print) last_print_ms = now_ms;
+    if (should_print) {
+        Serial.print("# FUSION source=");
+        Serial.print(last_fusion_source);
+        Serial.print(" arm_link_ready=");
+        Serial.print(arm_link_ready ? 1 : 0);
+        Serial.print(" arm_packet=");
+        Serial.print(arm_odometry_link.has_packet ? 1 : 0);
+        // Distinguishes "packets keep arriving but fusion is stuck" (received
+        // climbing, sequence static) from "the link is mostly corrupt"
+        // (checksum/parse errors climbing much faster than packets_received).
+        Serial.print(" last_seq=");
+        Serial.print(arm_odometry_link.latest.sequence);
+        Serial.print(" received=");
+        Serial.print(arm_uart.packets_received);
+        Serial.print(" checksum_err=");
+        Serial.print(arm_uart.checksum_errors);
+        Serial.print(" parse_err=");
+        Serial.print(arm_uart.parse_errors);
+        // decode_failures isolates rejects inside odometry_packet_decode()
+        // itself (bad payload length, non-finite pose) that "received" can't
+        // see -- it only knows a frame arrived, not what happened decoding
+        // it. latest_valid is the actual gate
+        // pmw3610_odometry_source_update() checks first.
+        Serial.print(" decode_fail=");
+        Serial.print(arm_odometry_link.decode_failures);
+        Serial.print(" latest_valid=");
+        Serial.print(arm_odometry_link.latest.valid ? 1 : 0);
+        Serial.print(" optical_updates=");
+        Serial.print(optical_update_count);
+        Serial.print(" encoder_updates=");
+        Serial.println(encoder_update_count);
+    }
 
     if (cal_mode == CalMode::kMove) {
         service_move(now_ms, dt_s, should_print);

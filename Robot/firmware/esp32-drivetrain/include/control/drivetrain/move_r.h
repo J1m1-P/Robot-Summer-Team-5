@@ -7,6 +7,7 @@
 
 #include "control/drivetrain/x_drive_kinematics.h"
 #include "control/drivetrain/motion_estimate_adapter.h"
+#include "control/drivetrain/rotational_settle.h"
 #include "control/drivetrain/speed_profile.h"
 #include "control/tape_following/tape_following_controller.h"
 
@@ -36,6 +37,12 @@ typedef struct {
     SpeedProfile profile;
     float target_heading_rad;
     MoveRStatus status;
+    /* Once the profile-commanded omega has decayed to a stop but heading
+     * error still exceeds tolerance, a continuous PID correction can be
+     * below the angular deadband (physically inert) -- see
+     * rotational_settle.h. Mirrors MoveL/MoveC's settling/settle fields. */
+    bool settling;
+    RotationalSettleState settle;
 } MoveR;
 
 typedef struct {
