@@ -4,21 +4,20 @@
 #include <Arduino.h>
 #include "config/stepper_config.h"
 
-// Holds the pins, timing values, and runtime state for one initialized stepper driver.
-// The state machine in stepper_update() uses these fields to generate pulses without blocking.
+// Holds the pins, timing values, and hardware-timer state for one stepper.
 typedef struct {
     StepperConfig config; // Configuration values for this stepper driver.
 
-    bool isMoving;              // True when an asynchronous move is active.
-    long stepsRemaining;        // Number of steps left to execute.
+    volatile bool isMoving;     // True when an asynchronous move is active.
+    volatile long stepsRemaining; // Number of steps left to execute.
     bool direction;             // Current movement direction.
-    unsigned long lastEventUs;  // Timestamp of the last step cycle transition.
-    unsigned long pulseStartUs; // Timestamp when the current pulse was asserted.
-    bool state;                 // Internal state: 0=waiting, 1=pulse active.
+    volatile bool state;        // Internal state: 0=STEP low, 1=STEP high.
+    hw_timer_t *timer;          // Generates STEP edges independently of loop().
+    uint8_t timerIndex;         // Hardware timer slot assigned during initialization.
 } StepperDriver;
 
 // Initialize the stepper driver with the given configuration.
-// Returns ESP_OK on success and ESP_ERR_INVALID_ARG when the driver or configuration is invalid.
+// Returns ESP_OK on success or an error if configuration/timer allocation fails.
 esp_err_t stepper_init(StepperDriver *driver, StepperConfig config);
 
 // Starts a signed step movement asynchronously.
@@ -29,8 +28,7 @@ void stepper_move_steps(StepperDriver *driver, long steps);
 // The conversion uses the configured belt and pulley geometry.
 void stepper_move_distanceMM(StepperDriver*driver, float distanceMM);
 
-// Advances the stepper state machine; call frequently from loop().
-// This function returns immediately and generates pulses over time.
+// Retained for source compatibility; hardware timers now advance motion.
 void stepper_update(StepperDriver *driver);
 
 // Returns true while an asynchronous move is active.
