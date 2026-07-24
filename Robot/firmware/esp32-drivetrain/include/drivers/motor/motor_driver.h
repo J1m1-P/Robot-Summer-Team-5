@@ -39,6 +39,11 @@ typedef struct {
 // Checks whether a motor configuration is safe and internally consistent.
 bool motor_driver_config_is_valid(const MotorDriverConfig *config);
 
+// Drives the PWM GPIO low without initializing or enabling the motor.
+// Call this before startup delays so the motor controller never sees a
+// floating PWM input.
+esp_err_t motor_driver_hold_pwm_low(const MotorDriverConfig *config);
+
 // Configures the motor's direction GPIO and LEDC PWM channel.
 esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config);
 

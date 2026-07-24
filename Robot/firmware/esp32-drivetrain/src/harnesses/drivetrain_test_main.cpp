@@ -331,12 +331,12 @@ bool direction_vector(const String &name, float *x_out, float *y_out) {
     *y_out = 0.0f;
     if (name == "forward") *x_out = 1.0f;
     else if (name == "backward") *x_out = -1.0f;
-    else if (name == "left") *y_out = -1.0f;
-    else if (name == "right") *y_out = 1.0f;
-    else if (name == "forward-left") { *x_out = kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
-    else if (name == "forward-right") { *x_out = kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
-    else if (name == "backward-left") { *x_out = -kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
-    else if (name == "backward-right") { *x_out = -kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "left") *y_out = 1.0f;
+    else if (name == "right") *y_out = -1.0f;
+    else if (name == "forward-left") { *x_out = kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "forward-right") { *x_out = kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
+    else if (name == "backward-left") { *x_out = -kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "backward-right") { *x_out = -kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
     else return false;
     return true;
 }
@@ -1439,6 +1439,7 @@ void service_sequence(uint32_t now_ms) {
 }  // namespace
 
 void setup() {
+    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
     Serial.begin(115200);
     Serial.setTimeout(20);
     delay(1000);

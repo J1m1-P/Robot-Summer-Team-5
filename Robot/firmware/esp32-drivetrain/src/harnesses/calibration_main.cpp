@@ -935,6 +935,7 @@ void service_mover(unsigned long now_ms, float dt_s, bool should_print) {
 
 // Initializes serial telemetry, the drivetrain facade, and odometry source.
 void setup() {
+    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
     Serial.begin(115200);
     delay(1000);
 

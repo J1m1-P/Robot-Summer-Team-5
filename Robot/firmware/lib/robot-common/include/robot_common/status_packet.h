@@ -24,8 +24,16 @@ typedef enum {
     STATUS_LOOK_END,        // the ESP closed its look-window (sweep done, nothing found)
     STATUS_ROUTINE_DONE,    // the ESP ran out of sweeps/routine with targets still unfound
     STATUS_FAULT,           // something went wrong; `detail` holds a fault code
+    STATUS_ACTION_COMPLETE, // an arm action completed; `detail` identifies the result
     STATUS_MAX
 } StatusCode;
+
+// Detail values used with STATUS_ACTION_COMPLETE by the simple system demo.
+typedef enum {
+    STATUS_DETAIL_NONE = 0,
+    STATUS_DETAIL_TOWER_Z_RAISED,
+    STATUS_DETAIL_TOWER_Z_LOWERED,
+} ActionStatusDetail;
 
 // Represents one decoded status: a code plus an optional detail byte.
 typedef struct {

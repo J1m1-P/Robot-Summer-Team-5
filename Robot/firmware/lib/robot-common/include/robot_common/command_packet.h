@@ -1,5 +1,5 @@
 /*
- * Defines the command packet the Pi sends to gate and steer ESP-owned motion.
+ * Defines commands exchanged between the Pi and the two ESP32 boards.
  * The API sends, identifies, and decodes its fixed wire representation.
  */
 #pragma once
@@ -16,8 +16,7 @@ extern "C" {
 // Stores one opcode byte and one signed, x100-scaled value byte.
 #define COMMAND_PACKET_PAYLOAD_SIZE 2U
 
-// Identifies the action a command packet requests. TURN carries a steering
-// value in CommandPacket.value; every other opcode ignores it.
+// Identifies the action a command packet requests.
 typedef enum {
     CMD_STOP = 0,
     CMD_TURN,
@@ -26,6 +25,8 @@ typedef enum {
     CMD_FLASH,
     CMD_DONE,
     CMD_RESUME,   // continue an interrupted sweep/drive routine (reactive detector)
+    CMD_TOWER_Z_UP,
+    CMD_TOWER_Z_DOWN,
     CMD_MAX
 } CommandOpcode;
 

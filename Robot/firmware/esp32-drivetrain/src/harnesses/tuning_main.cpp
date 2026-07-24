@@ -542,6 +542,9 @@ void service_run(unsigned long now, float dt_s, bool should_print) {
 
 // Initializes serial telemetry and the default front-left tuning channel.
 void setup() {
+    for (int index = 0; index < kMotorCount; ++index) {
+        (void)motor_driver_hold_pwm_low(kMotorConfigs[index]);
+    }
     Serial.begin(115200);
     delay(1000);
 

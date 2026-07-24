@@ -76,6 +76,10 @@ typedef struct {
     DrivetrainStatus status;
 } Drivetrain;
 
+// Engages the brake and holds every PWM GPIO low before longer startup work.
+// This does not initialize or enable the drivetrain.
+esp_err_t drivetrain_hold_safe_outputs(const DrivetrainConfig *config);
+
 // Validates configuration and initializes the brake, motors, and encoders.
 esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config);
 
