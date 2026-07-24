@@ -1,4 +1,4 @@
-/* Runs the Tower-only action sequence while keeping the drivetrain inert. */
+/* Coordinates the Tower placement sequence while keeping the drivetrain inert. */
 #include <Arduino.h>
 
 #include <robot_common/command_packet.h>
@@ -19,22 +19,48 @@ enum class DemoState {
     FAULT,
 };
 
+// Shared command/status headers cannot be extended for this hardware test.
+// CMD_DONE carries one of these IDs as its x100-encoded value, and the arm
+// echoes the same ID as STATUS_ACTION_COMPLETE.detail.
+enum class TowerSequenceAction : uint8_t {
+    HOME = 20,
+    ROTATE_VERTICAL_FIRST = 21,
+    OPEN_CLAWS = 22,
+    RAISE_50_FIRST = 23,
+    ROTATE_HORIZONTAL = 24,
+    LOWER_50 = 25,
+    CLOSE_CLAWS = 26,
+    RAISE_50_SECOND = 27,
+    ROTATE_VERTICAL_SECOND = 28,
+    RAISE_30 = 29,
+};
+
 struct TowerSequenceStep {
-    CommandOpcode command;
-    ActionStatusDetail completion;
+    TowerSequenceAction action;
     const char *start_message;
 };
 
-// Reorder these independent action blocks to change the test sequence.
 constexpr TowerSequenceStep kTowerSequence[] = {
-    {CMD_TOWER_Z_UP, STATUS_DETAIL_TOWER_Z_RAISED,
-     "# Raising Tower 0.1 m"},
-    {CMD_TOWER_Z_DOWN, STATUS_DETAIL_TOWER_Z_LOWERED,
-     "# Lowering Tower 0.1 m"},
-    {CMD_TOWER_X_LEFT, STATUS_DETAIL_TOWER_X_LEFT,
-     "# Moving Tower left 0.05 m"},
-    {CMD_TOWER_X_RIGHT, STATUS_DETAIL_TOWER_X_RIGHT,
-     "# Moving Tower right 0.05 m"},
+    {TowerSequenceAction::HOME,
+     "# 1: Setting Tower home and retracting locator"},
+    {TowerSequenceAction::ROTATE_VERTICAL_FIRST,
+     "# 2: Rotating Tower vertical"},
+    {TowerSequenceAction::OPEN_CLAWS,
+     "# 3: Opening all Tower claws"},
+    {TowerSequenceAction::RAISE_50_FIRST,
+     "# 4: Raising Tower claw 50 mm"},
+    {TowerSequenceAction::ROTATE_HORIZONTAL,
+     "# 5: Rotating Tower horizontal"},
+    {TowerSequenceAction::LOWER_50,
+     "# 6: Lowering Tower claw 50 mm to home"},
+    {TowerSequenceAction::CLOSE_CLAWS,
+     "# 7: Closing all Tower claws"},
+    {TowerSequenceAction::RAISE_50_SECOND,
+     "# 8: Raising Tower claw 50 mm"},
+    {TowerSequenceAction::ROTATE_VERTICAL_SECOND,
+     "# 9: Rotating Tower vertical"},
+    {TowerSequenceAction::RAISE_30,
+     "# 10: Raising Tower claw 30 mm"},
 };
 
 UartLink arm_uart = {};
@@ -55,8 +81,9 @@ void enter_fault(const char *reason, esp_err_t error = ESP_FAIL) {
 esp_err_t start_tower_step(size_t step_index) {
     const TowerSequenceStep &step = kTowerSequence[step_index];
     const CommandPacket command = {
-        .opcode = step.command,
-        .value = 0.0f,
+        .opcode = CMD_DONE,
+        .value =
+            static_cast<float>(static_cast<uint8_t>(step.action)) / 100.0f,
     };
     const esp_err_t error = command_packet_send(&arm_uart, &command);
     if (error == ESP_OK) {
@@ -103,10 +130,9 @@ void service_arm_uart() {
         return;
     }
 
-    const ActionStatusDetail detail =
-        static_cast<ActionStatusDetail>(status.detail);
     if (status.code == STATUS_ACTION_COMPLETE &&
-        detail == kTowerSequence[current_step].completion) {
+        status.detail ==
+            static_cast<uint8_t>(kTowerSequence[current_step].action)) {
         finish_current_step();
     }
 }
@@ -130,7 +156,7 @@ void setup() {
     current_step = 0;
     const esp_err_t action_error = start_tower_step(current_step);
     if (action_error != ESP_OK) {
-        enter_fault("failed to start Tower raise", action_error);
+        enter_fault("failed to start Tower sequence", action_error);
     }
 }
 
