@@ -1,4 +1,4 @@
-/* Runs the arm board's sensors, odometry UART stream, and Tower-Z demo actions. */
+/* Runs arm sensing and the drivetrain-coordinated Tower action sequence. */
 #include <Arduino.h>
 
 #include <robot_common/uart_link.h>
@@ -29,6 +29,10 @@ void setup() {
     delay(1000);
     Serial.println("# Starting arm demo firmware");
 
+    pinMode(PIN_LOC_EN, OUTPUT);
+    digitalWrite(PIN_LOC_EN, LOW);
+    Serial.println("# Locator retracted");
+
     // Bring up the command path before optional sensing. A missing ToF sensor
     // must not prevent the arm from receiving and executing Tower commands.
 
@@ -46,7 +50,9 @@ void setup() {
         &drivetrain_uart,
         &tower_x_stepper,
         &tower_z_stepper);
-    Serial.println("# Tower steppers ready");
+    Serial.println(
+        "# Tower X/Z startup positions are the manually adjusted home");
+    Serial.println("# Tower servos and steppers ready");
     
 
     // TOF init 

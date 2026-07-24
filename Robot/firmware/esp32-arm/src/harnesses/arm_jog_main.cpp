@@ -163,8 +163,10 @@ void report_stepper(size_t index) {
 }
 
 void report_all() {
+    output_line("state_begin");
     for (size_t index = 0; index < kServoCount; ++index) report_servo(index);
     for (size_t index = 0; index < kStepperCount; ++index) report_stepper(index);
+    output_line("state_end");
 }
 
 void set_servo_angle(size_t index, float requested_angle) {
@@ -479,6 +481,9 @@ void setup() {
     for (size_t index = 0; index < kServoCount; ++index) {
         servos[index].current_angle = kServoConfigs[index]->anglePositionA;
         servos[index].ready = servo_init(&servos[index].driver, *kServoConfigs[index]) == ESP_OK;
+        Serial.println("# servo " + String(index + 1) + " pin " +
+                       String(kServoConfigs[index]->pin) + " init " +
+                       String(servos[index].ready ? "ok" : "failed"));
         if (!servos[index].ready) {
             Serial.println("# servo " + String(index + 1) + " initialization failed");
         }

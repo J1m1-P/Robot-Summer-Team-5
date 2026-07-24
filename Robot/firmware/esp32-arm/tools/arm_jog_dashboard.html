@@ -150,6 +150,7 @@
   #status.error { color: var(--danger); font-weight: 700; }
   .offline { color: var(--danger) !important; }
   .moving { color: var(--stepper) !important; }
+  .stale { color: var(--muted) !important; }
 
   #log {
     height: 150px;
@@ -222,7 +223,10 @@
     readableClosed: null,
     keepReading: false,
     rxBuffer: "",
-    connected: false
+    connected: false,
+    lastTelemetryMs: 0,
+    lastSnapshotMs: 0,
+    freshnessTimer: null
   };
 
   const statusEl = document.getElementById("status");
@@ -235,7 +239,7 @@
     return `
       <article class="card servo-card" id="servo-card-${id}">
         <div class="card-head">
-          <div><h3>Servo ${id} · ${name}</h3><p class="hint">Awaiting telemetry</p></div>
+          <div><h3>Servo ${id} · ${name}</h3><p class="hint" id="servo-state-${id}">Awaiting telemetry</p></div>
           <div class="position" id="servo-position-${id}">--°<small>commanded angle</small></div>
         </div>
         <div class="group">
@@ -357,6 +361,7 @@
     connectBtn.disabled = connected;
     disconnectBtn.disabled = !connected;
     document.querySelectorAll("[data-command]").forEach(element => { element.disabled = !connected; });
+    if (!connected) markAllStale("Not connected");
   }
 
   async function connectSerial() {
@@ -377,6 +382,7 @@
       log("# connected over USB");
       readLoop();
       send("state");
+      startFreshnessTimer();
     } catch (error) {
       log("# USB connection error: " + error.message);
       setConnected(false, "", true);
@@ -425,6 +431,7 @@
       log("# disconnect error: " + error.message);
     }
     state.rxBuffer = "";
+    stopFreshnessTimer();
     setConnected(false);
     log("# disconnected");
   }
@@ -441,6 +448,40 @@
     }
   }
 
+  function startFreshnessTimer() {
+    stopFreshnessTimer();
+    state.freshnessTimer = window.setInterval(checkFreshness, 1000);
+  }
+
+  function stopFreshnessTimer() {
+    if (state.freshnessTimer) {
+      window.clearInterval(state.freshnessTimer);
+      state.freshnessTimer = null;
+    }
+  }
+
+  function markAllStale(message) {
+    for (let id = 1; id <= SERVOS.length; id += 1) {
+      const hint = document.getElementById(`servo-state-${id}`);
+      const position = document.getElementById(`servo-position-${id}`);
+      if (hint) hint.textContent = message;
+      if (position) position.classList.add("stale");
+    }
+    for (let id = 1; id <= STEPPERS.length; id += 1) {
+      const hint = document.getElementById(`stepper-state-${id}`);
+      const position = document.getElementById(`stepper-position-${id}`);
+      if (hint) hint.textContent = message;
+      if (position) position.classList.add("stale");
+    }
+  }
+
+  function checkFreshness() {
+    if (!state.connected || state.lastTelemetryMs === 0) return;
+    if (Date.now() - state.lastTelemetryMs > 2500) {
+      markAllStale("Telemetry stale - refresh state");
+    }
+  }
+
   function updateInput(id, value) {
     const input = document.getElementById(id);
     if (input && document.activeElement !== input) input.value = value;
@@ -450,10 +491,12 @@
     if (parts.length !== 9) return false;
     const [id, current, angleA, angleB, frequency, minUs, maxUs, ready] = parts.slice(1).map(Number);
     if ([id, current, angleA, angleB, frequency, minUs, maxUs, ready].some(Number.isNaN) || id < 1 || id > SERVOS.length) return false;
+    state.lastTelemetryMs = Date.now();
     const position = document.getElementById(`servo-position-${id}`);
     position.innerHTML = `${current}°<small>commanded angle</small>`;
     position.classList.toggle("offline", !ready);
-    const hint = document.querySelector(`#servo-card-${id} .card-head .hint`);
+    position.classList.remove("stale");
+    const hint = document.getElementById(`servo-state-${id}`);
     hint.textContent = ready ? `PWM ${frequency} Hz · ${minUs}–${maxUs} µs` : "Initialization failed";
     updateInput(`servo-angle-${id}`, current);
     updateInput(`servo-a-${id}`, angleA);
@@ -474,10 +517,12 @@
     if (parts.length !== 10) return false;
     const [id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready] = parts.slice(1).map(Number);
     if ([id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready].some(Number.isNaN) || id < 1 || id > STEPPERS.length) return false;
+    state.lastTelemetryMs = Date.now();
     const position = document.getElementById(`stepper-position-${id}`);
     position.innerHTML = `${mm.toFixed(3)} mm<small>${steps} steps</small>`;
     position.classList.toggle("offline", !ready);
     position.classList.toggle("moving", Boolean(moving && ready));
+    position.classList.remove("stale");
     const stateText = document.getElementById(`stepper-state-${id}`);
     stateText.textContent = !ready ? "Initialization failed" : (moving ? "Moving" : `Idle · max jog ±${rangeMm.toFixed(3)} mm`);
     updateInput(`stepper-range-${id}`, rangeMm);
@@ -495,6 +540,12 @@
   function handleLine(rawLine) {
     const line = rawLine.trim();
     if (!line) return;
+    if (line === "state_begin") return;
+    if (line === "state_end") {
+      state.lastSnapshotMs = Date.now();
+      statusEl.textContent = "Connected (USB) - state current";
+      return;
+    }
     if (line.startsWith("#")) {
       log(line);
       return;
