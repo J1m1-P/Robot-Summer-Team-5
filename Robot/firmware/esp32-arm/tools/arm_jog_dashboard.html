@@ -179,7 +179,9 @@
     <button id="connectBtn" class="primary">Connect (USB)</button>
     <button id="disconnectBtn" disabled>Disconnect</button>
     <button id="refreshBtn" data-command disabled>Refresh state</button>
-    <button id="stopAllBtn" class="stop" data-command disabled>STOP ALL STEPPERS</button>
+    <button id="towerSequenceBtn" data-command disabled
+      title="Requires Tower Z at logical home (0 mm) and all steppers stopped">Run tower sequence</button>
+    <button id="stopAllBtn" class="stop" data-command disabled>STOP / ABORT SEQUENCE</button>
     <span id="status">Not connected</span>
   </div>
 
@@ -616,6 +618,7 @@
   connectBtn.addEventListener("click", connectSerial);
   disconnectBtn.addEventListener("click", disconnect);
   document.getElementById("refreshBtn").addEventListener("click", () => send("state"));
+  document.getElementById("towerSequenceBtn").addEventListener("click", () => send("tower sequence"));
   document.getElementById("stopAllBtn").addEventListener("click", () => send("stop"));
   setConnected(false);
 })();

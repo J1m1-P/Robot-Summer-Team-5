@@ -19,6 +19,13 @@ constexpr unsigned long kServoTelemetryPeriodMs = 1000;
 constexpr float kMaxConfiguredRangeMm = 10000.0f;
 constexpr long kMaxStepperTimingUs = 10000000L;
 constexpr size_t kMaxCommandLength = 160;
+constexpr unsigned long kTowerServoSettleMs = 1000;
+
+constexpr size_t kTowerRotateServoIndex = 2;
+constexpr size_t kTowerLeftServoIndex = 3;
+constexpr size_t kTowerMiddleServoIndex = 4;
+constexpr size_t kTowerRightServoIndex = 5;
+constexpr size_t kTowerZStepperIndex = 1;
 
 // These are the same mechanics used by stepper_move_distanceMM(). Keeping the
 // conversion here lets this harness enforce positional limits before moving.
@@ -37,6 +44,23 @@ struct StepperRuntime {
     float range_mm;
     long position_steps;
     long last_steps_remaining;
+};
+
+enum class TowerSequenceStage : uint8_t {
+    Idle,
+    WaitVerticalAndOpen,
+    RaiseFirst50,
+    WaitHorizontal,
+    Lower50,
+    WaitClosed,
+    RaiseSecond50,
+    WaitVerticalFinal,
+    RaiseFinal30,
+};
+
+struct TowerSequenceRuntime {
+    TowerSequenceStage stage = TowerSequenceStage::Idle;
+    unsigned long wait_until_ms = 0;
 };
 
 const ServoConfig *const kServoConfigs[kServoCount] = {
@@ -58,6 +82,7 @@ const StepperConfig *const kStepperConfigs[kStepperCount] = {
 
 ServoRuntime servos[kServoCount];
 StepperRuntime steppers[kStepperCount];
+TowerSequenceRuntime tower_sequence;
 String serial_line;
 unsigned long last_stepper_telemetry_ms = 0;
 unsigned long last_servo_telemetry_ms = 0;
@@ -80,7 +105,7 @@ void output_line(String line) {
 }
 
 void print_usage() {
-    output_line("# usage: state | stop [servo|stepper] [id] | "
+    output_line("# usage: state | tower sequence | stop [servo|stepper] [id] | "
                 "servo angle|a|b <id> <deg> | servo neutral <id> | "
                 "servo goto <id> a|b | servo pwm <id> <hz> <min_us> <max_us> | "
                 "stepper mm|steps <id> <delta> | stepper home <id> | "
@@ -291,6 +316,155 @@ void stop_all() {
     output_line("# all stepper motion stopped (servo outputs hold their current angles)");
 }
 
+bool tower_sequence_active() {
+    return tower_sequence.stage != TowerSequenceStage::Idle;
+}
+
+void set_tower_servo_position(size_t index, ServoPosition position) {
+    ServoRuntime &servo = servos[index];
+    servo_set_position(&servo.driver, position);
+    servo.current_angle = position == SERVO_POSITION_B
+        ? servo.driver.config.anglePositionB
+        : servo.driver.config.anglePositionA;
+    report_servo(index);
+}
+
+void set_tower_claws(ServoPosition position) {
+    set_tower_servo_position(kTowerLeftServoIndex, position);
+    set_tower_servo_position(kTowerMiddleServoIndex, position);
+    set_tower_servo_position(kTowerRightServoIndex, position);
+}
+
+void start_tower_z_move_mm(float distance_mm) {
+    StepperRuntime &tower_z = steppers[kTowerZStepperIndex];
+    start_stepper_move(
+        kTowerZStepperIndex,
+        lroundf(distance_mm * steps_per_mm(tower_z)));
+}
+
+void abort_tower_sequence() {
+    if (!tower_sequence_active()) return;
+    tower_sequence.stage = TowerSequenceStage::Idle;
+    stop_stepper(kTowerZStepperIndex);
+    output_line("# tower sequence aborted");
+}
+
+void start_tower_sequence() {
+    if (tower_sequence_active()) {
+        output_line("# tower sequence is already running");
+        return;
+    }
+
+    const size_t required_servos[] = {
+        kTowerRotateServoIndex,
+        kTowerLeftServoIndex,
+        kTowerMiddleServoIndex,
+        kTowerRightServoIndex,
+    };
+    for (size_t index : required_servos) {
+        if (!servos[index].ready) {
+            output_line("# tower sequence unavailable: servo " + String(index + 1) +
+                        " is not initialized");
+            return;
+        }
+    }
+    for (size_t index = 0; index < kStepperCount; ++index) {
+        if (steppers[index].ready && stepper_is_moving(&steppers[index].driver)) {
+            output_line("# tower sequence unavailable: stop all steppers first");
+            return;
+        }
+    }
+
+    StepperRuntime &tower_z = steppers[kTowerZStepperIndex];
+    if (!tower_z.ready) {
+        output_line("# tower sequence unavailable: Tower Z stepper is not initialized");
+        return;
+    }
+    if (tower_z.position_steps != 0) {
+        output_line("# tower sequence must start at Tower Z logical home (0 mm)");
+        return;
+    }
+    if (tower_z.range_mm < 50.0f) {
+        output_line("# tower sequence requires a Tower Z full range of at least 50 mm");
+        return;
+    }
+
+    output_line("# tower sequence 1/8: rotate vertical and open all tower claws");
+    set_tower_servo_position(kTowerRotateServoIndex, SERVO_POSITION_B);
+    set_tower_claws(SERVO_POSITION_A);
+    tower_sequence.stage = TowerSequenceStage::WaitVerticalAndOpen;
+    tower_sequence.wait_until_ms = millis() + kTowerServoSettleMs;
+}
+
+bool tower_servo_wait_complete(unsigned long now_ms) {
+    return static_cast<int32_t>(now_ms - tower_sequence.wait_until_ms) >= 0;
+}
+
+void update_tower_sequence(unsigned long now_ms) {
+    switch (tower_sequence.stage) {
+        case TowerSequenceStage::Idle:
+            return;
+
+        case TowerSequenceStage::WaitVerticalAndOpen:
+            if (!tower_servo_wait_complete(now_ms)) return;
+            output_line("# tower sequence 2/8: raise Tower Z by 50 mm");
+            start_tower_z_move_mm(50.0f);
+            tower_sequence.stage = TowerSequenceStage::RaiseFirst50;
+            return;
+
+        case TowerSequenceStage::RaiseFirst50:
+            if (stepper_is_moving(&steppers[kTowerZStepperIndex].driver)) return;
+            output_line("# tower sequence 3/8: rotate horizontal");
+            set_tower_servo_position(kTowerRotateServoIndex, SERVO_POSITION_A);
+            tower_sequence.stage = TowerSequenceStage::WaitHorizontal;
+            tower_sequence.wait_until_ms = now_ms + kTowerServoSettleMs;
+            return;
+
+        case TowerSequenceStage::WaitHorizontal:
+            if (!tower_servo_wait_complete(now_ms)) return;
+            output_line("# tower sequence 4/8: lower Tower Z by 50 mm to home");
+            start_tower_z_move_mm(-50.0f);
+            tower_sequence.stage = TowerSequenceStage::Lower50;
+            return;
+
+        case TowerSequenceStage::Lower50:
+            if (stepper_is_moving(&steppers[kTowerZStepperIndex].driver)) return;
+            output_line("# tower sequence 5/8: close all tower claws");
+            set_tower_claws(SERVO_POSITION_B);
+            tower_sequence.stage = TowerSequenceStage::WaitClosed;
+            tower_sequence.wait_until_ms = now_ms + kTowerServoSettleMs;
+            return;
+
+        case TowerSequenceStage::WaitClosed:
+            if (!tower_servo_wait_complete(now_ms)) return;
+            output_line("# tower sequence 6/8: raise Tower Z by 50 mm");
+            start_tower_z_move_mm(50.0f);
+            tower_sequence.stage = TowerSequenceStage::RaiseSecond50;
+            return;
+
+        case TowerSequenceStage::RaiseSecond50:
+            if (stepper_is_moving(&steppers[kTowerZStepperIndex].driver)) return;
+            output_line("# tower sequence 7/8: rotate vertical");
+            set_tower_servo_position(kTowerRotateServoIndex, SERVO_POSITION_B);
+            tower_sequence.stage = TowerSequenceStage::WaitVerticalFinal;
+            tower_sequence.wait_until_ms = now_ms + kTowerServoSettleMs;
+            return;
+
+        case TowerSequenceStage::WaitVerticalFinal:
+            if (!tower_servo_wait_complete(now_ms)) return;
+            output_line("# tower sequence 8/8: raise Tower Z by 30 mm");
+            start_tower_z_move_mm(30.0f);
+            tower_sequence.stage = TowerSequenceStage::RaiseFinal30;
+            return;
+
+        case TowerSequenceStage::RaiseFinal30:
+            if (stepper_is_moving(&steppers[kTowerZStepperIndex].driver)) return;
+            tower_sequence.stage = TowerSequenceStage::Idle;
+            output_line("# tower sequence complete");
+            return;
+    }
+}
+
 void process_servo_command(String tokens[], int count) {
     if (count < 3) {
         print_usage();
@@ -443,7 +617,13 @@ void process_command_line(String line) {
     if (tokens[0] == "state") {
         report_all();
     } else if (tokens[0] == "stop") {
+        abort_tower_sequence();
         process_stop_command(tokens, count);
+    } else if (tokens[0] == "tower" && count >= 2 && tokens[1] == "sequence") {
+        start_tower_sequence();
+    } else if (tower_sequence_active()) {
+        output_line("# manual motor commands are locked while the tower sequence is running; "
+                    "press STOP to abort");
     } else if (tokens[0] == "servo") {
         process_servo_command(tokens, count);
     } else if (tokens[0] == "stepper") {
@@ -515,6 +695,7 @@ void loop() {
     }
 
     const unsigned long now_ms = millis();
+    update_tower_sequence(now_ms);
     if (now_ms - last_stepper_telemetry_ms >= kStepperTelemetryPeriodMs) {
         last_stepper_telemetry_ms = now_ms;
         for (size_t index = 0; index < kStepperCount; ++index) report_stepper(index);
