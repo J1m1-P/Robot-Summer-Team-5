@@ -27,6 +27,8 @@ typedef enum {
     CMD_RESUME,   // continue an interrupted sweep/drive routine (reactive detector)
     CMD_TOWER_Z_UP,
     CMD_TOWER_Z_DOWN,
+    CMD_TOWER_X_LEFT,
+    CMD_TOWER_X_RIGHT,
     CMD_MAX
 } CommandOpcode;
 

@@ -59,6 +59,10 @@ CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
 CMD_FLASH  = 4
 CMD_DONE   = 5
 CMD_RESUME = 6   # continue an interrupted sweep/drive routine (reactive detector)
+CMD_TOWER_Z_UP   = 7
+CMD_TOWER_Z_DOWN = 8
+CMD_TOWER_X_LEFT = 9
+CMD_TOWER_X_RIGHT = 10
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -68,6 +72,13 @@ STATUS_LOOK_START   = 1   # the ESP opened its look-window (reactive detector: b
 STATUS_LOOK_END     = 2   # the ESP closed its look-window (sweep done, nothing found)
 STATUS_ROUTINE_DONE = 3   # the ESP ran out of sweeps/routine with targets still unfound
 STATUS_FAULT        = 4   # something went wrong; detail byte holds a fault code
+STATUS_ACTION_COMPLETE = 5
+
+STATUS_DETAIL_NONE = 0
+STATUS_DETAIL_TOWER_Z_RAISED = 1
+STATUS_DETAIL_TOWER_Z_LOWERED = 2
+STATUS_DETAIL_TOWER_X_LEFT = 3
+STATUS_DETAIL_TOWER_X_RIGHT = 4
 
 
 def encode_command(opcode, value=0.0):

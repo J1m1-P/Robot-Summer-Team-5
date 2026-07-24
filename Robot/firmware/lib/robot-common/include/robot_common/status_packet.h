@@ -33,6 +33,8 @@ typedef enum {
     STATUS_DETAIL_NONE = 0,
     STATUS_DETAIL_TOWER_Z_RAISED,
     STATUS_DETAIL_TOWER_Z_LOWERED,
+    STATUS_DETAIL_TOWER_X_LEFT,
+    STATUS_DETAIL_TOWER_X_RIGHT,
 } ActionStatusDetail;
 
 // Represents one decoded status: a code plus an optional detail byte.

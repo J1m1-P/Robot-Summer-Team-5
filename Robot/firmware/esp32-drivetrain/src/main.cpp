@@ -28,6 +28,7 @@ enum class DemoState {
     WAIT_FOR_TOWER_UP,
     WAIT_FOR_TOWER_DOWN,
     MOVE_SECOND_METER,
+    WAIT_FOR_TOWER_X,
     COMPLETE,
     FAULT,
 };
@@ -128,13 +129,20 @@ void finish_first_leg() {
 }
 
 void finish_second_leg() {
-    const esp_err_t error = drivetrain_coast(&drivetrain);
+    esp_err_t error = drivetrain_coast(&drivetrain);
     if (error != ESP_OK) {
         enter_fault("failed to coast after second meter", error);
         return;
     }
-    demo_state = DemoState::COMPLETE;
-    Serial.println("# DEMO COMPLETE; drivetrain coasting");
+    Serial.println("# Second meter complete; drivetrain coasting");
+
+    error = send_tower_command(CMD_TOWER_X_RIGHT);
+    if (error != ESP_OK) {
+        enter_fault("failed to request Tower X movement", error);
+        return;
+    }
+    demo_state = DemoState::WAIT_FOR_TOWER_X;
+    Serial.println("# Requested Tower X movement");
 }
 
 void service_arm_uart() {
@@ -175,6 +183,11 @@ void service_arm_uart() {
         if (error != ESP_OK) {
             enter_fault("failed to start second MoveL leg", error);
         }
+    } else if (demo_state == DemoState::WAIT_FOR_TOWER_X &&
+               status.code == STATUS_ACTION_COMPLETE &&
+               status.detail == STATUS_DETAIL_TOWER_X_RIGHT) {
+        demo_state = DemoState::COMPLETE;
+        Serial.println("# Tower X moved right; DEMO COMPLETE");
     }
 }
 
@@ -256,7 +269,8 @@ void loop() {
 
     const uint32_t now_ms = millis();
     if ((demo_state == DemoState::WAIT_FOR_TOWER_UP ||
-         demo_state == DemoState::WAIT_FOR_TOWER_DOWN) &&
+         demo_state == DemoState::WAIT_FOR_TOWER_DOWN ||
+         demo_state == DemoState::WAIT_FOR_TOWER_X) &&
         deadline_reached(now_ms, arm_action_deadline_ms)) {
         enter_fault("arm action timed out", ESP_ERR_TIMEOUT);
         return;
