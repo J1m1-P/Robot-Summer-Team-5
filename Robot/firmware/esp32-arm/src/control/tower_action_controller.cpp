@@ -19,36 +19,24 @@ constexpr float kTowerXTravelMm = 50.0f;
 constexpr uint32_t kRotateServoSettleMs = 1000;
 constexpr uint32_t kClawServoSettleMs = 750;
 constexpr uint32_t kHomeSettleMs = 1000;
-constexpr float kCommandValueScale = 100.0f;
+constexpr float kCommandDistanceUnitMm = 100.0f;
 
-// Keep these IDs synchronized with esp32-drivetrain/src/main.cpp. They travel
-// in CMD_DONE.value and are echoed in STATUS_ACTION_COMPLETE.detail.
-enum class TowerSequenceAction : uint8_t {
-    HOME = 20,
-    ROTATE_VERTICAL_FIRST = 21,
-    OPEN_CLAWS = 22,
-    RAISE_50_FIRST = 23,
-    ROTATE_HORIZONTAL = 24,
-    LOWER_50 = 25,
-    CLOSE_CLAWS = 26,
-    RAISE_50_SECOND = 27,
-    ROTATE_VERTICAL_SECOND = 28,
-    RAISE_30 = 29,
-};
-
-enum class TowerActionKind {
-    STEPPER,
-    HOME,
+enum class TowerServoAction {
     ROTATE_HORIZONTAL,
     ROTATE_VERTICAL,
-    OPEN_CLAWS,
-    CLOSE_CLAWS,
+    OPEN_CLAW,
+    CLOSE_CLAW,
 };
 
-struct TowerAction {
-    TowerActionKind kind;
+struct TowerStepperAction {
     StepperDriver *stepper;
     float distance_mm;
+    ActionStatusDetail completion_detail;
+    const char *start_message;
+};
+
+struct TowerServoCommand {
+    TowerServoAction action;
     ActionStatusDetail completion_detail;
     uint32_t settle_ms;
     const char *start_message;
@@ -104,149 +92,46 @@ void send_status(
     (void)status_packet_send(drivetrain_uart, &status);
 }
 
-ActionStatusDetail sequence_completion_detail(TowerSequenceAction action) {
-    return static_cast<ActionStatusDetail>(static_cast<uint8_t>(action));
+float requested_distance_mm(float command_value, float default_distance_mm) {
+    if (command_value == 0.0f) return default_distance_mm;
+    return fabsf(command_value) * kCommandDistanceUnitMm;
 }
 
-bool describe_sequence_action(
+bool describe_stepper_action(
     TowerActionController *controller,
-    float encoded_action,
-    TowerAction *action) {
-    const long action_id = lroundf(encoded_action * kCommandValueScale);
-    const TowerSequenceAction sequence_action =
-        static_cast<TowerSequenceAction>(action_id);
-
-    switch (sequence_action) {
-        case TowerSequenceAction::HOME:
-            *action = {
-                TowerActionKind::HOME,
-                nullptr,
-                0.0f,
-                sequence_completion_detail(sequence_action),
-                kHomeSettleMs,
-                "# Tower accepting current X/Z positions as home",
-            };
-            return true;
-        case TowerSequenceAction::ROTATE_VERTICAL_FIRST:
-        case TowerSequenceAction::ROTATE_VERTICAL_SECOND:
-            *action = {
-                TowerActionKind::ROTATE_VERTICAL,
-                nullptr,
-                0.0f,
-                sequence_completion_detail(sequence_action),
-                kRotateServoSettleMs,
-                "# Tower rotating vertical",
-            };
-            return true;
-        case TowerSequenceAction::OPEN_CLAWS:
-            *action = {
-                TowerActionKind::OPEN_CLAWS,
-                nullptr,
-                0.0f,
-                sequence_completion_detail(sequence_action),
-                kClawServoSettleMs,
-                "# Opening left, middle, and right Tower claws",
-            };
-            return true;
-        case TowerSequenceAction::RAISE_50_FIRST:
-        case TowerSequenceAction::RAISE_50_SECOND:
-            *action = {
-                TowerActionKind::STEPPER,
-                controller->tower_z_stepper,
-                -50.0f,
-                sequence_completion_detail(sequence_action),
-                0,
-                "# Tower Z moving up 50 mm",
-            };
-            return true;
-        case TowerSequenceAction::ROTATE_HORIZONTAL:
-            *action = {
-                TowerActionKind::ROTATE_HORIZONTAL,
-                nullptr,
-                0.0f,
-                sequence_completion_detail(sequence_action),
-                kRotateServoSettleMs,
-                "# Tower rotating horizontal",
-            };
-            return true;
-        case TowerSequenceAction::LOWER_50:
-            *action = {
-                TowerActionKind::STEPPER,
-                controller->tower_z_stepper,
-                50.0f,
-                sequence_completion_detail(sequence_action),
-                0,
-                "# Tower Z moving down 50 mm",
-            };
-            return true;
-        case TowerSequenceAction::CLOSE_CLAWS:
-            *action = {
-                TowerActionKind::CLOSE_CLAWS,
-                nullptr,
-                0.0f,
-                sequence_completion_detail(sequence_action),
-                kClawServoSettleMs,
-                "# Closing left, middle, and right Tower claws",
-            };
-            return true;
-        case TowerSequenceAction::RAISE_30:
-            *action = {
-                TowerActionKind::STEPPER,
-                controller->tower_z_stepper,
-                -30.0f,
-                sequence_completion_detail(sequence_action),
-                0,
-                "# Tower Z moving up 30 mm",
-            };
-            return true;
-        default:
-            return false;
-    }
-}
-
-bool describe_legacy_action(
-    TowerActionController *controller,
-    CommandOpcode command,
-    TowerAction *action) {
-    switch (command) {
+    const CommandPacket &command,
+    TowerStepperAction *action) {
+    switch (command.opcode) {
         case CMD_TOWER_Z_UP:
             *action = {
-                TowerActionKind::STEPPER,
                 controller->tower_z_stepper,
-                -kTowerZTravelMm,
+                -requested_distance_mm(command.value, kTowerZTravelMm),
                 STATUS_DETAIL_TOWER_Z_RAISED,
-                0,
-                "# Tower Z moving up 100 mm",
+                "# Tower Z moving up",
             };
             return true;
         case CMD_TOWER_Z_DOWN:
             *action = {
-                TowerActionKind::STEPPER,
                 controller->tower_z_stepper,
-                kTowerZTravelMm,
+                requested_distance_mm(command.value, kTowerZTravelMm),
                 STATUS_DETAIL_TOWER_Z_LOWERED,
-                0,
-                "# Tower Z moving down 100 mm",
+                "# Tower Z moving down",
             };
             return true;
         case CMD_TOWER_X_LEFT:
             *action = {
-                TowerActionKind::STEPPER,
                 controller->tower_x_stepper,
-                -kTowerXTravelMm,
+                -requested_distance_mm(command.value, kTowerXTravelMm),
                 STATUS_DETAIL_TOWER_X_LEFT,
-                0,
-                "# Tower X moving left 50 mm",
+                "# Tower X moving left",
             };
             return true;
         case CMD_TOWER_X_RIGHT:
             *action = {
-                TowerActionKind::STEPPER,
                 controller->tower_x_stepper,
-                kTowerXTravelMm,
+                requested_distance_mm(command.value, kTowerXTravelMm),
                 STATUS_DETAIL_TOWER_X_RIGHT,
-                0,
-                "# Tower X moving right 50 mm",
+                "# Tower X moving right",
             };
             return true;
         default:
@@ -254,78 +139,150 @@ bool describe_legacy_action(
     }
 }
 
-bool describe_action(
-    TowerActionController *controller,
+bool describe_servo_action(
     const CommandPacket &command,
-    TowerAction *action) {
-    if (command.opcode == CMD_DONE) {
-        return describe_sequence_action(controller, command.value, action);
+    TowerServoCommand *servo_command) {
+    switch (command.opcode) {
+        case CMD_TOWER_ROTATE_HORIZONTAL:
+            *servo_command = {
+                TowerServoAction::ROTATE_HORIZONTAL,
+                STATUS_DETAIL_TOWER_HORIZONTAL,
+                kRotateServoSettleMs,
+                "# Tower rotating horizontal",
+            };
+            return true;
+        case CMD_TOWER_ROTATE_VERTICAL:
+            *servo_command = {
+                TowerServoAction::ROTATE_VERTICAL,
+                STATUS_DETAIL_TOWER_VERTICAL,
+                kRotateServoSettleMs,
+                "# Tower rotating vertical",
+            };
+            return true;
+        case CMD_TOWER_OPEN_CLAW:
+            *servo_command = {
+                TowerServoAction::OPEN_CLAW,
+                STATUS_DETAIL_TOWER_CLAW_OPEN,
+                kClawServoSettleMs,
+                "# Opening left, middle, and right Tower claws",
+            };
+            return true;
+        case CMD_TOWER_CLOSE_CLAW:
+            *servo_command = {
+                TowerServoAction::CLOSE_CLAW,
+                STATUS_DETAIL_TOWER_CLAW_CLOSED,
+                kClawServoSettleMs,
+                "# Closing left, middle, and right Tower claws",
+            };
+            return true;
+        default:
+            return false;
     }
-    return describe_legacy_action(controller, command.opcode, action);
 }
 
-void execute_action(
-    TowerActionController *controller,
-    const TowerAction &action) {
-    active_action_is_timed = action.kind != TowerActionKind::STEPPER;
-    timed_action_complete_ms = millis() + action.settle_ms;
-
-    switch (action.kind) {
-        case TowerActionKind::STEPPER:
-            stepper_move_distanceMM(action.stepper, action.distance_mm);
-            break;
-        case TowerActionKind::HOME:
-            stepper_stop(controller->tower_x_stepper);
-            stepper_stop(controller->tower_z_stepper);
-            digitalWrite(PIN_LOC_EN, LOW);
-            servo_set_position(
-                &tower_rotate_servo, SERVO_POSITION_A);
-            set_all_claws(SERVO_POSITION_B);
-            break;
-        case TowerActionKind::ROTATE_HORIZONTAL:
+void execute_servo_action(TowerServoAction action) {
+    switch (action) {
+        case TowerServoAction::ROTATE_HORIZONTAL:
             servo_set_position(
                 &tower_rotate_servo, SERVO_POSITION_A);
             break;
-        case TowerActionKind::ROTATE_VERTICAL:
+        case TowerServoAction::ROTATE_VERTICAL:
             servo_set_position(
                 &tower_rotate_servo, SERVO_POSITION_B);
             break;
-        case TowerActionKind::OPEN_CLAWS:
+        case TowerServoAction::OPEN_CLAW:
             set_all_claws(SERVO_POSITION_A);
             break;
-        case TowerActionKind::CLOSE_CLAWS:
+        case TowerServoAction::CLOSE_CLAW:
             set_all_claws(SERVO_POSITION_B);
             break;
     }
+}
+
+bool controller_is_busy(TowerActionController *controller) {
+    return controller->action_active ||
+        stepper_is_moving(controller->tower_x_stepper) ||
+        stepper_is_moving(controller->tower_z_stepper);
+}
+
+void reject_if_busy(
+    TowerActionController *controller,
+    const CommandPacket &command) {
+    send_status(
+        controller->drivetrain_uart,
+        STATUS_FAULT,
+        static_cast<uint8_t>(command.opcode));
+}
+
+void prepare_action(
+    TowerActionController *controller,
+    ActionStatusDetail completion_detail) {
+    controller->active_action_detail = completion_detail;
+    controller->repeated_action_detail = STATUS_DETAIL_NONE;
+    controller->repeat_status_until_ms = 0;
 }
 
 void start_tower_action(
     TowerActionController *controller,
     const CommandPacket &command) {
-    TowerAction action = {};
-    if (!describe_action(controller, command, &action)) return;
+    TowerStepperAction stepper_action = {};
+    if (describe_stepper_action(controller, command, &stepper_action)) {
+        if (controller_is_busy(controller)) {
+            reject_if_busy(controller, command);
+            return;
+        }
 
-    if (controller->action_active ||
-        stepper_is_moving(controller->tower_x_stepper) ||
-        stepper_is_moving(controller->tower_z_stepper)) {
-        send_status(
-            controller->drivetrain_uart,
-            STATUS_FAULT,
-            static_cast<uint8_t>(command.opcode));
+        controller->active_stepper = stepper_action.stepper;
+        prepare_action(controller, stepper_action.completion_detail);
+        active_action_is_timed = false;
+        stepper_move_distanceMM(
+            stepper_action.stepper, stepper_action.distance_mm);
+        controller->action_active = true;
+        Serial.printf(
+            "%s %.0f mm\n",
+            stepper_action.start_message,
+            fabsf(stepper_action.distance_mm));
         return;
     }
 
-    controller->active_stepper = action.stepper;
-    controller->active_action_detail = action.completion_detail;
-    controller->repeated_action_detail = STATUS_DETAIL_NONE;
-    controller->repeat_status_until_ms = 0;
-    execute_action(controller, action);
+    TowerServoCommand servo_command = {};
+    if (describe_servo_action(command, &servo_command)) {
+        if (controller_is_busy(controller)) {
+            reject_if_busy(controller, command);
+            return;
+        }
+
+        controller->active_stepper = nullptr;
+        prepare_action(controller, servo_command.completion_detail);
+        active_action_is_timed = true;
+        timed_action_complete_ms = millis() + servo_command.settle_ms;
+        execute_servo_action(servo_command.action);
+        controller->action_active = true;
+        Serial.println(servo_command.start_message);
+        return;
+    }
+
+    if (command.opcode != CMD_TOWER_HOME) return;
+    if (controller_is_busy(controller)) {
+        reject_if_busy(controller, command);
+        return;
+    }
+
+    controller->active_stepper = nullptr;
+    prepare_action(controller, STATUS_DETAIL_TOWER_HOME);
+    active_action_is_timed = true;
+    timed_action_complete_ms = millis() + kHomeSettleMs;
+    stepper_stop(controller->tower_x_stepper);
+    stepper_stop(controller->tower_z_stepper);
+    digitalWrite(PIN_LOC_EN, LOW);
+    servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
+    set_all_claws(SERVO_POSITION_B);
     controller->action_active = true;
-    Serial.println(action.start_message);
+    Serial.println("# Tower accepting current X/Z positions as home");
 }
 
 const char *completion_message(ActionStatusDetail detail) {
-    switch (static_cast<uint8_t>(detail)) {
+    switch (detail) {
         case STATUS_DETAIL_TOWER_Z_RAISED:
             return "# Tower Z raised";
         case STATUS_DETAIL_TOWER_Z_LOWERED:
@@ -334,29 +291,17 @@ const char *completion_message(ActionStatusDetail detail) {
             return "# Tower X left movement complete";
         case STATUS_DETAIL_TOWER_X_RIGHT:
             return "# Tower X right movement complete";
-        case static_cast<uint8_t>(TowerSequenceAction::HOME):
+        case STATUS_DETAIL_TOWER_HOME:
             return "# Tower home ready; locator retracted";
-        case static_cast<uint8_t>(
-            TowerSequenceAction::ROTATE_VERTICAL_FIRST):
-        case static_cast<uint8_t>(
-            TowerSequenceAction::ROTATE_VERTICAL_SECOND):
+        case STATUS_DETAIL_TOWER_VERTICAL:
             return "# Tower vertical";
-        case static_cast<uint8_t>(TowerSequenceAction::OPEN_CLAWS):
-            return "# All Tower claws open";
-        case static_cast<uint8_t>(
-            TowerSequenceAction::RAISE_50_FIRST):
-        case static_cast<uint8_t>(
-            TowerSequenceAction::RAISE_50_SECOND):
-            return "# Tower Z raised 50 mm";
-        case static_cast<uint8_t>(
-            TowerSequenceAction::ROTATE_HORIZONTAL):
+        case STATUS_DETAIL_TOWER_HORIZONTAL:
             return "# Tower horizontal";
-        case static_cast<uint8_t>(TowerSequenceAction::LOWER_50):
-            return "# Tower Z returned to home";
-        case static_cast<uint8_t>(TowerSequenceAction::CLOSE_CLAWS):
+        case STATUS_DETAIL_TOWER_CLAW_OPEN:
+            return "# All Tower claws open";
+        case STATUS_DETAIL_TOWER_CLAW_CLOSED:
             return "# All Tower claws closed";
-        case static_cast<uint8_t>(TowerSequenceAction::RAISE_30):
-            return "# Tower Z raised another 30 mm";
+        case STATUS_DETAIL_NONE:
         default:
             return "# Tower action complete";
     }

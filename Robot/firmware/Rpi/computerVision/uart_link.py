@@ -63,6 +63,11 @@ CMD_TOWER_Z_UP   = 7
 CMD_TOWER_Z_DOWN = 8
 CMD_TOWER_X_LEFT = 9
 CMD_TOWER_X_RIGHT = 10
+CMD_TOWER_HOME = 11
+CMD_TOWER_ROTATE_VERTICAL = 12
+CMD_TOWER_ROTATE_HORIZONTAL = 13
+CMD_TOWER_OPEN_CLAW = 14
+CMD_TOWER_CLOSE_CLAW = 15
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -79,6 +84,11 @@ STATUS_DETAIL_TOWER_Z_RAISED = 1
 STATUS_DETAIL_TOWER_Z_LOWERED = 2
 STATUS_DETAIL_TOWER_X_LEFT = 3
 STATUS_DETAIL_TOWER_X_RIGHT = 4
+STATUS_DETAIL_TOWER_HOME = 5
+STATUS_DETAIL_TOWER_VERTICAL = 6
+STATUS_DETAIL_TOWER_HORIZONTAL = 7
+STATUS_DETAIL_TOWER_CLAW_OPEN = 8
+STATUS_DETAIL_TOWER_CLAW_CLOSED = 9
 
 
 def encode_command(opcode, value=0.0):
@@ -86,7 +96,8 @@ def encode_command(opcode, value=0.0):
     Build a COMMAND packet: payload = [opcode, signed value byte]. `value` is a
     float ~-1..+1; we send round(value*100) as a signed int8 (-100..100). The
     ESP recovers it as (int8_t)payload[1] / 100.0f. Commands without a value
-    (STOP/SCAN/FOLLOW/FLASH/DONE/RESUME) just send 0.
+    just send 0. Tower stepper values are distances in units of 100 mm, so
+    value=0.50 requests 50 mm.
     """
     scaled = max(-127, min(127, int(round(value * 100))))
     payload = struct.pack("<Bb", opcode, scaled)   # B = opcode (uint8), b = value (int8)
@@ -184,6 +195,18 @@ class RobotLink:
     def flash(self):         self.send_command(CMD_FLASH)
     def done(self):          self.send_command(CMD_DONE)
     def resume(self):        self.send_command(CMD_RESUME)
+    def tower_z_up(self, distance_mm=100):
+        self.send_command(CMD_TOWER_Z_UP, distance_mm / 100.0)
+    def tower_z_down(self, distance_mm=100):
+        self.send_command(CMD_TOWER_Z_DOWN, distance_mm / 100.0)
+    def tower_rotate_vertical(self):
+        self.send_command(CMD_TOWER_ROTATE_VERTICAL)
+    def tower_rotate_horizontal(self):
+        self.send_command(CMD_TOWER_ROTATE_HORIZONTAL)
+    def tower_open_claw(self):
+        self.send_command(CMD_TOWER_OPEN_CLAW)
+    def tower_close_claw(self):
+        self.send_command(CMD_TOWER_CLOSE_CLAW)
 
     # --- receiving ---
     def poll(self):

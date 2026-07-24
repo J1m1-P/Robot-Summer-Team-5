@@ -19,49 +19,45 @@ enum class DemoState {
     FAULT,
 };
 
-// Shared command/status headers cannot be extended for this hardware test.
-// CMD_DONE carries one of these IDs as its x100-encoded value, and the arm
-// echoes the same ID as STATUS_ACTION_COMPLETE.detail.
-enum class TowerSequenceAction : uint8_t {
-    HOME = 20,
-    ROTATE_VERTICAL_FIRST = 21,
-    OPEN_CLAWS = 22,
-    RAISE_50_FIRST = 23,
-    ROTATE_HORIZONTAL = 24,
-    LOWER_50 = 25,
-    CLOSE_CLAWS = 26,
-    RAISE_50_SECOND = 27,
-    ROTATE_VERTICAL_SECOND = 28,
-    RAISE_30 = 29,
-};
-
 struct TowerSequenceStep {
-    TowerSequenceAction action;
+    CommandOpcode command;
+    float command_value;
+    ActionStatusDetail completion_detail;
     const char *start_message;
 };
 
 constexpr TowerSequenceStep kTowerSequence[] = {
-    {TowerSequenceAction::HOME,
+    {CMD_TOWER_HOME, 0.0f,
+     STATUS_DETAIL_TOWER_HOME,
      "# 1: Setting Tower home and retracting locator"},
-    {TowerSequenceAction::ROTATE_VERTICAL_FIRST,
+    {CMD_TOWER_ROTATE_VERTICAL, 0.0f, STATUS_DETAIL_TOWER_VERTICAL,
      "# 2: Rotating Tower vertical"},
-    {TowerSequenceAction::OPEN_CLAWS,
+    {CMD_TOWER_OPEN_CLAW, 0.0f,
+     STATUS_DETAIL_TOWER_CLAW_OPEN,
      "# 3: Opening all Tower claws"},
-    {TowerSequenceAction::RAISE_50_FIRST,
+    {CMD_TOWER_Z_UP, 0.50f,
+     STATUS_DETAIL_TOWER_Z_RAISED,
      "# 4: Raising Tower claw 50 mm"},
-    {TowerSequenceAction::ROTATE_HORIZONTAL,
+    {CMD_TOWER_ROTATE_HORIZONTAL, 0.0f, STATUS_DETAIL_TOWER_HORIZONTAL,
      "# 5: Rotating Tower horizontal"},
-    {TowerSequenceAction::LOWER_50,
+    {CMD_TOWER_Z_DOWN, 0.50f,
+     STATUS_DETAIL_TOWER_Z_LOWERED,
      "# 6: Lowering Tower claw 50 mm to home"},
-    {TowerSequenceAction::CLOSE_CLAWS,
+    {CMD_TOWER_CLOSE_CLAW, 0.0f,
+     STATUS_DETAIL_TOWER_CLAW_CLOSED,
      "# 7: Closing all Tower claws"},
-    {TowerSequenceAction::RAISE_50_SECOND,
+    {CMD_TOWER_Z_UP, 0.50f,
+     STATUS_DETAIL_TOWER_Z_RAISED,
      "# 8: Raising Tower claw 50 mm"},
-    {TowerSequenceAction::ROTATE_VERTICAL_SECOND,
+    {CMD_TOWER_ROTATE_VERTICAL, 0.0f, STATUS_DETAIL_TOWER_VERTICAL,
      "# 9: Rotating Tower vertical"},
-    {TowerSequenceAction::RAISE_30,
+    {CMD_TOWER_Z_UP, 0.30f,
+     STATUS_DETAIL_TOWER_Z_RAISED,
      "# 10: Raising Tower claw 30 mm"},
 };
+
+constexpr size_t kTowerSequenceLength =
+    sizeof(kTowerSequence) / sizeof(kTowerSequence[0]);
 
 UartLink arm_uart = {};
 DemoState demo_state = DemoState::FAULT;
@@ -78,26 +74,62 @@ void enter_fault(const char *reason, esp_err_t error = ESP_FAIL) {
     Serial.printf("# DEMO FAULT: %s (%s)\n", reason, esp_err_to_name(error));
 }
 
+const char *tower_command_name(CommandOpcode command) {
+    switch (command) {
+        case CMD_TOWER_HOME:
+            return "HOME";
+        case CMD_TOWER_Z_UP:
+            return "Z_UP";
+        case CMD_TOWER_Z_DOWN:
+            return "Z_DOWN";
+        case CMD_TOWER_ROTATE_VERTICAL:
+            return "ROTATE_VERTICAL";
+        case CMD_TOWER_ROTATE_HORIZONTAL:
+            return "ROTATE_HORIZONTAL";
+        case CMD_TOWER_OPEN_CLAW:
+            return "OPEN_CLAW";
+        case CMD_TOWER_CLOSE_CLAW:
+            return "CLOSE_CLAW";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 esp_err_t start_tower_step(size_t step_index) {
     const TowerSequenceStep &step = kTowerSequence[step_index];
     const CommandPacket command = {
-        .opcode = CMD_DONE,
-        .value =
-            static_cast<float>(static_cast<uint8_t>(step.action)) / 100.0f,
+        .opcode = step.command,
+        .value = step.command_value,
     };
     const esp_err_t error = command_packet_send(&arm_uart, &command);
     if (error == ESP_OK) {
         demo_state = DemoState::RUNNING;
         arm_action_deadline_ms = millis() + kArmActionTimeoutMs;
         Serial.println(step.start_message);
+        Serial.printf(
+            "# Executing task %u/%u: %s",
+            static_cast<unsigned>(step_index + 1),
+            static_cast<unsigned>(kTowerSequenceLength),
+            tower_command_name(step.command));
+        if (step.command == CMD_TOWER_Z_UP ||
+            step.command == CMD_TOWER_Z_DOWN) {
+            Serial.printf(" (%.0f mm)", step.command_value * 100.0f);
+        }
+        Serial.println();
     }
     return error;
 }
 
 void finish_current_step() {
+    const TowerSequenceStep &completed_step = kTowerSequence[current_step];
+    Serial.printf(
+        "# Completed task %u/%u: %s\n",
+        static_cast<unsigned>(current_step + 1),
+        static_cast<unsigned>(kTowerSequenceLength),
+        tower_command_name(completed_step.command));
+
     ++current_step;
-    if (current_step >=
-        sizeof(kTowerSequence) / sizeof(kTowerSequence[0])) {
+    if (current_step >= kTowerSequenceLength) {
         demo_state = DemoState::COMPLETE;
         Serial.println("# Tower action sequence complete");
         return;
@@ -131,8 +163,8 @@ void service_arm_uart() {
     }
 
     if (status.code == STATUS_ACTION_COMPLETE &&
-        status.detail ==
-            static_cast<uint8_t>(kTowerSequence[current_step].action)) {
+        status.detail == static_cast<uint8_t>(
+            kTowerSequence[current_step].completion_detail)) {
         finish_current_step();
     }
 }

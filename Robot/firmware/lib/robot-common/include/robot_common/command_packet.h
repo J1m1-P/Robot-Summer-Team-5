@@ -29,6 +29,11 @@ typedef enum {
     CMD_TOWER_Z_DOWN,
     CMD_TOWER_X_LEFT,
     CMD_TOWER_X_RIGHT,
+    CMD_TOWER_HOME,
+    CMD_TOWER_ROTATE_VERTICAL,
+    CMD_TOWER_ROTATE_HORIZONTAL,
+    CMD_TOWER_OPEN_CLAW,
+    CMD_TOWER_CLOSE_CLAW,
     CMD_MAX
 } CommandOpcode;
 
@@ -41,7 +46,10 @@ typedef struct {
     //   Pi -> arm:         normalized visual steering error, roughly -1.0..1.0.
     //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
     //                       matching DrivetrainBodyVelocity.omega).
-    // Unused (0) for every other opcode.
+    // Tower stepper commands: requested travel in units of 100 mm. For
+    // example, 0.50 requests 50 mm and 0.30 requests 30 mm. Zero selects the
+    // command's legacy default travel.
+    // Unused (0) for all other opcodes.
     float value;
 } CommandPacket;
 
