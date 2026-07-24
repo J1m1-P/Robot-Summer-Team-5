@@ -18,6 +18,23 @@ Primary input: bounded body-frame velocity commands. Primary output: four signed
 PWM duty requests. Secondary outputs: lifecycle status, targets, measured wheel
 speeds, counts, and applied duty telemetry.
 
+> **SAFETY-CRITICAL — startup output hold:** Motor GPIOs power up in an
+> undefined/floating state. Every firmware entry point that drives a motor
+> (directly through `MotorDriver`, or through `Drivetrain`) must call
+> `drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG)` (declared in
+> `include/control/drivetrain/drivetrain.h`) as the *first statement* in
+> `setup()`, before `Serial.begin()`, `delay()`, or any UART/sensor init that
+> can block. Skipping this, or placing it after other setup work, leaves a
+> window where the robot can drive uncommanded at full power. This applies to
+> every current entry point that touches a motor — `src/main.cpp`,
+> `src/harnesses/drive_main.cpp`, `src/harnesses/drivetrain_test_main.cpp`,
+> `src/harnesses/calibration_main.cpp`, and `src/harnesses/tuning_main.cpp` —
+> and to any new harness, tuning tool, or test firmware added later. The only
+> current exception is `src/harnesses/tof_test_main.cpp`, which never drives a
+> motor GPIO at all. `drivetrain_init()` also calls this internally before
+> device init, but harnesses that drive motors without ever calling
+> `drivetrain_init()` (e.g. `tuning_main.cpp`) must call it directly.
+
 ## 2. System Context
 
 ```mermaid
