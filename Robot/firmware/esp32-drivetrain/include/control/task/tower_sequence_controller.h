@@ -27,7 +27,7 @@ esp_err_t tower_sequence_controller_init(
     UartLink *arm_uart);
 
 // Processes arm status packets and advances or times out the active action.
-void tower_sequence_controller_service(
+void tower_sequence_controller_update(
     TowerSequenceController *controller,
     uint32_t now_ms);
 

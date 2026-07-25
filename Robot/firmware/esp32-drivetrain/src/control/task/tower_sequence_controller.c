@@ -1,5 +1,5 @@
 /* Implements the drivetrain-side Tower demo sequence and status handling. */
-#include "control/tower_sequence_controller.h"
+#include "control/task/tower_sequence_controller.h"
 
 #include <stdio.h>
 
@@ -127,7 +127,7 @@ esp_err_t tower_sequence_controller_init(
     return error;
 }
 
-void tower_sequence_controller_service(
+void tower_sequence_controller_update(
     TowerSequenceController *controller,
     uint32_t now_ms) {
     if (controller == NULL || !controller->running) return;
