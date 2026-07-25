@@ -1,4 +1,4 @@
-/* Implements the drivetrain-side Tower demo sequence and status handling. */
+/* Implements the mixed drivetrain and arm Tower task sequence. */
 #include "control/task/tower_sequence_controller.h"
 
 #include <stdio.h>
@@ -7,26 +7,36 @@
 #include <robot_common/command_packet.h>
 #include <robot_common/status_packet.h>
 
-static const uint32_t kArmActionTimeoutMs = 15000;
+static const uint32_t kActionTimeoutMs = 15000;
 
-// Describes one command and the completion status expected from the arm.
+// Describes one action, which device runs it, and its value.
 typedef struct {
-    CommandOpcode command;
-    float command_value;
+    TaskDevice device;
+    union {
+        CommandOpcode arm;
+        TapeFollowingAction drivetrain;
+    } action;
+    float action_value;
 } TowerSequenceStep;
 
-// The sequence for tower building 
+// The sequence for the mixed Tower task
 static const TowerSequenceStep kTowerSequence[] = {
-    {CMD_TOWER_HOME, 0.0f},
-    {CMD_TOWER_ROTATE_VERTICAL, 0.0f},
-    {CMD_TOWER_OPEN_CLAW, 0.0f},
-    {CMD_TOWER_Z_UP, 0.50f},
-    {CMD_TOWER_ROTATE_HORIZONTAL, 0.0f},
-    {CMD_TOWER_Z_DOWN, 0.50f},
-    {CMD_TOWER_CLOSE_CLAW, 0.0f},
-    {CMD_TOWER_Z_UP, 0.50f},
-    {CMD_TOWER_ROTATE_VERTICAL, 0.0f},
-    {CMD_TOWER_Z_UP, 0.30f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_OPEN_CLAW}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_Z_DOWN}, 0.50f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_CLOSE_CLAW}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
+    {TASK_DEVICE_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
+    {TASK_DEVICE_DRIVETRAIN,
+     {.drivetrain = TAPE_FOLLOWING_ACTION_FOLLOW_DISTANCE},
+     1.0f},
+    {TASK_DEVICE_DRIVETRAIN,
+     {.drivetrain = TAPE_FOLLOWING_ACTION_ROTATE_CW_UNTIL_ALIGNED},
+     0.0f},
 };
 
 // The number of steps for this sequence
@@ -41,68 +51,80 @@ static void enter_fault(
     printf("# DEMO FAULT: %s (%s)\n", reason, esp_err_to_name(error));
 }
 
-// Sends one sequence command and starts its completion timeout.
+// Starts one sequence action and its completion timeout.
 static esp_err_t start_tower_step(
     TowerSequenceController *controller,
     size_t step_index) {
 
-    // Set up the currennt step and its information
+    // Set up the current step and its information
     const TowerSequenceStep *step = &kTowerSequence[step_index];
-    const CommandPacket command = {
-        .opcode = step->command,
-        .value = step->command_value,
-    };
 
-    // Send out the command to arm
-    const esp_err_t error = command_packet_send(controller->arm_uart, &command);
+    esp_err_t error = ESP_OK;
+    if (step->device == TASK_DEVICE_ARM) {
+        // Send out the command to arm
+        const CommandPacket command = {
+            .opcode = step->action.arm,
+            .value = step->action_value,
+        };
+        error = command_packet_send(controller->arm_uart, &command);
+    } else {
+        // Start the action on the drivetrain
+        error = tape_following_action_controller_init(
+            &controller->drivetrain_action_controller,
+            step->action.drivetrain,
+            step->action_value);
+    }
     if (error != ESP_OK) return error;
 
+    controller->active_device = step->device;
     controller->running = true;
-    controller->action_deadline_ms = millis() + kArmActionTimeoutMs;
+    controller->action_deadline_ms = millis() + kActionTimeoutMs;
     return ESP_OK;
 }
 
 // Consumes one arm status packet and handles faults or action completion.
-static void service_arm_uart(TowerSequenceController *controller) {
+static bool service_arm_uart(TowerSequenceController *controller) {
     
     // Update the UART mailbox
     const esp_err_t update_error = uart_link_update(controller->arm_uart);
     if (update_error != ESP_OK) {
         enter_fault(controller, "arm UART update failed", update_error);
-        return;
+        return false;
     }
 
     // Get the lastest UART message from arm 
     PacketFrame frame = {0};
     if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK ||
         !status_packet_is(&frame)) {
-        return;
+        return false;
     }
 
     // Decode the message 
     StatusPacket status = {0};
-    if (status_packet_decode(&frame, &status) != ESP_OK) return;
+    if (status_packet_decode(&frame, &status) != ESP_OK) return false;
 
     // Return if fault
     if (status.code == STATUS_FAULT) {
         enter_fault(controller, "arm reported a fault", ESP_FAIL);
+        return false;
+    }
+
+    return status.code == STATUS_ACTION_COMPLETE;
+}
+
+// Executes the next step after the current action completes.
+static void advance_sequence(TowerSequenceController *controller) {
+    ++controller->current_step;
+    if (controller->current_step >= kTowerSequenceLength) {
+        controller->running = false;
+        printf("# Tower task sequence complete\n");
         return;
     }
 
-    // Execute next step if complete
-    if (status.code == STATUS_ACTION_COMPLETE) {
-        ++controller->current_step;
-        if (controller->current_step >= kTowerSequenceLength) {
-            controller->running = false;
-            printf("# Tower action sequence complete\n");
-            return;
-        }
-
-        const esp_err_t error =
-            start_tower_step(controller, controller->current_step);
-        if (error != ESP_OK) {
-            enter_fault(controller, "failed to start next Tower action", error);
-        }
+    const esp_err_t error =
+        start_tower_step(controller, controller->current_step);
+    if (error != ESP_OK) {
+        enter_fault(controller, "failed to start next task action", error);
     }
 }
 
@@ -132,10 +154,21 @@ void tower_sequence_controller_update(
     uint32_t now_ms) {
     if (controller == NULL || !controller->running) return;
 
-    service_arm_uart(controller);
+    // Check the active device for action completion
+    const bool action_complete =
+        controller->active_device == TASK_DEVICE_ARM
+        ? service_arm_uart(controller)
+        : tape_following_action_controller_update(
+            &controller->drivetrain_action_controller);
     if (!controller->running) return;
 
+    // Execute next step if complete
+    if (action_complete) {
+        advance_sequence(controller);
+        return;
+    }
+
     if ((int32_t)(now_ms - controller->action_deadline_ms) >= 0) {
-        enter_fault(controller, "arm action timed out", ESP_ERR_TIMEOUT);
+        enter_fault(controller, "task action timed out", ESP_ERR_TIMEOUT);
     }
 }

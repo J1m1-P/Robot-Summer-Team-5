@@ -9,7 +9,7 @@
 #include "config/tof_config.h"
 #include "config/uart_link_config.h"
 #include "control/time_of_flight/tof_manager.h"
-#include "control/tower_action_controller.h"
+#include "control/task/tower_action_controller.h"
 #include "drivers/stepper_driver.h"
 
 namespace {

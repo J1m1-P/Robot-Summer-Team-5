@@ -1,5 +1,5 @@
 /* Implements coordinated Tower servo and stepper command handling. */
-#include "control/tower_action_controller.h"
+#include "control/task/tower_action_controller.h"
 
 #include <Arduino.h>
 #include <math.h>

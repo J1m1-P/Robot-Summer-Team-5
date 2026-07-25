@@ -43,9 +43,12 @@ void setup() {
     }
 
     // Tape Following task init
-    err = tape_following_sequence_controller_init(&tape_following_sequence_controller);
+    err = tape_following_sequence_controller_init(
+        &tape_following_sequence_controller);
     if (err != ESP_OK) {
-        Serial.printf("# FAULT: Tape Following initialization failed (%s)\n", esp_err_to_name(err));
+        Serial.printf(
+            "# FAULT: Tape Following initialization failed (%s)\n",
+            esp_err_to_name(err));
         return;
     }
 }
