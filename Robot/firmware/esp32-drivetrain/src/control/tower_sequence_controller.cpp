@@ -48,15 +48,16 @@ constexpr TowerSequenceStep kTowerSequence[] = {
      "# 10: Raising Tower claw 30 mm"},
 };
 
-constexpr size_t kTowerSequenceLength =
+static constexpr size_t kTowerSequenceLength =
     sizeof(kTowerSequence) / sizeof(kTowerSequence[0]);
 
 // Compares millisecond deadlines safely across millis() wraparound.
-bool deadline_reached(uint32_t now, uint32_t deadline) {
+static bool deadline_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
 }
 
 // Stops the sequence and reports why it can no longer continue.
+// may not need, no choice if fault detected
 void enter_fault(
     TowerSequenceController *controller,
     const char *reason,
@@ -66,6 +67,7 @@ void enter_fault(
 }
 
 // Returns a short diagnostic name for a Tower command.
+// Probably don't need
 const char *tower_command_name(CommandOpcode command) {
     switch (command) {
         case CMD_TOWER_HOME:
@@ -144,6 +146,7 @@ void finish_current_step(TowerSequenceController *controller) {
 
 // Consumes one arm status packet and handles faults or action completion.
 void service_arm_uart(TowerSequenceController *controller) {
+    // Check if the packet is a fault
     const esp_err_t update_error = uart_link_update(controller->arm_uart);
     if (update_error != ESP_OK) {
         enter_fault(controller, "arm UART update failed", update_error);
