@@ -15,28 +15,33 @@ TowerSequenceController tower_sequence_controller = {};
 
 }  // namespace
 
-// Holds the drivetrain safely, initializes communication, and starts the demo.
 void setup() {
-    // No drivetrain lifecycle is started for this Tower-only hardware test.
-    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
-    Serial.begin(115200);
-    delay(5000);
-    Serial.println("# Starting Tower-only action sequence");
+    // Must be called first, prevents weird motor behavior at start up
+    drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
 
-    const esp_err_t uart_error =
-        uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG);
-    if (uart_error != ESP_OK) {
-        Serial.printf(
-            "# DEMO FAULT: arm UART initialization failed (%s)\n",
-            esp_err_to_name(uart_error));
+    Serial.begin(115200);
+    
+    // Delay(5000) later need to be change to start button action
+    delay(5000); 
+
+    Serial.println("# Starting Task Sequence");
+
+    // UART init
+    // Put link and config for the MCU you are communicating to
+    esp_err_t err = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG); 
+    if (err != ESP_OK) {
+        Serial.printf("# FAULT: arm UART initialization failed (%s)\n", esp_err_to_name(uart_error));
         return;
     }
 
-    (void)tower_sequence_controller_init(
-        &tower_sequence_controller, &arm_uart);
+    // Tower init
+    err = tower_sequence_controller_init(&tower_sequence_controller, &arm_uart);
+    if (err != ESP_OK) {
+        Serial.printf("# FAULT: Tower initialization failed (%s)\n", esp_err_to_name(uart_error));
+        return;
+    }
 }
 
-// Services the active Tower action sequence without enabling the drivetrain.
 void loop() {
     tower_sequence_controller_service(
         &tower_sequence_controller, millis());

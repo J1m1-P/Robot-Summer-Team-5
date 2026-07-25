@@ -25,15 +25,19 @@ typedef enum {
     CMD_FLASH,
     CMD_DONE,
     CMD_RESUME,   // continue an interrupted sweep/drive routine (reactive detector)
+
+
+    // Tower Tasks
+    CMD_TOWER_HOME,
     CMD_TOWER_Z_UP,
     CMD_TOWER_Z_DOWN,
     CMD_TOWER_X_LEFT,
     CMD_TOWER_X_RIGHT,
-    CMD_TOWER_HOME,
     CMD_TOWER_ROTATE_VERTICAL,
     CMD_TOWER_ROTATE_HORIZONTAL,
     CMD_TOWER_OPEN_CLAW,
     CMD_TOWER_CLOSE_CLAW,
+
     CMD_MAX
 } CommandOpcode;
 
