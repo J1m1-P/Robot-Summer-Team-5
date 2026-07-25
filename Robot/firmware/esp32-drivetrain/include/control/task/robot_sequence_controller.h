@@ -9,7 +9,7 @@
 
 #include <robot_common/uart_link.h>
 
-#include "control/task/tape_following_action_controller.h"
+#include "control/task/movement_action_controller.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,7 +17,7 @@ extern "C" {
 
 typedef struct {
     UartLink *arm_uart;
-    TapeFollowingActionController tape_action_controller;
+    MovementActionController movement_action_controller;
     size_t current_step;
     uint32_t step_deadline_ms;
     bool running;

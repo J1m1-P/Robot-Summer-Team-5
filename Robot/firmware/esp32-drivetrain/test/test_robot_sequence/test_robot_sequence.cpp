@@ -126,7 +126,7 @@ void setUp() {
 
 void tearDown() {}
 
-void test_sequence_runs_tape_then_all_tower_then_final_tape() {
+void test_sequence_runs_tape_then_tower_then_movement() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
 
@@ -134,9 +134,18 @@ void test_sequence_runs_tape_then_all_tower_then_final_tape() {
         ESP_OK,
         robot_sequence_controller_init(&controller, &arm_uart));
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    TEST_ASSERT_EQUAL(
+        MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE,
+        controller.movement_action_controller.action);
+    TEST_ASSERT_EQUAL_FLOAT(
+        1.0f,
+        controller.movement_action_controller.action_value);
 
     robot_sequence_controller_update(&controller, 100);
     TEST_ASSERT_EQUAL_UINT32(1, controller.current_step);
+    TEST_ASSERT_EQUAL(
+        MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED,
+        controller.movement_action_controller.action);
 
     robot_sequence_controller_update(&controller, 101);
     TEST_ASSERT_EQUAL_UINT32(2, controller.current_step);
@@ -175,9 +184,25 @@ void test_sequence_runs_tape_then_all_tower_then_final_tape() {
 
     TEST_ASSERT_EQUAL_UINT32(12, controller.current_step);
     TEST_ASSERT_TRUE(controller.running);
+    TEST_ASSERT_EQUAL(
+        MOVEMENT_ACTION_GO_FORWARD,
+        controller.movement_action_controller.action);
+    TEST_ASSERT_EQUAL_FLOAT(
+        1.0f,
+        controller.movement_action_controller.action_value);
 
     robot_sequence_controller_update(&controller, 123);
     TEST_ASSERT_EQUAL_UINT32(13, controller.current_step);
+    TEST_ASSERT_TRUE(controller.running);
+    TEST_ASSERT_EQUAL(
+        MOVEMENT_ACTION_ROTATE,
+        controller.movement_action_controller.action);
+    TEST_ASSERT_EQUAL_FLOAT(
+        90.0f,
+        controller.movement_action_controller.action_value);
+
+    robot_sequence_controller_update(&controller, 124);
+    TEST_ASSERT_EQUAL_UINT32(14, controller.current_step);
     TEST_ASSERT_FALSE(controller.running);
 }
 
@@ -212,7 +237,7 @@ void test_missing_arm_completion_times_out() {
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_sequence_runs_tape_then_all_tower_then_final_tape);
+    RUN_TEST(test_sequence_runs_tape_then_tower_then_movement);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_missing_arm_completion_times_out);
     return UNITY_END();

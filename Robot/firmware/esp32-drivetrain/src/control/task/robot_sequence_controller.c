@@ -10,14 +10,14 @@
 static const uint32_t kActionTimeoutMs = 15000;
 
 typedef enum {
-    ROBOT_STEP_TAPE = 0,
+    ROBOT_STEP_MOVEMENT = 0,
     ROBOT_STEP_ARM,
 } RobotStepType;
 
 typedef struct {
     RobotStepType type;
     union {
-        TapeFollowingAction tape;
+        MovementAction movement;
         CommandOpcode arm;
     } action;
     float action_value;
@@ -26,8 +26,8 @@ typedef struct {
 // Actual Robot Sequence (To be finished)
 static const RobotSequenceStep kRobotSequence[] = {
     // Tape Follow: From start to clear the ramp
-    {ROBOT_STEP_TAPE, {.tape = TAPE_FOLLOWING_ACTION_FOLLOW_DISTANCE}, 1.0f},
-    {ROBOT_STEP_TAPE, {.tape = TAPE_FOLLOWING_ACTION_ROTATE_CW_UNTIL_ALIGNED}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE}, 1.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 0.0f},
 
     // Tower: Picking up the pieces
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
@@ -41,8 +41,9 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
 
-    // Tape Follow: From tower pieces to tower base
-    {ROBOT_STEP_TAPE, {.tape = TAPE_FOLLOWING_ACTION_STEP_3}, 0.0f},
+    // Movement: From tower pieces to tower base
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
 };
 
 static const size_t kRobotSequenceLength =
@@ -67,10 +68,10 @@ static esp_err_t start_robot_step(
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
-    if (step->type == ROBOT_STEP_TAPE) {
-        error = tape_following_action_controller_init(
-            &controller->tape_action_controller,
-            step->action.tape,
+    if (step->type == ROBOT_STEP_MOVEMENT) {
+        error = movement_action_controller_init(
+            &controller->movement_action_controller,
+            step->action.movement,
             step->action_value);
     } else {
         const CommandPacket command = {
@@ -155,9 +156,9 @@ void robot_sequence_controller_update(
 
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
-    const bool step_complete = step->type == ROBOT_STEP_TAPE
-        ? tape_following_action_controller_update(
-            &controller->tape_action_controller)
+    const bool step_complete = step->type == ROBOT_STEP_MOVEMENT
+        ? movement_action_controller_update(
+            &controller->movement_action_controller)
         : service_arm_uart(controller);
     if (!controller->running) return;
 
