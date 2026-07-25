@@ -29,10 +29,6 @@ void setup() {
     delay(1000);
     Serial.println("# Starting arm demo firmware");
 
-    pinMode(PIN_LOC_EN, OUTPUT);
-    digitalWrite(PIN_LOC_EN, LOW);
-    Serial.println("# Locator retracted");
-
     // Bring up the command path before optional sensing. A missing ToF sensor
     // must not prevent the arm from receiving and executing Tower commands.
 
@@ -41,7 +37,11 @@ void setup() {
         &drivetrain_uart, &DRIVETRAIN_UART_LINK_CONFIG));
     Serial.println("# Arm UART ready");
 
-    
+    // Locator init
+    pinMode(PIN_LOC_EN, OUTPUT);
+    digitalWrite(PIN_LOC_EN, LOW);
+    Serial.println("# Locator retracted");
+
     // Tower init
     ESP_ERROR_CHECK(stepper_init(&tower_x_stepper, towerXConfig));
     ESP_ERROR_CHECK(stepper_init(&tower_z_stepper, towerZConfig));
@@ -54,7 +54,6 @@ void setup() {
         "# Tower X/Z startup positions are the manually adjusted home");
     Serial.println("# Tower servos and steppers ready");
     
-
     // TOF init 
     esp_err_t tof_error = tof_manager_init(&tof_manager, &ARM_TOF_CONFIG);
     if (tof_error == ESP_OK) {
@@ -65,7 +64,6 @@ void setup() {
         Serial.printf("# ToF unavailable (%s); arm commands remain enabled\n",
                       esp_err_to_name(tof_error));
     }
-
 
     // Optical init
     const PmwPinConfig pmw_pins = {
@@ -94,7 +92,7 @@ void loop() {
     }
 
     const uint32_t now_ms = millis();
-    const bool reporting_completion = tower_action_controller_service_status(
+    const bool reporting_completion = tower_action_controller_update(
         &tower_action_controller, now_ms);
     if (!reporting_completion) {
         (void)odometry_link_producer_update(

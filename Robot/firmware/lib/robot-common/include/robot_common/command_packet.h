@@ -51,8 +51,7 @@ typedef struct {
     //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
     //                       matching DrivetrainBodyVelocity.omega).
     // Tower stepper commands: requested travel in units of 100 mm. For
-    // example, 0.50 requests 50 mm and 0.30 requests 30 mm. Zero selects the
-    // command's legacy default travel.
+    // example, 0.50 requests 50 mm and 0.30 requests 30 mm.
     // Unused (0) for all other opcodes.
     float value;
 } CommandPacket;

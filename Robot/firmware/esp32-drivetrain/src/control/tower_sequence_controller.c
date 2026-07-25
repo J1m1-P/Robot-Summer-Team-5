@@ -13,21 +13,20 @@ static const uint32_t kArmActionTimeoutMs = 15000;
 typedef struct {
     CommandOpcode command;
     float command_value;
-    ActionStatusDetail completion_detail;
 } TowerSequenceStep;
 
 // The sequence for tower building 
 static const TowerSequenceStep kTowerSequence[] = {
-    {CMD_TOWER_HOME, 0.0f, STATUS_DETAIL_TOWER_HOME},
-    {CMD_TOWER_ROTATE_VERTICAL, 0.0f, STATUS_DETAIL_TOWER_VERTICAL},
-    {CMD_TOWER_OPEN_CLAW, 0.0f, STATUS_DETAIL_TOWER_CLAW_OPEN},
-    {CMD_TOWER_Z_UP, 0.50f, STATUS_DETAIL_TOWER_Z_RAISED},
-    {CMD_TOWER_ROTATE_HORIZONTAL, 0.0f, STATUS_DETAIL_TOWER_HORIZONTAL},
-    {CMD_TOWER_Z_DOWN, 0.50f, STATUS_DETAIL_TOWER_Z_LOWERED},
-    {CMD_TOWER_CLOSE_CLAW, 0.0f, STATUS_DETAIL_TOWER_CLAW_CLOSED},
-    {CMD_TOWER_Z_UP, 0.50f, STATUS_DETAIL_TOWER_Z_RAISED},
-    {CMD_TOWER_ROTATE_VERTICAL, 0.0f, STATUS_DETAIL_TOWER_VERTICAL},
-    {CMD_TOWER_Z_UP, 0.30f, STATUS_DETAIL_TOWER_Z_RAISED},
+    {CMD_TOWER_HOME, 0.0f},
+    {CMD_TOWER_ROTATE_VERTICAL, 0.0f},
+    {CMD_TOWER_OPEN_CLAW, 0.0f},
+    {CMD_TOWER_Z_UP, 0.50f},
+    {CMD_TOWER_ROTATE_HORIZONTAL, 0.0f},
+    {CMD_TOWER_Z_DOWN, 0.50f},
+    {CMD_TOWER_CLOSE_CLAW, 0.0f},
+    {CMD_TOWER_Z_UP, 0.50f},
+    {CMD_TOWER_ROTATE_VERTICAL, 0.0f},
+    {CMD_TOWER_Z_UP, 0.30f},
 };
 
 // The number of steps for this sequence
@@ -91,9 +90,7 @@ static void service_arm_uart(TowerSequenceController *controller) {
     }
 
     // Execute next step if complete
-    if (status.code == STATUS_ACTION_COMPLETE &&
-        status.detail == (uint8_t)
-            kTowerSequence[controller->current_step].completion_detail) {
+    if (status.code == STATUS_ACTION_COMPLETE) {
         ++controller->current_step;
         if (controller->current_step >= kTowerSequenceLength) {
             controller->running = false;
