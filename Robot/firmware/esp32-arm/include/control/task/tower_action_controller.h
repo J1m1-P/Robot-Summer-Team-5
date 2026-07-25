@@ -16,6 +16,7 @@ struct TowerActionController {
     bool action_active;
     bool action_is_timed;
     uint32_t action_complete_ms;
+    uint8_t active_command_detail;
     bool completion_pending;
     uint32_t repeat_status_until_ms;
     uint32_t last_status_ms;

@@ -12,6 +12,7 @@ extern "C" {
 typedef enum {
     TAPE_FOLLOWING_ACTION_FOLLOW_DISTANCE = 0,
     TAPE_FOLLOWING_ACTION_ROTATE_CW_UNTIL_ALIGNED,
+    TAPE_FOLLOWING_ACTION_STEP_3,
 } TapeFollowingAction;
 
 typedef struct {

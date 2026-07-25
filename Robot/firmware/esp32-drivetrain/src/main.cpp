@@ -1,4 +1,4 @@
-/* Starts and services the drivetrain-side task sequences. */
+/* Starts and services the ordered robot task sequence. */
 #include <Arduino.h>
 
 #include <robot_common/uart_link.h>
@@ -6,14 +6,12 @@
 #include "config/communication/uart_link_config.h"
 #include "config/drivetrain/drivetrain_config.h"
 #include "control/drivetrain/drivetrain.h"
-#include "control/task/tape_following_sequence_controller.h"
-#include "control/task/tower_sequence_controller.h"
+#include "control/task/robot_sequence_controller.h"
 
 namespace {
 
 UartLink arm_uart = {};
-TowerSequenceController tower_sequence_controller = {};
-TapeFollowingSequenceController tape_following_sequence_controller = {};
+RobotSequenceController robot_sequence_controller = {};
 
 }  // namespace
 
@@ -35,28 +33,19 @@ void setup() {
         return;
     }
 
-    // Tower Building task init
-    err = tower_sequence_controller_init(&tower_sequence_controller, &arm_uart);
-    if (err != ESP_OK) {
-        Serial.printf("# FAULT: Tower initialization failed (%s)\n", esp_err_to_name(err));
-        return;
-    }
-
-    // Tape Following task init
-    err = tape_following_sequence_controller_init(
-        &tape_following_sequence_controller);
+    // Robot task sequence init
+    err = robot_sequence_controller_init(&robot_sequence_controller, &arm_uart);
     if (err != ESP_OK) {
         Serial.printf(
-            "# FAULT: Tape Following initialization failed (%s)\n",
+            "# FAULT: Robot sequence initialization failed (%s)\n",
             esp_err_to_name(err));
         return;
     }
 }
 
 void loop() {
-    tower_sequence_controller_update(
-        &tower_sequence_controller, millis());
-    tape_following_sequence_controller_update(
-        &tape_following_sequence_controller);
+    robot_sequence_controller_update(
+        &robot_sequence_controller,
+        millis());
     delay(1);
 }

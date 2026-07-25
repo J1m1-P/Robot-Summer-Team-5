@@ -102,6 +102,9 @@ void start_tower_action(
     controller->completion_pending = false;
     controller->active_stepper = nullptr;
     controller->action_is_timed = false;
+    controller->active_command_detail =
+        static_cast<uint8_t>(
+            tower_action_status_detail(command.opcode));
     float distance_mm = 0.0f;
     const char *start_message = nullptr;
 
@@ -253,7 +256,7 @@ bool tower_action_controller_update(
             send_status(
                 controller->drivetrain_uart,
                 STATUS_ACTION_COMPLETE,
-                STATUS_DETAIL_NONE);
+                controller->active_command_detail);
             Serial.println("# Tower action complete");
             return true;
         }
@@ -271,7 +274,7 @@ bool tower_action_controller_update(
         send_status(
             controller->drivetrain_uart,
             STATUS_ACTION_COMPLETE,
-            STATUS_DETAIL_NONE);
+            controller->active_command_detail);
     }
 
     return true;

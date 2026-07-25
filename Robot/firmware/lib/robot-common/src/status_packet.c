@@ -11,6 +11,31 @@
 _Static_assert(STATUS_PACKET_PAYLOAD_SIZE <= PACKET_MAX_PAYLOAD_SIZE,
                "Status packet exceeds UART payload capacity");
 
+ActionStatusDetail tower_action_status_detail(CommandOpcode command) {
+    switch (command) {
+        case CMD_TOWER_HOME:
+            return STATUS_DETAIL_TOWER_HOME;
+        case CMD_TOWER_Z_UP:
+            return STATUS_DETAIL_TOWER_Z_RAISED;
+        case CMD_TOWER_Z_DOWN:
+            return STATUS_DETAIL_TOWER_Z_LOWERED;
+        case CMD_TOWER_X_LEFT:
+            return STATUS_DETAIL_TOWER_X_LEFT;
+        case CMD_TOWER_X_RIGHT:
+            return STATUS_DETAIL_TOWER_X_RIGHT;
+        case CMD_TOWER_ROTATE_VERTICAL:
+            return STATUS_DETAIL_TOWER_VERTICAL;
+        case CMD_TOWER_ROTATE_HORIZONTAL:
+            return STATUS_DETAIL_TOWER_HORIZONTAL;
+        case CMD_TOWER_OPEN_CLAW:
+            return STATUS_DETAIL_TOWER_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_CLAW:
+            return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        default:
+            return STATUS_DETAIL_NONE;
+    }
+}
+
 // Serializes a valid status and sends it as a status frame.
 esp_err_t status_packet_send(UartLink *link, const StatusPacket *packet) {
     if (link == NULL || packet == NULL) return ESP_ERR_INVALID_ARG;

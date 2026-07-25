@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <robot_common/command_packet.h>
 #include <robot_common/uart_link.h>
 
 #ifdef __cplusplus
@@ -41,6 +42,9 @@ typedef enum {
     STATUS_DETAIL_TOWER_CLAW_OPEN,
     STATUS_DETAIL_TOWER_CLAW_CLOSED,
 } ActionStatusDetail;
+
+// Maps a Tower command to the completion detail shared by both ESPs.
+ActionStatusDetail tower_action_status_detail(CommandOpcode command);
 
 // Represents one decoded status: a code plus an optional detail byte.
 typedef struct {

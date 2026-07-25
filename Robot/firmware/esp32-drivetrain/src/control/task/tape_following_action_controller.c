@@ -9,7 +9,7 @@ esp_err_t tape_following_action_controller_init(
     TapeFollowingAction action,
     float action_value) {
     if (controller == NULL ||
-        action > TAPE_FOLLOWING_ACTION_ROTATE_CW_UNTIL_ALIGNED) {
+        action > TAPE_FOLLOWING_ACTION_STEP_3) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -34,6 +34,10 @@ bool tape_following_action_controller_update(
 
         case TAPE_FOLLOWING_ACTION_ROTATE_CW_UNTIL_ALIGNED:
             printf("# PLACEHOLDER: Rotate CW until aligned with tape again\n");
+            break;
+
+        case TAPE_FOLLOWING_ACTION_STEP_3:
+            printf("# PLACEHOLDER: Tape Following step 3\n");
             break;
 
         default:
