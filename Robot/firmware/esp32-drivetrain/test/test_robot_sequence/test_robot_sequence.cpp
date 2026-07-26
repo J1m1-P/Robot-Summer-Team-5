@@ -126,29 +126,24 @@ void setUp() {
 
 void tearDown() {}
 
-void test_sequence_runs_tape_then_tower_then_movement() {
+void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
 
     TEST_ASSERT_EQUAL(
         ESP_OK,
         robot_sequence_controller_init(&controller, &arm_uart));
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
-    TEST_ASSERT_EQUAL(
-        MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE,
-        controller.movement_action_controller.action);
-    TEST_ASSERT_EQUAL_FLOAT(
-        1.0f,
-        controller.movement_action_controller.action_value);
+    TEST_ASSERT_TRUE(controller.running);
+    TEST_ASSERT_TRUE(controller.waiting_for_arm_ready);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
     robot_sequence_controller_update(&controller, 100);
-    TEST_ASSERT_EQUAL_UINT32(1, controller.current_step);
-    TEST_ASSERT_EQUAL(
-        MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED,
-        controller.movement_action_controller.action);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
     robot_sequence_controller_update(&controller, 101);
-    TEST_ASSERT_EQUAL_UINT32(2, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
     TEST_ASSERT_EQUAL(kExpectedTowerCommands[0], sent_commands[0]);
 
@@ -162,7 +157,7 @@ void test_sequence_runs_tape_then_tower_then_movement() {
         robot_sequence_controller_update(
             &controller,
             static_cast<uint32_t>(102 + index * 2));
-        TEST_ASSERT_EQUAL_UINT32(2 + index, controller.current_step);
+        TEST_ASSERT_EQUAL_UINT32(index, controller.current_step);
 
         queue_status(
             STATUS_ACTION_COMPLETE,
@@ -174,7 +169,7 @@ void test_sequence_runs_tape_then_tower_then_movement() {
 
         if (index + 1 < sizeof(kExpectedTowerCommands) /
                 sizeof(kExpectedTowerCommands[0])) {
-            TEST_ASSERT_EQUAL_UINT32(3 + index, controller.current_step);
+            TEST_ASSERT_EQUAL_UINT32(1 + index, controller.current_step);
             TEST_ASSERT_EQUAL_UINT32(index + 2, sent_command_count);
             TEST_ASSERT_EQUAL(
                 kExpectedTowerCommands[index + 1],
@@ -182,27 +177,7 @@ void test_sequence_runs_tape_then_tower_then_movement() {
         }
     }
 
-    TEST_ASSERT_EQUAL_UINT32(12, controller.current_step);
-    TEST_ASSERT_TRUE(controller.running);
-    TEST_ASSERT_EQUAL(
-        MOVEMENT_ACTION_GO_FORWARD,
-        controller.movement_action_controller.action);
-    TEST_ASSERT_EQUAL_FLOAT(
-        1.0f,
-        controller.movement_action_controller.action_value);
-
-    robot_sequence_controller_update(&controller, 123);
-    TEST_ASSERT_EQUAL_UINT32(13, controller.current_step);
-    TEST_ASSERT_TRUE(controller.running);
-    TEST_ASSERT_EQUAL(
-        MOVEMENT_ACTION_ROTATE,
-        controller.movement_action_controller.action);
-    TEST_ASSERT_EQUAL_FLOAT(
-        90.0f,
-        controller.movement_action_controller.action_value);
-
-    robot_sequence_controller_update(&controller, 124);
-    TEST_ASSERT_EQUAL_UINT32(14, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(10, controller.current_step);
     TEST_ASSERT_FALSE(controller.running);
 }
 
@@ -213,10 +188,10 @@ void test_arm_fault_stops_sequence() {
         ESP_OK,
         robot_sequence_controller_init(&controller, &arm_uart));
 
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
     robot_sequence_controller_update(&controller, 100);
-    robot_sequence_controller_update(&controller, 101);
     queue_status(STATUS_FAULT, STATUS_DETAIL_TOWER_HOME);
-    robot_sequence_controller_update(&controller, 102);
+    robot_sequence_controller_update(&controller, 101);
 
     TEST_ASSERT_FALSE(controller.running);
 }
@@ -228,16 +203,16 @@ void test_missing_arm_completion_times_out() {
         ESP_OK,
         robot_sequence_controller_init(&controller, &arm_uart));
 
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
     robot_sequence_controller_update(&controller, 100);
-    robot_sequence_controller_update(&controller, 101);
-    robot_sequence_controller_update(&controller, 15102);
+    robot_sequence_controller_update(&controller, 15100);
 
     TEST_ASSERT_FALSE(controller.running);
 }
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_sequence_runs_tape_then_tower_then_movement);
+    RUN_TEST(test_sequence_waits_for_arm_then_runs_enabled_tower_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_missing_arm_completion_times_out);
     return UNITY_END();

@@ -20,6 +20,7 @@ void setup() {
     drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
 
     Serial.begin(115200);
+    Serial.println("Starting...");
     
     // Delay(5000) later need to be change to start button action
     delay(5000); 

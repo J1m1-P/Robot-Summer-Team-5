@@ -25,9 +25,9 @@ typedef struct {
 
 // Actual Robot Sequence (To be finished)
 static const RobotSequenceStep kRobotSequence[] = {
-    // Tape Follow: From start to clear the ramp
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE}, 1.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 0.0f},
+    // Tape Follow: From start to after the ramp
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE}, 1.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 0.0f},
 
     // Tower: Picking up the pieces
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
@@ -42,8 +42,8 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
 
     // Movement: From tower pieces to tower base
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
 };
 
 static const size_t kRobotSequenceLength =
@@ -59,6 +59,64 @@ static void enter_fault(
     esp_err_t error) {
     controller->running = false;
     printf("# Robot sequence FAULT: %s (%s)\n", reason, esp_err_to_name(error));
+}
+
+static esp_err_t start_robot_step(
+    RobotSequenceController *controller,
+    size_t step_index,
+    uint32_t now_ms);
+
+static bool service_arm_uart(
+    RobotSequenceController *controller,
+    uint32_t now_ms) {
+    const esp_err_t update_error = uart_link_update(controller->arm_uart);
+    if (update_error != ESP_OK) {
+        enter_fault(controller, "arm UART update failed", update_error);
+        return false;
+    }
+
+    PacketFrame frame = {0};
+    if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK ||
+        !status_packet_is(&frame)) {
+        return false;
+    }
+
+    StatusPacket status = {0};
+    if (status_packet_decode(&frame, &status) != ESP_OK) return false;
+    if (status.code == STATUS_FAULT) {
+        enter_fault(controller, "arm reported a fault", ESP_FAIL);
+        return false;
+    }
+
+    if (controller->waiting_for_arm_ready) {
+        if (status.code != STATUS_ACTION_COMPLETE ||
+            status.detail != STATUS_DETAIL_NONE) {
+            return false;
+        }
+
+        controller->waiting_for_arm_ready = false;
+        const esp_err_t start_error = start_robot_step(
+            controller,
+            controller->current_step,
+            now_ms);
+        if (start_error != ESP_OK) {
+            enter_fault(
+                controller,
+                "failed to start first robot step",
+                start_error);
+        } else {
+            printf("# Arm ready; robot sequence started\n");
+        }
+        return false;
+    }
+
+    if (status.code != STATUS_ACTION_COMPLETE) return false;
+
+    const RobotSequenceStep *step =
+        &kRobotSequence[controller->current_step];
+    return step->type == ROBOT_STEP_ARM &&
+           status.detail ==
+               (uint8_t)tower_action_status_detail(step->action.arm);
 }
 
 static esp_err_t start_robot_step(
@@ -87,34 +145,6 @@ static esp_err_t start_robot_step(
     return ESP_OK;
 }
 
-static bool service_arm_uart(RobotSequenceController *controller) {
-    const esp_err_t update_error = uart_link_update(controller->arm_uart);
-    if (update_error != ESP_OK) {
-        enter_fault(controller, "arm UART update failed", update_error);
-        return false;
-    }
-
-    PacketFrame frame = {0};
-    if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK ||
-        !status_packet_is(&frame)) {
-        return false;
-    }
-
-    StatusPacket status = {0};
-    if (status_packet_decode(&frame, &status) != ESP_OK) return false;
-    if (status.code == STATUS_FAULT) {
-        enter_fault(controller, "arm reported a fault", ESP_FAIL);
-        return false;
-    }
-    if (status.code != STATUS_ACTION_COMPLETE) return false;
-
-    const RobotSequenceStep *step =
-        &kRobotSequence[controller->current_step];
-    return step->type == ROBOT_STEP_ARM &&
-           status.detail ==
-               (uint8_t)tower_action_status_detail(step->action.arm);
-}
-
 static void advance_sequence(
     RobotSequenceController *controller,
     uint32_t now_ms) {
@@ -141,12 +171,10 @@ esp_err_t robot_sequence_controller_init(
 
     *controller = (RobotSequenceController){0};
     controller->arm_uart = arm_uart;
-
-    const esp_err_t error = start_robot_step(controller, 0, millis());
-    if (error != ESP_OK) {
-        enter_fault(controller, "failed to start robot sequence", error);
-    }
-    return error;
+    controller->waiting_for_arm_ready = true;
+    controller->running = true;
+    printf("# Waiting for arm controller\n");
+    return ESP_OK;
 }
 
 void robot_sequence_controller_update(
@@ -154,12 +182,17 @@ void robot_sequence_controller_update(
     uint32_t now_ms) {
     if (controller == NULL || !controller->running) return;
 
+    if (controller->waiting_for_arm_ready) {
+        (void)service_arm_uart(controller, now_ms);
+        return;
+    }
+
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
     const bool step_complete = step->type == ROBOT_STEP_MOVEMENT
         ? movement_action_controller_update(
             &controller->movement_action_controller)
-        : service_arm_uart(controller);
+        : service_arm_uart(controller, now_ms);
     if (!controller->running) return;
 
     if (step_complete) {

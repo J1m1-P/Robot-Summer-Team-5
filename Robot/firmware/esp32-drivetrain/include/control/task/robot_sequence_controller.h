@@ -21,9 +21,10 @@ typedef struct {
     size_t current_step;
     uint32_t step_deadline_ms;
     bool running;
+    bool waiting_for_arm_ready;
 } RobotSequenceController;
 
-// Connects the action paths and starts the first robot step.
+// Connects the action paths and waits for the arm before starting the sequence.
 esp_err_t robot_sequence_controller_init(
     RobotSequenceController *controller,
     UartLink *arm_uart);
