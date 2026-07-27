@@ -43,8 +43,6 @@ void setup() {
     Serial.println("# Locator retracted");
 
     // Tower init
-    ESP_ERROR_CHECK(stepper_init(&tower_x_stepper, towerXConfig));
-    ESP_ERROR_CHECK(stepper_init(&tower_z_stepper, towerZConfig));
     tower_action_controller_init(
         &tower_action_controller,
         &drivetrain_uart,

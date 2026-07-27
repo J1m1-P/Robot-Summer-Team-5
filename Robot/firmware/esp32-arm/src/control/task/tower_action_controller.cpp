@@ -26,38 +26,47 @@ ServoDriver tower_middle_servo = {};
 ServoDriver tower_right_servo = {};
 
 // Signed subtraction keeps this comparison valid across millis() wraparound.
-bool deadline_reached(uint32_t now, uint32_t deadline) {
+static bool deadline_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
 }
 
-esp_err_t initialize_tower_servos() {
+static esp_err_t initialize_tower_motors(
+    StepperDriver *tower_x_stepper,
+    StepperDriver *tower_z_stepper) {
     esp_err_t error =
         servo_init(&tower_rotate_servo, towerRotateServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
+    servo_set_position_by_name(&tower_rotate_servo, "horizontal");
 
     error = servo_init(&tower_left_servo, towerLeftServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_left_servo, SERVO_POSITION_B);
+    servo_set_position_by_name(&tower_left_servo, "close");
 
     error = servo_init(&tower_middle_servo, towerMiddleServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_middle_servo, SERVO_POSITION_B);
+    servo_set_position_by_name(&tower_middle_servo, "close");
 
     error = servo_init(&tower_right_servo, towerRightServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_right_servo, SERVO_POSITION_B);
+    servo_set_position_by_name(&tower_right_servo, "close");
+
+    error = stepper_init(tower_x_stepper, towerXConfig);
+    if (error != ESP_OK) return error;
+
+    error = stepper_init(tower_z_stepper, towerZConfig);
+    if (error != ESP_OK) return error;
+
     return ESP_OK;
 }
 
-void set_all_claws(ServoPosition position) {
-    servo_set_position(&tower_left_servo, position);
-    servo_set_position(&tower_middle_servo, position);
-    servo_set_position(&tower_right_servo, position);
+static void set_all_tower_claws(const char *name) {
+    servo_set_position_by_name(&tower_left_servo, name);
+    servo_set_position_by_name(&tower_middle_servo, name);
+    servo_set_position_by_name(&tower_right_servo, name);
 }
 
 // Status transmission is intentionally best effort, matching the old behavior.
-void send_status(
+static void send_status(
     UartLink *drivetrain_uart,
     StatusCode code,
     uint8_t detail) {
@@ -68,17 +77,17 @@ void send_status(
     (void)status_packet_send(drivetrain_uart, &status);
 }
 
-float requested_distance_mm(float command_value) {
+static float requested_distance_mm(float command_value) {
     return fabsf(command_value) * kCommandDistanceUnitMm;
 }
 
-bool controller_is_busy(const TowerActionController *controller) {
+static bool controller_is_busy(const TowerActionController *controller) {
     return controller->action_active ||
         stepper_is_moving(controller->tower_x_stepper) ||
         stepper_is_moving(controller->tower_z_stepper);
 }
 
-void reject_if_busy(
+static void reject_if_busy(
     TowerActionController *controller,
     const CommandPacket &command) {
     send_status(
@@ -87,12 +96,13 @@ void reject_if_busy(
         static_cast<uint8_t>(command.opcode));
 }
 
-void start_tower_action(
+static void start_tower_action(
     TowerActionController *controller,
     const CommandPacket &command) {
 
     // Failure Check
     if (command.opcode < CMD_TOWER_HOME || command.opcode >= CMD_MAX) return;
+    controller->waiting_for_first_command = false;
     if (controller_is_busy(controller)) {
         reject_if_busy(controller, command);
         return;
@@ -117,7 +127,7 @@ void start_tower_action(
             stepper_stop(controller->tower_z_stepper);
             digitalWrite(PIN_LOC_EN, LOW);
             servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
-            set_all_claws(SERVO_POSITION_B);
+            set_all_tower_claws("close");
             start_message =
                 "# Tower accepting current X/Z positions as home";
             break;
@@ -174,7 +184,7 @@ void start_tower_action(
             controller->action_is_timed = true;
             controller->action_complete_ms =
                 millis() + kClawServoSettleMs;
-            set_all_claws(SERVO_POSITION_A);
+            set_all_tower_claws("open");
             start_message = "# Opening left, middle, and right Tower claws";
             break;
 
@@ -182,7 +192,7 @@ void start_tower_action(
             controller->action_is_timed = true;
             controller->action_complete_ms =
                 millis() + kClawServoSettleMs;
-            set_all_claws(SERVO_POSITION_B);
+            set_all_tower_claws("close");
             start_message = "# Closing left, middle, and right Tower claws";
             break;
 
@@ -211,8 +221,11 @@ void tower_action_controller_init(
     controller->drivetrain_uart = drivetrain_uart;
     controller->tower_x_stepper = tower_x_stepper;
     controller->tower_z_stepper = tower_z_stepper;
+    controller->waiting_for_first_command = true;
 
-    ESP_ERROR_CHECK(initialize_tower_servos());
+    ESP_ERROR_CHECK(initialize_tower_motors(
+        controller->tower_x_stepper,
+        controller->tower_z_stepper));
 }
 
 void tower_action_controller_service_commands(
@@ -240,6 +253,19 @@ bool tower_action_controller_update(
     TowerActionController *controller,
     uint32_t now_ms) {
 
+    // Keep the UART dedicated to a ready signal until the drivetrain sends
+    // its first command. This makes either ESP32 safe to boot or reset first.
+    if (controller->waiting_for_first_command) {
+        if (now_ms - controller->last_status_ms >= kStatusRepeatPeriodMs) {
+            controller->last_status_ms = now_ms;
+            send_status(
+                controller->drivetrain_uart,
+                STATUS_ACTION_COMPLETE,
+                STATUS_DETAIL_NONE);
+        }
+        return true;
+    }
+
     if (controller->action_active) {
         const bool action_complete = controller->action_is_timed
             ? deadline_reached(now_ms, controller->action_complete_ms)
@@ -250,8 +276,7 @@ bool tower_action_controller_update(
             controller->action_active = false;
             controller->completion_pending = true;
             controller->active_stepper = nullptr;
-            controller->repeat_status_until_ms =
-                now_ms + kStatusRepeatDurationMs;
+            controller->repeat_status_until_ms = now_ms + kStatusRepeatDurationMs;
             controller->last_status_ms = now_ms;
             send_status(
                 controller->drivetrain_uart,
