@@ -1,6 +1,8 @@
 // Line following: own weighted-channel line error, EMA filter, PD steering.
 #include "control/line_following/line_follower.hpp"
 
+#include <Arduino.h>
+
 #include <algorithm>
 #include <cmath>
 
