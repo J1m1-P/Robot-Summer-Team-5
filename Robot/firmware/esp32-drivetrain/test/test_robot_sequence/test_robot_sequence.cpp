@@ -9,6 +9,16 @@ extern "C" {
 #include <robot_common/status_packet.h>
 }
 
+#include "control/line_following/line_follower.hpp"
+
+// No test here sets a line-follower context, so movement_action_controller
+// keeps the tape-follow placeholder path and never actually calls this --
+// it only needs to exist to satisfy the linker.
+bool follow_tape(LineFollowerContext *, Direction, float, StopCondition,
+                  float, float) {
+    return true;
+}
+
 namespace {
 
 uint32_t fake_millis = 0;

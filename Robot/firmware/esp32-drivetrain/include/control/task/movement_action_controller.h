@@ -5,6 +5,11 @@
 
 #include "esp_err.h"
 
+// Opaque here -- only line_following code (a C++ translation unit) knows
+// its contents. Lets this header, and everything that includes it
+// (robot_sequence_controller, all plain C), stay C.
+typedef struct LineFollowerContext LineFollowerContext;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +36,14 @@ esp_err_t movement_action_controller_init(
 // Updates the active action and returns true when it is complete.
 bool movement_action_controller_update(
     MovementActionController *controller);
+
+// Injects the hardware/pose access MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE
+// needs. Call once during setup, after pose_service is ready. Leaving this
+// unset (or passing NULL) keeps that action on its placeholder
+// immediate-complete behavior -- what the native robot-sequence tests rely
+// on, since they have no drivetrain/sensors/pose_service to give it.
+void movement_action_controller_set_line_follower_context(
+    LineFollowerContext *ctx);
 
 #ifdef __cplusplus
 }

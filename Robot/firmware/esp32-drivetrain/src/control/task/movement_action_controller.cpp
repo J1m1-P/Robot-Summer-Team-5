@@ -1,10 +1,32 @@
-/* Implements placeholder tape-guided and ordinary drivetrain actions. */
+/* Implements tape-guided and ordinary drivetrain actions. Only
+ * MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE is real; the rest are still
+ * placeholders. */
 #include "control/task/movement_action_controller.h"
 
 #include <stddef.h>
 #include <stdio.h>
 
-esp_err_t movement_action_controller_init(
+#include "control/line_following/line_follower.hpp"
+
+namespace {
+
+// Placeholder speed/timeout for tape-follow steps until §3 calibration
+// picks real values. Kept under robot_sequence_controller's 15s per-step
+// deadline so follow_tape's own timeout reports a normal (non-fault) miss
+// first.
+constexpr float kTapeFollowSpeedMps = 0.2f;
+constexpr float kTapeFollowTimeoutS = 12.0f;
+
+LineFollowerContext *g_line_follower_ctx = nullptr;
+
+}  // namespace
+
+extern "C" void movement_action_controller_set_line_follower_context(
+    LineFollowerContext *ctx) {
+    g_line_follower_ctx = ctx;
+}
+
+extern "C" esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
     float action_value) {
@@ -14,19 +36,25 @@ esp_err_t movement_action_controller_init(
     }
 
     // Controller init
-    *controller = (MovementActionController){0};
+    *controller = MovementActionController{};
     controller->action = action;
     controller->action_value = action_value;
     return ESP_OK;
 }
 
-bool movement_action_controller_update(
+extern "C" bool movement_action_controller_update(
     MovementActionController *controller) {
     if (controller == NULL) return false;
 
     // Decide what to do for this action
     switch (controller->action) {
         case MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape(
+                    g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
+                    StopCondition::DISTANCE, controller->action_value,
+                    kTapeFollowTimeoutS);
+            }
             printf(
                 "# PLACEHOLDER: Tape following for %.1f m\n",
                 controller->action_value);

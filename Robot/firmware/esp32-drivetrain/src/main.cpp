@@ -7,6 +7,7 @@
 #include "config/drivetrain/drivetrain_config.h"
 #include "config/tape_following/tape_following_config.h"
 #include "control/drivetrain/drivetrain.h"
+#include "control/line_following/line_follower.hpp"
 #include "control/odometry/pose_service.h"
 #include "control/odometry/pose_tracker.h"
 #include "control/task/robot_sequence_controller.h"
@@ -29,6 +30,7 @@ DrivetrainOdometrySourceConfig pose_encoder_config = {};
 PoseTracker pose_tracker = {};
 Pmw3610OdometryLink arm_odometry_link = {};
 PoseService pose_service = {};
+LineFollowerContext line_follower_ctx = {};
 
 // Brings up the drivetrain, tape sensors, and pose tracker so pose is live
 // from startup for whatever lego block needs it later.
@@ -101,6 +103,13 @@ void setup() {
         .odometry_link = &arm_odometry_link,
         .sequence_controller = &robot_sequence_controller,
     };
+
+    line_follower_ctx = {
+        .drivetrain = &drivetrain,
+        .sensors = {tape_sensor_list[0], tape_sensor_list[1], tape_sensor_list[2]},
+        .pose_service = &pose_service,
+    };
+    movement_action_controller_set_line_follower_context(&line_follower_ctx);
 }
 
 void loop() {
