@@ -17,6 +17,7 @@ struct TowerActionController {
     bool action_is_timed;
     uint32_t action_complete_ms;
     uint8_t active_command_detail;
+    bool readiness_pending;
     bool completion_pending;
     uint32_t repeat_status_until_ms;
     uint32_t last_status_ms;
@@ -33,8 +34,9 @@ void tower_action_controller_init(
 void tower_action_controller_service_commands(
     TowerActionController *controller);
 
-// Reports completed actions repeatedly so the drivetrain cannot easily miss
-// them. Returns true while completion packets take priority over odometry.
+// Reports startup readiness and completed actions repeatedly so the drivetrain
+// cannot easily miss them. Returns true while status packets take priority over
+// odometry.
 bool tower_action_controller_update(
     TowerActionController *controller,
     uint32_t now_ms);

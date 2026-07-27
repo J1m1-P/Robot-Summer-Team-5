@@ -93,6 +93,7 @@ void start_tower_action(
 
     // Failure Check
     if (command.opcode < CMD_TOWER_HOME || command.opcode >= CMD_MAX) return;
+    controller->readiness_pending = false;
     if (controller_is_busy(controller)) {
         reject_if_busy(controller, command);
         return;
@@ -211,6 +212,7 @@ void tower_action_controller_init(
     controller->drivetrain_uart = drivetrain_uart;
     controller->tower_x_stepper = tower_x_stepper;
     controller->tower_z_stepper = tower_z_stepper;
+    controller->readiness_pending = true;
 
     ESP_ERROR_CHECK(initialize_tower_servos());
 }
@@ -239,6 +241,17 @@ void tower_action_controller_service_commands(
 bool tower_action_controller_update(
     TowerActionController *controller,
     uint32_t now_ms) {
+
+    if (controller->readiness_pending) {
+        if (now_ms - controller->last_status_ms >= kStatusRepeatPeriodMs) {
+            controller->last_status_ms = now_ms;
+            send_status(
+                controller->drivetrain_uart,
+                STATUS_ACTION_COMPLETE,
+                STATUS_DETAIL_NONE);
+        }
+        return true;
+    }
 
     if (controller->action_active) {
         const bool action_complete = controller->action_is_timed
