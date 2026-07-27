@@ -1,6 +1,7 @@
 /* Runs arm sensing and the drivetrain-coordinated arm action sequence. */
 #include <Arduino.h>
 
+#include <robot_common/fixed_rate_gate.h>
 #include <robot_common/uart_link.h>
 
 #include "comm/odometry_link_producer.h"
@@ -30,6 +31,9 @@ HabitatActionController habitat_action_controller = {};
 PiActionController pi_action_controller = {};
 ArmActionDispatcher arm_action_dispatcher = {};
 bool tof_ready = false;
+
+constexpr int64_t kOdometrySendPeriodUs = 5000;  // 200 Hz, matches the drivetrain's control loop
+FixedRateGate odometry_gate = {kOdometrySendPeriodUs, 0};
 
 }  // namespace
 
@@ -132,7 +136,10 @@ void loop() {
     const uint32_t now_ms = millis();
     const bool reporting_arm_status = arm_action_dispatcher_update(
         &arm_action_dispatcher, now_ms);
-    if (!reporting_arm_status) {
+
+    int64_t unused_dt_us = 0;
+    const int64_t now_us = static_cast<int64_t>(now_ms) * 1000;
+    if (!reporting_arm_status && odometry_gate.Ready(now_us, &unused_dt_us)) {
         (void)odometry_link_producer_update(
             &odometry_producer, &drivetrain_uart);
     }
