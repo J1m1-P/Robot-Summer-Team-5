@@ -59,15 +59,26 @@ CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
 CMD_FLASH  = 4
 CMD_DONE   = 5
 CMD_RESUME = 6   # continue an interrupted sweep/drive routine (reactive detector)
-CMD_TOWER_Z_UP   = 7
-CMD_TOWER_Z_DOWN = 8
-CMD_TOWER_X_LEFT = 9
-CMD_TOWER_X_RIGHT = 10
-CMD_TOWER_HOME = 11
+CMD_TOWER_HOME = 7
+CMD_TOWER_Z_UP = 8
+CMD_TOWER_Z_DOWN = 9
+CMD_TOWER_X_LEFT = 10
+CMD_TOWER_X_RIGHT = 11
 CMD_TOWER_ROTATE_VERTICAL = 12
 CMD_TOWER_ROTATE_HORIZONTAL = 13
 CMD_TOWER_OPEN_CLAW = 14
 CMD_TOWER_CLOSE_CLAW = 15
+CMD_HABITAT_HOME = 16
+CMD_HABITAT_Z_UP = 17
+CMD_HABITAT_Z_DOWN = 18
+CMD_HABITAT_X_LEFT = 19
+CMD_HABITAT_X_RIGHT = 20
+CMD_HABITAT_OPEN_CLAWS = 21
+CMD_HABITAT_CLOSE_CLAWS = 22
+CMD_HABITAT_OPEN_LEFT_CLAW = 23
+CMD_HABITAT_CLOSE_LEFT_CLAW = 24
+CMD_HABITAT_OPEN_RIGHT_CLAW = 25
+CMD_HABITAT_CLOSE_RIGHT_CLAW = 26
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -89,6 +100,17 @@ STATUS_DETAIL_TOWER_VERTICAL = 6
 STATUS_DETAIL_TOWER_HORIZONTAL = 7
 STATUS_DETAIL_TOWER_CLAW_OPEN = 8
 STATUS_DETAIL_TOWER_CLAW_CLOSED = 9
+STATUS_DETAIL_HABITAT_HOME = 10
+STATUS_DETAIL_HABITAT_Z_RAISED = 11
+STATUS_DETAIL_HABITAT_Z_LOWERED = 12
+STATUS_DETAIL_HABITAT_X_LEFT = 13
+STATUS_DETAIL_HABITAT_X_RIGHT = 14
+STATUS_DETAIL_HABITAT_CLAWS_OPEN = 15
+STATUS_DETAIL_HABITAT_CLAWS_CLOSED = 16
+STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN = 17
+STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED = 18
+STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN = 19
+STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED = 20
 
 
 def encode_command(opcode, value=0.0):
@@ -96,8 +118,8 @@ def encode_command(opcode, value=0.0):
     Build a COMMAND packet: payload = [opcode, signed value byte]. `value` is a
     float ~-1..+1; we send round(value*100) as a signed int8 (-100..100). The
     ESP recovers it as (int8_t)payload[1] / 100.0f. Commands without a value
-    just send 0. Tower stepper values are distances in units of 100 mm, so
-    value=0.50 requests 50 mm.
+    just send 0. Tower/Habitat stepper values are distances in units of
+    100 mm, so value=0.50 requests 50 mm.
     """
     scaled = max(-127, min(127, int(round(value * 100))))
     payload = struct.pack("<Bb", opcode, scaled)   # B = opcode (uint8), b = value (int8)

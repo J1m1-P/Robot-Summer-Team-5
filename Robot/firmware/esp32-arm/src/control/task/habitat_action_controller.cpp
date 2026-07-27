@@ -1,10 +1,9 @@
-/* Implements coordinated Tower servo and stepper command handling. */
-#include "control/task/tower_action_controller.h"
+/* Implements coordinated Habitat servo and stepper command handling. */
+#include "control/task/habitat_action_controller.h"
 
 #include <Arduino.h>
 #include <math.h>
 
-#include "config/pin_map.h"
 #include "config/servo_config.h"
 #include "drivers/servo_driver.h"
 
@@ -12,49 +11,37 @@ namespace {
 
 constexpr uint32_t kStatusRepeatPeriodMs = 20;
 constexpr uint32_t kStatusRepeatDurationMs = 500;
-constexpr uint32_t kRotateServoSettleMs = 1000;
 constexpr uint32_t kClawServoSettleMs = 750;
 constexpr uint32_t kHomeSettleMs = 1000;
 
 constexpr float kCommandDistanceUnitMm = 100.0f;
 
-ServoDriver tower_rotate_servo = {};
-ServoDriver tower_left_servo = {};
-ServoDriver tower_middle_servo = {};
-ServoDriver tower_right_servo = {};
+ServoDriver habitat_left_servo = {};
+ServoDriver habitat_right_servo = {};
 
 // Signed subtraction keeps this comparison valid across millis() wraparound.
 bool deadline_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
 }
 
-esp_err_t initialize_tower_servos() {
+esp_err_t initialize_habitat_servos() {
     esp_err_t error =
-        servo_init(&tower_rotate_servo, towerRotateServoConfig);
+        servo_init(&habitat_left_servo, habitatLeftServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
+    servo_set_position(&habitat_left_servo, SERVO_POSITION_B);
 
-    error = servo_init(&tower_left_servo, towerLeftServoConfig);
+    error = servo_init(&habitat_right_servo, habitatRightServoConfig);
     if (error != ESP_OK) return error;
-    servo_set_position(&tower_left_servo, SERVO_POSITION_B);
-
-    error = servo_init(&tower_middle_servo, towerMiddleServoConfig);
-    if (error != ESP_OK) return error;
-    servo_set_position(&tower_middle_servo, SERVO_POSITION_B);
-
-    error = servo_init(&tower_right_servo, towerRightServoConfig);
-    if (error != ESP_OK) return error;
-    servo_set_position(&tower_right_servo, SERVO_POSITION_B);
+    servo_set_position(&habitat_right_servo, SERVO_POSITION_B);
     return ESP_OK;
 }
 
-void set_all_claws(ServoPosition position) {
-    servo_set_position(&tower_left_servo, position);
-    servo_set_position(&tower_middle_servo, position);
-    servo_set_position(&tower_right_servo, position);
+void set_both_claws(ServoPosition position) {
+    servo_set_position(&habitat_left_servo, position);
+    servo_set_position(&habitat_right_servo, position);
 }
 
-// Status transmission is intentionally best effort, matching the old behavior.
+// Status transmission is intentionally best effort, matching Tower behavior.
 void send_status(
     UartLink *drivetrain_uart,
     StatusCode code,
@@ -70,14 +57,14 @@ float requested_distance_mm(float command_value) {
     return fabsf(command_value) * kCommandDistanceUnitMm;
 }
 
-bool tower_is_busy(const TowerActionController *controller) {
+bool habitat_is_busy(const HabitatActionController *controller) {
     return controller->action_active ||
-        stepper_is_moving(controller->tower_x_stepper) ||
-        stepper_is_moving(controller->tower_z_stepper);
+        stepper_is_moving(controller->habitat_x_stepper) ||
+        stepper_is_moving(controller->habitat_z_stepper);
 }
 
 void reject_if_busy(
-    TowerActionController *controller,
+    HabitatActionController *controller,
     const CommandPacket &command) {
     send_status(
         controller->drivetrain_uart,
@@ -85,16 +72,16 @@ void reject_if_busy(
         static_cast<uint8_t>(command.opcode));
 }
 
-void start_tower_action(
-    TowerActionController *controller,
+void start_habitat_action(
+    HabitatActionController *controller,
     const CommandPacket &command) {
 
     // Failure Check
-    if (command.opcode < CMD_TOWER_HOME || command.opcode >= CMD_MAX) return;
-    if (tower_is_busy(controller)) {
+    if (!habitat_action_controller_accepts(command.opcode)) return;
+    if (habitat_is_busy(controller)) {
         reject_if_busy(controller, command);
         Serial.printf(
-            "# Tower command rejected while busy (opcode %u)\n",
+            "# Habitat command rejected while busy (opcode %u)\n",
             static_cast<unsigned>(command.opcode));
         return;
     }
@@ -109,82 +96,96 @@ void start_tower_action(
     float distance_mm = 0.0f;
     const char *start_message = nullptr;
 
-    // Decide what to do for this commmand
+    // Decide what to do for this command
     switch (command.opcode) {
-        case CMD_TOWER_HOME:
+        case CMD_HABITAT_HOME:
             controller->action_is_timed = true;
             controller->action_complete_ms = millis() + kHomeSettleMs;
-            stepper_stop(controller->tower_x_stepper);
-            stepper_stop(controller->tower_z_stepper);
-            digitalWrite(PIN_LOC_EN, LOW);
-            servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
-            set_all_claws(SERVO_POSITION_B);
+            stepper_stop(controller->habitat_x_stepper);
+            stepper_stop(controller->habitat_z_stepper);
+            set_both_claws(SERVO_POSITION_B);
             start_message =
-                "# Tower accepting current X/Z positions as home";
+                "# Habitat accepting current X/Z positions as home";
             break;
 
-        case CMD_TOWER_Z_UP:
-            controller->active_stepper = controller->tower_z_stepper;
+        case CMD_HABITAT_Z_UP:
+            controller->active_stepper = controller->habitat_z_stepper;
             distance_mm = -requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Tower Z moving up";
+            start_message = "# Habitat Z moving up";
             break;
 
-        case CMD_TOWER_Z_DOWN:
-            controller->active_stepper = controller->tower_z_stepper;
+        case CMD_HABITAT_Z_DOWN:
+            controller->active_stepper = controller->habitat_z_stepper;
             distance_mm = requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Tower Z moving down";
+            start_message = "# Habitat Z moving down";
             break;
 
-        case CMD_TOWER_X_LEFT:
-            controller->active_stepper = controller->tower_x_stepper;
+        case CMD_HABITAT_X_LEFT:
+            controller->active_stepper = controller->habitat_x_stepper;
             distance_mm = -requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Tower X moving left";
+            start_message = "# Habitat X moving left";
             break;
 
-        case CMD_TOWER_X_RIGHT:
-            controller->active_stepper = controller->tower_x_stepper;
+        case CMD_HABITAT_X_RIGHT:
+            controller->active_stepper = controller->habitat_x_stepper;
             distance_mm = requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Tower X moving right";
+            start_message = "# Habitat X moving right";
             break;
 
-        case CMD_TOWER_ROTATE_HORIZONTAL:
-            controller->action_is_timed = true;
-            controller->action_complete_ms =
-                millis() + kRotateServoSettleMs;
-            servo_set_position(&tower_rotate_servo, SERVO_POSITION_A);
-            start_message = "# Tower rotating horizontal";
-            break;
-
-        case CMD_TOWER_ROTATE_VERTICAL:
-            controller->action_is_timed = true;
-            controller->action_complete_ms =
-                millis() + kRotateServoSettleMs;
-            servo_set_position(&tower_rotate_servo, SERVO_POSITION_B);
-            start_message = "# Tower rotating vertical";
-            break;
-
-        case CMD_TOWER_OPEN_CLAW:
+        case CMD_HABITAT_OPEN_CLAWS:
             controller->action_is_timed = true;
             controller->action_complete_ms =
                 millis() + kClawServoSettleMs;
-            set_all_claws(SERVO_POSITION_A);
-            start_message = "# Opening left, middle, and right Tower claws";
+            set_both_claws(SERVO_POSITION_A);
+            start_message = "# Opening both Habitat claws";
             break;
 
-        case CMD_TOWER_CLOSE_CLAW:
+        case CMD_HABITAT_CLOSE_CLAWS:
             controller->action_is_timed = true;
             controller->action_complete_ms =
                 millis() + kClawServoSettleMs;
-            set_all_claws(SERVO_POSITION_B);
-            start_message = "# Closing left, middle, and right Tower claws";
+            set_both_claws(SERVO_POSITION_B);
+            start_message = "# Closing both Habitat claws";
+            break;
+
+        case CMD_HABITAT_OPEN_LEFT_CLAW:
+        case CMD_HABITAT_CLOSE_LEFT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_position(
+                &habitat_left_servo,
+                command.opcode == CMD_HABITAT_OPEN_LEFT_CLAW
+                    ? SERVO_POSITION_A
+                    : SERVO_POSITION_B);
+            start_message =
+                command.opcode == CMD_HABITAT_OPEN_LEFT_CLAW
+                    ? "# Opening left Habitat claw"
+                    : "# Closing left Habitat claw";
+            break;
+
+        case CMD_HABITAT_OPEN_RIGHT_CLAW:
+        case CMD_HABITAT_CLOSE_RIGHT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_position(
+                &habitat_right_servo,
+                command.opcode == CMD_HABITAT_OPEN_RIGHT_CLAW
+                    ? SERVO_POSITION_A
+                    : SERVO_POSITION_B);
+            start_message =
+                command.opcode == CMD_HABITAT_OPEN_RIGHT_CLAW
+                    ? "# Opening right Habitat claw"
+                    : "# Closing right Habitat claw";
             break;
 
         default:
@@ -202,42 +203,43 @@ void start_tower_action(
 
 }  // namespace
 
-void tower_action_controller_init(
-    TowerActionController *controller,
+void habitat_action_controller_init(
+    HabitatActionController *controller,
     UartLink *drivetrain_uart,
-    StepperDriver *tower_x_stepper,
-    StepperDriver *tower_z_stepper) {
+    StepperDriver *habitat_x_stepper,
+    StepperDriver *habitat_z_stepper) {
 
     *controller = {};
     controller->drivetrain_uart = drivetrain_uart;
-    controller->tower_x_stepper = tower_x_stepper;
-    controller->tower_z_stepper = tower_z_stepper;
-    ESP_ERROR_CHECK(initialize_tower_servos());
+    controller->habitat_x_stepper = habitat_x_stepper;
+    controller->habitat_z_stepper = habitat_z_stepper;
+
+    ESP_ERROR_CHECK(initialize_habitat_servos());
 }
 
-bool tower_action_controller_accepts(CommandOpcode command) {
-    return command >= CMD_TOWER_HOME &&
-        command <= CMD_TOWER_CLOSE_CLAW;
+bool habitat_action_controller_accepts(CommandOpcode command) {
+    return command >= CMD_HABITAT_HOME &&
+        command <= CMD_HABITAT_CLOSE_RIGHT_CLAW;
 }
 
-bool tower_action_controller_is_busy(
-    const TowerActionController *controller) {
-    return controller != nullptr && tower_is_busy(controller);
+bool habitat_action_controller_is_busy(
+    const HabitatActionController *controller) {
+    return controller != nullptr && habitat_is_busy(controller);
 }
 
-void tower_action_controller_start(
-    TowerActionController *controller,
+void habitat_action_controller_start(
+    HabitatActionController *controller,
     const CommandPacket *command) {
     if (controller == nullptr || command == nullptr ||
-        !tower_action_controller_accepts(command->opcode)) {
-        Serial.println("# Tower command rejected: invalid action");
+        !habitat_action_controller_accepts(command->opcode)) {
+        Serial.println("# Habitat command rejected: invalid action");
         return;
     }
-    start_tower_action(controller, *command);
+    start_habitat_action(controller, *command);
 }
 
-bool tower_action_controller_update(
-    TowerActionController *controller,
+bool habitat_action_controller_update(
+    HabitatActionController *controller,
     uint32_t now_ms) {
 
     if (controller->action_active) {
@@ -245,7 +247,7 @@ bool tower_action_controller_update(
             ? deadline_reached(now_ms, controller->action_complete_ms)
             : controller->active_stepper != nullptr &&
                 !stepper_is_moving(controller->active_stepper);
-                
+
         if (action_complete) {
             controller->action_active = false;
             controller->completion_pending = true;
@@ -257,7 +259,7 @@ bool tower_action_controller_update(
                 controller->drivetrain_uart,
                 STATUS_ACTION_COMPLETE,
                 controller->active_command_detail);
-            Serial.println("# Tower action complete");
+            Serial.println("# Habitat action complete");
             return true;
         }
     }

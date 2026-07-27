@@ -89,7 +89,7 @@ extern "C" esp_err_t status_packet_decode(
     return ESP_OK;
 }
 
-extern "C" ActionStatusDetail tower_action_status_detail(
+extern "C" ActionStatusDetail arm_action_status_detail(
     CommandOpcode command) {
     switch (command) {
         case CMD_TOWER_HOME:
@@ -110,6 +110,28 @@ extern "C" ActionStatusDetail tower_action_status_detail(
             return STATUS_DETAIL_TOWER_CLAW_OPEN;
         case CMD_TOWER_CLOSE_CLAW:
             return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        case CMD_HABITAT_HOME:
+            return STATUS_DETAIL_HABITAT_HOME;
+        case CMD_HABITAT_Z_UP:
+            return STATUS_DETAIL_HABITAT_Z_RAISED;
+        case CMD_HABITAT_Z_DOWN:
+            return STATUS_DETAIL_HABITAT_Z_LOWERED;
+        case CMD_HABITAT_X_LEFT:
+            return STATUS_DETAIL_HABITAT_X_LEFT;
+        case CMD_HABITAT_X_RIGHT:
+            return STATUS_DETAIL_HABITAT_X_RIGHT;
+        case CMD_HABITAT_OPEN_CLAWS:
+            return STATUS_DETAIL_HABITAT_CLAWS_OPEN;
+        case CMD_HABITAT_CLOSE_CLAWS:
+            return STATUS_DETAIL_HABITAT_CLAWS_CLOSED;
+        case CMD_HABITAT_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN;
+        case CMD_HABITAT_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED;
+        case CMD_HABITAT_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN;
+        case CMD_HABITAT_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED;
         default:
             return STATUS_DETAIL_NONE;
     }
@@ -162,7 +184,7 @@ void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
         queue_status(
             STATUS_ACTION_COMPLETE,
             static_cast<uint8_t>(
-                tower_action_status_detail(kExpectedTowerCommands[index])));
+                arm_action_status_detail(kExpectedTowerCommands[index])));
         robot_sequence_controller_update(
             &controller,
             static_cast<uint32_t>(103 + index * 2));
@@ -210,10 +232,39 @@ void test_missing_arm_completion_times_out() {
     TEST_ASSERT_FALSE(controller.running);
 }
 
+void test_habitat_actions_have_unique_completion_details() {
+    const CommandOpcode actions[] = {
+        CMD_HABITAT_HOME,
+        CMD_HABITAT_Z_UP,
+        CMD_HABITAT_Z_DOWN,
+        CMD_HABITAT_X_LEFT,
+        CMD_HABITAT_X_RIGHT,
+        CMD_HABITAT_OPEN_CLAWS,
+        CMD_HABITAT_CLOSE_CLAWS,
+        CMD_HABITAT_OPEN_LEFT_CLAW,
+        CMD_HABITAT_CLOSE_LEFT_CLAW,
+        CMD_HABITAT_OPEN_RIGHT_CLAW,
+        CMD_HABITAT_CLOSE_RIGHT_CLAW,
+    };
+
+    for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);
+         ++index) {
+        const ActionStatusDetail detail =
+            arm_action_status_detail(actions[index]);
+        TEST_ASSERT_NOT_EQUAL(STATUS_DETAIL_NONE, detail);
+        for (size_t prior = 0; prior < index; ++prior) {
+            TEST_ASSERT_NOT_EQUAL(
+                arm_action_status_detail(actions[prior]),
+                detail);
+        }
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_sequence_waits_for_arm_then_runs_enabled_tower_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_missing_arm_completion_times_out);
+    RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();
 }

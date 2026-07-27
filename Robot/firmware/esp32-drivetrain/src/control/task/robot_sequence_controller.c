@@ -41,6 +41,15 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
 
+    // Habitat: Building actions (enable and tune when the sequence is ready)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z_UP}, 0.30f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X_RIGHT}, 0.90f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},
+
     // Movement: From tower pieces to tower base
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
@@ -58,7 +67,11 @@ static void enter_fault(
     const char *reason,
     esp_err_t error) {
     controller->running = false;
-    printf("# Robot sequence FAULT: %s (%s)\n", reason, esp_err_to_name(error));
+    printf(
+        "# Robot sequence FAULT at step %u: %s (%s)\n",
+        (unsigned)controller->current_step,
+        reason,
+        esp_err_to_name(error));
 }
 
 static esp_err_t start_robot_step(
@@ -116,7 +129,7 @@ static bool service_arm_uart(
         &kRobotSequence[controller->current_step];
     return step->type == ROBOT_STEP_ARM &&
            status.detail ==
-               (uint8_t)tower_action_status_detail(step->action.arm);
+               (uint8_t)arm_action_status_detail(step->action.arm);
 }
 
 static esp_err_t start_robot_step(

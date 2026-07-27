@@ -11,7 +11,7 @@
 _Static_assert(STATUS_PACKET_PAYLOAD_SIZE <= PACKET_MAX_PAYLOAD_SIZE,
                "Status packet exceeds UART payload capacity");
 
-ActionStatusDetail tower_action_status_detail(CommandOpcode command) {
+ActionStatusDetail arm_action_status_detail(CommandOpcode command) {
     switch (command) {
         case CMD_TOWER_HOME:
             return STATUS_DETAIL_TOWER_HOME;
@@ -31,6 +31,28 @@ ActionStatusDetail tower_action_status_detail(CommandOpcode command) {
             return STATUS_DETAIL_TOWER_CLAW_OPEN;
         case CMD_TOWER_CLOSE_CLAW:
             return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        case CMD_HABITAT_HOME:
+            return STATUS_DETAIL_HABITAT_HOME;
+        case CMD_HABITAT_Z_UP:
+            return STATUS_DETAIL_HABITAT_Z_RAISED;
+        case CMD_HABITAT_Z_DOWN:
+            return STATUS_DETAIL_HABITAT_Z_LOWERED;
+        case CMD_HABITAT_X_LEFT:
+            return STATUS_DETAIL_HABITAT_X_LEFT;
+        case CMD_HABITAT_X_RIGHT:
+            return STATUS_DETAIL_HABITAT_X_RIGHT;
+        case CMD_HABITAT_OPEN_CLAWS:
+            return STATUS_DETAIL_HABITAT_CLAWS_OPEN;
+        case CMD_HABITAT_CLOSE_CLAWS:
+            return STATUS_DETAIL_HABITAT_CLAWS_CLOSED;
+        case CMD_HABITAT_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN;
+        case CMD_HABITAT_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED;
+        case CMD_HABITAT_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN;
+        case CMD_HABITAT_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED;
         default:
             return STATUS_DETAIL_NONE;
     }
