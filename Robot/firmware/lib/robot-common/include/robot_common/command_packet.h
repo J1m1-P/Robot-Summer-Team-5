@@ -1,5 +1,5 @@
 /*
- * Defines commands exchanged between the Pi and the two ESP32 boards.
+ * Defines commands issued by the drivetrain to arm-side action controllers.
  * The API sends, identifies, and decodes its fixed wire representation.
  */
 #pragma once
@@ -38,6 +38,22 @@ typedef enum {
     CMD_TOWER_OPEN_CLAW,
     CMD_TOWER_CLOSE_CLAW,
 
+    // Habitat Tasks
+    CMD_HABITAT_HOME,
+    CMD_HABITAT_Z_UP,
+    CMD_HABITAT_Z_DOWN,
+    CMD_HABITAT_X_LEFT,
+    CMD_HABITAT_X_RIGHT,
+    CMD_HABITAT_OPEN_CLAWS,
+    CMD_HABITAT_CLOSE_CLAWS,
+    CMD_HABITAT_OPEN_LEFT_CLAW,
+    CMD_HABITAT_CLOSE_LEFT_CLAW,
+    CMD_HABITAT_OPEN_RIGHT_CLAW,
+    CMD_HABITAT_CLOSE_RIGHT_CLAW,
+
+    // Raspberry Pi Tasks
+    CMD_PI_SCAN_TELETUBBIES,
+
     CMD_MAX
 } CommandOpcode;
 
@@ -50,8 +66,9 @@ typedef struct {
     //   Pi -> arm:         normalized visual steering error, roughly -1.0..1.0.
     //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
     //                       matching DrivetrainBodyVelocity.omega).
-    // Tower stepper commands: requested travel in units of 100 mm. For
-    // example, 0.50 requests 50 mm and 0.30 requests 30 mm.
+    // Tower/Habitat stepper commands: requested travel in units of 100 mm.
+    // For example, 0.50 requests 50 mm and 0.30 requests 30 mm.
+    // Pi commands: optional action parameter forwarded in the Pi request.
     // Unused (0) for all other opcodes.
     float value;
 } CommandPacket;

@@ -25,7 +25,7 @@ typedef enum {
     STATUS_LOOK_END,        // the ESP closed its look-window (sweep done, nothing found)
     STATUS_ROUTINE_DONE,    // the ESP ran out of sweeps/routine with targets still unfound
     STATUS_FAULT,           // something went wrong; `detail` holds a fault code
-    STATUS_ACTION_COMPLETE, // an arm action completed; `detail` identifies the result
+    STATUS_ACTION_COMPLETE, // arm ready when detail is NONE; otherwise an action completed
     STATUS_MAX
 } StatusCode;
 
@@ -41,10 +41,21 @@ typedef enum {
     STATUS_DETAIL_TOWER_HORIZONTAL,
     STATUS_DETAIL_TOWER_CLAW_OPEN,
     STATUS_DETAIL_TOWER_CLAW_CLOSED,
+    STATUS_DETAIL_HABITAT_HOME,
+    STATUS_DETAIL_HABITAT_Z_RAISED,
+    STATUS_DETAIL_HABITAT_Z_LOWERED,
+    STATUS_DETAIL_HABITAT_X_LEFT,
+    STATUS_DETAIL_HABITAT_X_RIGHT,
+    STATUS_DETAIL_HABITAT_CLAWS_OPEN,
+    STATUS_DETAIL_HABITAT_CLAWS_CLOSED,
+    STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN,
+    STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED,
+    STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN,
+    STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED,
 } ActionStatusDetail;
 
-// Maps a Tower command to the completion detail shared by both ESPs.
-ActionStatusDetail tower_action_status_detail(CommandOpcode command);
+// Maps any arm command to its command-specific completion detail.
+ActionStatusDetail arm_action_status_detail(CommandOpcode command);
 
 // Represents one decoded status: a code plus an optional detail byte.
 typedef struct {

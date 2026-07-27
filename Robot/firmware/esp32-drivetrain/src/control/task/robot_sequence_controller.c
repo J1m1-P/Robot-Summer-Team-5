@@ -5,13 +5,21 @@
 
 #include "esp32-hal.h"
 #include <robot_common/command_packet.h>
+#include <robot_common/pi_action_packet.h>
 #include <robot_common/status_packet.h>
 
 static const uint32_t kActionTimeoutMs = 15000;
 
+// Placeholder scan-course values. Replace these after measuring the tape
+// sections and camera-to-drivetrain steering response on the real robot.
+#define PLACEHOLDER_SCAN_DISTANCE_M 1.0f
+#define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
+
 typedef enum {
     ROBOT_STEP_MOVEMENT = 0,
     ROBOT_STEP_ARM,
+    ROBOT_STEP_PI_SCAN,
+    ROBOT_STEP_SCAN_ROTATION,
 } RobotStepType;
 
 typedef struct {
@@ -23,11 +31,24 @@ typedef struct {
     float action_value;
 } RobotSequenceStep;
 
-// Actual Robot Sequence (To be finished)
+// Actual Robot Sequence (To be finished).
 static const RobotSequenceStep kRobotSequence[] = {
-    // Tape Follow: From start to after the ramp
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE}, 1.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 0.0f},
+    // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
+     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
+
+    // Each scan sets the angle of the following rotation step.
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
+     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
+
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
+     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
     // Tower: Picking up the pieces
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
@@ -41,6 +62,15 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
 
+    // Habitat: Building actions (enable and tune when the sequence is ready)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z_UP}, 0.30f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X_RIGHT}, 0.90f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},
+
     // Movement: From tower pieces to tower base
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
@@ -53,18 +83,73 @@ static bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
     return (int32_t)(now_ms - deadline_ms) >= 0;
 }
 
+static bool step_is_movement(RobotStepType type) {
+    return type == ROBOT_STEP_MOVEMENT ||
+           type == ROBOT_STEP_SCAN_ROTATION;
+}
+
 static void enter_fault(
     RobotSequenceController *controller,
     const char *reason,
     esp_err_t error) {
     controller->running = false;
-    printf("# Robot sequence FAULT: %s (%s)\n", reason, esp_err_to_name(error));
+    printf(
+        "# Robot sequence FAULT at step %u: %s (%s)\n",
+        (unsigned)controller->current_step,
+        reason,
+        esp_err_to_name(error));
 }
 
 static esp_err_t start_robot_step(
     RobotSequenceController *controller,
     size_t step_index,
     uint32_t now_ms);
+
+static bool service_pi_report(
+    RobotSequenceController *controller,
+    const PacketFrame *frame) {
+    // Decode the report received from the Pi.
+    PiReportPacket report = {0};
+    if (pi_report_packet_decode(frame, &report) != ESP_OK) return false;
+
+    // Ignore a stale Pi report unless the sequence is waiting for a scan.
+    if (kRobotSequence[controller->current_step].type !=
+        ROBOT_STEP_PI_SCAN) {
+        return false;
+    }
+
+    // Reports are repeated for reliability. Process each request only once.
+    if (controller->last_pi_request_id == report.request_id) {
+        return false;
+    }
+    controller->last_pi_request_id = report.request_id;
+
+    // A miss still completes the scan; its programmed rotation becomes zero.
+    if (report.result == PI_RESULT_NOT_FOUND) {
+        controller->scan_rotation_degrees = 0.0f;
+        printf("# Pi scan: no Teletubby detected\n");
+        return true;
+    }
+
+    // Link, camera, and request failures stop the sequence.
+    if (report.result != PI_RESULT_OK) {
+        enter_fault(controller, "Pi scan failed", ESP_FAIL);
+        return false;
+    }
+
+    // Positive camera error means the target is right of center. Drivetrain
+    // rotation is positive counterclockwise, so rightward error becomes a
+    // negative placeholder angle.
+    controller->scan_rotation_degrees =
+        -report.horizontal_error * PLACEHOLDER_VISION_ERROR_TO_DEGREES;
+    printf(
+        "# Pi scan: target %u detected at error %.3f; "
+        "rotating %.1f degrees (placeholder)\n",
+        (unsigned)report.target_id,
+        report.horizontal_error,
+        controller->scan_rotation_degrees);
+    return true;
+}
 
 static bool service_arm_uart(
     RobotSequenceController *controller,
@@ -76,10 +161,14 @@ static bool service_arm_uart(
     }
 
     PacketFrame frame = {0};
-    if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK ||
-        !status_packet_is(&frame)) {
+    if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK) {
         return false;
     }
+
+    if (pi_report_packet_is(&frame)) {
+        return service_pi_report(controller, &frame);
+    }
+    if (!status_packet_is(&frame)) return false;
 
     StatusPacket status = {0};
     if (status_packet_decode(&frame, &status) != ESP_OK) return false;
@@ -116,7 +205,7 @@ static bool service_arm_uart(
         &kRobotSequence[controller->current_step];
     return step->type == ROBOT_STEP_ARM &&
            status.detail ==
-               (uint8_t)tower_action_status_detail(step->action.arm);
+               (uint8_t)arm_action_status_detail(step->action.arm);
 }
 
 static esp_err_t start_robot_step(
@@ -126,11 +215,15 @@ static esp_err_t start_robot_step(
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
-    if (step->type == ROBOT_STEP_MOVEMENT) {
+    if (step_is_movement(step->type)) {
+        const float action_value =
+            step->type == ROBOT_STEP_SCAN_ROTATION
+                ? controller->scan_rotation_degrees
+                : step->action_value;
         error = movement_action_controller_init(
             &controller->movement_action_controller,
             step->action.movement,
-            step->action_value);
+            action_value);
     } else {
         const CommandPacket command = {
             .opcode = step->action.arm,
@@ -189,7 +282,7 @@ void robot_sequence_controller_update(
 
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
-    const bool step_complete = step->type == ROBOT_STEP_MOVEMENT
+    const bool step_complete = step_is_movement(step->type)
         ? movement_action_controller_update(
             &controller->movement_action_controller)
         : service_arm_uart(controller, now_ms);
