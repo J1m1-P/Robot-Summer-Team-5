@@ -1,4 +1,4 @@
-/* Routes shared arm commands to the Tower or Habitat controller. */
+/* Routes shared commands to the Tower, Habitat, or Pi action controller. */
 #pragma once
 
 #include <stdint.h>
@@ -19,7 +19,7 @@ struct ArmActionDispatcher {
     uint32_t last_ready_status_ms;
 };
 
-// Connects the shared UART to both arm action controllers.
+// Connects the shared UART to all arm-side action controllers.
 void arm_action_dispatcher_init(
     ArmActionDispatcher *dispatcher,
     UartLink *drivetrain_uart,

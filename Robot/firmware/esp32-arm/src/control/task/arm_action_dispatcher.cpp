@@ -25,7 +25,7 @@ void send_status(
 
 // Receives one drivetrain command and routes it to Tower, Habitat, or RPI.
 void service_command(ArmActionDispatcher *dispatcher, uint32_t now_ms) {
-    
+
     // Read available drivetrain UART data into the packet parser.
     const esp_err_t update_error =
         uart_link_update(dispatcher->drivetrain_uart);
@@ -106,7 +106,7 @@ void service_command(ArmActionDispatcher *dispatcher, uint32_t now_ms) {
 
 }  // namespace
 
-// Called during setup(). Initializes the dispatcher. 
+// Called during setup(). Initializes the dispatcher.
 void arm_action_dispatcher_init(
     ArmActionDispatcher *dispatcher,
     UartLink *drivetrain_uart,
@@ -126,7 +126,7 @@ void arm_action_dispatcher_init(
 bool arm_action_dispatcher_update(
     ArmActionDispatcher *dispatcher,
     uint32_t now_ms) {
-    
+
     service_command(dispatcher, now_ms);
 
     if (dispatcher->readiness_pending) {

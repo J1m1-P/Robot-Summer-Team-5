@@ -66,7 +66,7 @@ void setup() {
     // Habitat init
     ESP_ERROR_CHECK(stepper_init(&habitat_x_stepper, habitatXConfig));
     ESP_ERROR_CHECK(stepper_init(&habitat_z_stepper, habitatZConfig));
-    
+
     habitat_action_controller_init(
         &habitat_action_controller,
         &drivetrain_uart,
@@ -91,7 +91,7 @@ void setup() {
         &pi_action_controller);
     Serial.println("# Arm action dispatcher initialized");
 
-    // TOF init 
+    // TOF init
     esp_err_t tof_error = tof_manager_init(&tof_manager, &ARM_TOF_CONFIG);
     if (tof_error == ESP_OK) {
         tof_error = tof_manager_start(&tof_manager);

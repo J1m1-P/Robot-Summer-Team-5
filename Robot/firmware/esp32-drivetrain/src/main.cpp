@@ -21,14 +21,14 @@ void setup() {
 
     Serial.begin(115200);
     Serial.println("Starting...");
-    
+
     // Delay(5000) later need to be change to start button action
-    delay(5000); 
+    delay(5000);
 
     Serial.println("# Starting Task Sequence");
 
     // UART init
-    esp_err_t err = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG); 
+    esp_err_t err = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG);
     if (err != ESP_OK) {
         Serial.printf("# FAULT: arm UART initialization failed (%s)\n", esp_err_to_name(err));
         return;

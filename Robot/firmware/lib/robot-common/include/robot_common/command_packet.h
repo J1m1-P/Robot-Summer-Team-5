@@ -26,7 +26,6 @@ typedef enum {
     CMD_DONE,
     CMD_RESUME,   // continue an interrupted sweep/drive routine (reactive detector)
 
-
     // Tower Tasks
     CMD_TOWER_HOME,
     CMD_TOWER_Z_UP,
@@ -57,15 +56,11 @@ typedef enum {
     CMD_MAX
 } CommandOpcode;
 
-// Represents one decoded command: an opcode plus its (optional) steering value.
+// Represents one decoded command: an opcode plus its optional action value.
 typedef struct {
     CommandOpcode opcode;
-    // TURN: meaning depends on which link this travels over -- the bridge
-    // between them (esp32-arm/src/comms/pi_bridge.c) converts one to the
-    // other, it isn't the same number on both hops:
-    //   Pi -> arm:         normalized visual steering error, roughly -1.0..1.0.
-    //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
-    //                       matching DrivetrainBodyVelocity.omega).
+    // Legacy TURN commands use a normalized visual steering error, roughly
+    // -1.0..1.0.
     // Tower/Habitat stepper commands: requested travel in units of 100 mm.
     // For example, 0.50 requests 50 mm and 0.30 requests 30 mm.
     // Pi commands: optional action parameter forwarded in the Pi request.

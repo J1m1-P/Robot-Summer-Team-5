@@ -1405,7 +1405,7 @@ void setup() {
             Serial.println("# stepper " + String(index + 1) + " initialization failed");
         }
     }
-    pinMode(13, OUTPUT); 
+    pinMode(13, OUTPUT);
     digitalWrite(13, LOW);
     output_line("# Arm jog harness ready. Positions are open-loop and start at logical zero.");
     print_usage();

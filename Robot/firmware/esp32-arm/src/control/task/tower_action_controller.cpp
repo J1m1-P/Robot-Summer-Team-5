@@ -12,8 +12,6 @@
 
 namespace {
 
-constexpr uint32_t kStatusRepeatPeriodMs = 20;
-constexpr uint32_t kStatusRepeatDurationMs = 500;
 constexpr uint32_t kRotateServoSettleMs = 1000;
 constexpr uint32_t kClawServoSettleMs = 750;
 constexpr uint32_t kHomeSettleMs = 1000;
@@ -101,20 +99,21 @@ static void start_tower_action(
     const CommandPacket &command) {
 
     // Failure Check
-    if (command.opcode < CMD_TOWER_HOME || command.opcode >= CMD_MAX) return;
-    controller->waiting_for_first_command = false;
+    if (!tower_action_controller_accepts(command.opcode)) return;
     if (controller_is_busy(controller)) {
         reject_if_busy(controller, command);
+        Serial.printf(
+            "# Tower command rejected while busy (opcode %u)\n",
+            static_cast<unsigned>(command.opcode));
         return;
     }
 
     // Clear parameters from last step
-    controller->completion_pending = false;
     controller->active_stepper = nullptr;
     controller->action_is_timed = false;
     controller->active_command_detail =
         static_cast<uint8_t>(
-            tower_action_status_detail(command.opcode));
+            arm_action_status_detail(command.opcode));
     float distance_mm = 0.0f;
     const char *start_message = nullptr;
 
@@ -221,63 +220,46 @@ void tower_action_controller_init(
     controller->drivetrain_uart = drivetrain_uart;
     controller->tower_x_stepper = tower_x_stepper;
     controller->tower_z_stepper = tower_z_stepper;
-    controller->waiting_for_first_command = true;
 
     ESP_ERROR_CHECK(initialize_tower_motors(
         controller->tower_x_stepper,
         controller->tower_z_stepper));
 }
 
-void tower_action_controller_service_commands(
-    TowerActionController *controller) {
-    
-    // Update the received messages
-    if (uart_link_update(controller->drivetrain_uart) != ESP_OK) return;
+bool tower_action_controller_accepts(CommandOpcode command) {
+    return command >= CMD_TOWER_HOME &&
+        command <= CMD_TOWER_CLOSE_CLAW;
+}
 
-    // Take latest UART message
-    PacketFrame frame = {};
-    if (uart_link_take_packet(controller->drivetrain_uart, &frame) != ESP_OK ||
-        !command_packet_is(&frame)) {
+bool tower_action_controller_is_busy(
+    const TowerActionController *controller) {
+    return controller != nullptr && controller_is_busy(controller);
+}
+
+void tower_action_controller_start(
+    TowerActionController *controller,
+    const CommandPacket *command) {
+    if (controller == nullptr || command == nullptr ||
+        !tower_action_controller_accepts(command->opcode)) {
+        Serial.println("# Tower command rejected: invalid action");
         return;
     }
-
-    // Decode the message
-    CommandPacket command = {};
-    if (command_packet_decode(&frame, &command) != ESP_OK) return;
-
-    // Execute the tower action
-    start_tower_action(controller, command);
+    start_tower_action(controller, *command);
 }
 
 bool tower_action_controller_update(
     TowerActionController *controller,
     uint32_t now_ms) {
 
-    // Keep the UART dedicated to a ready signal until the drivetrain sends
-    // its first command. This makes either ESP32 safe to boot or reset first.
-    if (controller->waiting_for_first_command) {
-        if (now_ms - controller->last_status_ms >= kStatusRepeatPeriodMs) {
-            controller->last_status_ms = now_ms;
-            send_status(
-                controller->drivetrain_uart,
-                STATUS_ACTION_COMPLETE,
-                STATUS_DETAIL_NONE);
-        }
-        return true;
-    }
-
     if (controller->action_active) {
         const bool action_complete = controller->action_is_timed
             ? deadline_reached(now_ms, controller->action_complete_ms)
             : controller->active_stepper != nullptr &&
                 !stepper_is_moving(controller->active_stepper);
-                
+
         if (action_complete) {
             controller->action_active = false;
-            controller->completion_pending = true;
             controller->active_stepper = nullptr;
-            controller->repeat_status_until_ms = now_ms + kStatusRepeatDurationMs;
-            controller->last_status_ms = now_ms;
             send_status(
                 controller->drivetrain_uart,
                 STATUS_ACTION_COMPLETE,
@@ -286,21 +268,5 @@ bool tower_action_controller_update(
             return true;
         }
     }
-
-    if (!controller->completion_pending) return false;
-
-    if (deadline_reached(now_ms, controller->repeat_status_until_ms)) {
-        controller->completion_pending = false;
-        return false;
-    }
-
-    if (now_ms - controller->last_status_ms >= kStatusRepeatPeriodMs) {
-        controller->last_status_ms = now_ms;
-        send_status(
-            controller->drivetrain_uart,
-            STATUS_ACTION_COMPLETE,
-            controller->active_command_detail);
-    }
-
-    return true;
+    return false;
 }

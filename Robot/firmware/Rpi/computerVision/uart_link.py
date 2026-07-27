@@ -238,7 +238,7 @@ class PacketParser:
 # The link object your detector talks to
 # ─────────────────────────────────────────────
 class RobotLink:
-    """Opens the serial port, sends COMMAND packets, and decodes packets from the ESP."""
+    """Sends commands/reports and decodes packets over the ESP32 serial link."""
 
     def __init__(self, port, baud=115200, rx_chunk=256):
         import serial   # imported lazily so the encoders work without pyserial installed
