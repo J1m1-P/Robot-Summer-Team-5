@@ -23,8 +23,12 @@ constexpr float kD = 12.0f;
 constexpr float kEmaAlpha = 0.4f;
 constexpr float kMaxOmegaRadS = 1.2f;
 
-constexpr float kSearchOmegaRadS = 0.8f;  // spin rate while hunting for lost tape
+constexpr float kSearchOmegaRadS = 0.4f;  // spin rate while hunting for lost tape
 constexpr float kSearchTimeoutS = 2.0f;
+
+constexpr float kOvershootDeadbandM = 0.005f;  // below 5mm not worth correcting
+constexpr float kOvershootCorrectionSpeedMps = 0.06f;
+constexpr float kOvershootCorrectionTimeoutS = 3.0f;
 
 constexpr float kTapeWidthM = 0.019f;
 constexpr float kSensorPitchM = 0.019f;
@@ -65,6 +69,16 @@ DirectionInfo GetDirectionInfo(Direction dir) {
         case Direction::PY: return {kSideSensorIndex, kFrontWeights};
     }
     return {0, kFrontWeights};
+}
+
+// PX/MX are a reversible pair (front/back sensor on the same line); PY has
+// no reverse counterpart in this enum, so overshoot on it can't be corrected.
+bool HasOppositeDirection(Direction dir) {
+    return dir == Direction::PX || dir == Direction::MX;
+}
+
+Direction OppositeDirection(Direction dir) {
+    return dir == Direction::PX ? Direction::MX : Direction::PX;
 }
 
 // weighted centroid of active channels, in [-3, 3]; false if line is lost
@@ -165,6 +179,28 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             case StopCondition::LATERAL_ONE:
             case StopCondition::LATERAL_TWO: stop_reached = lateral_done; break;
         }
-        if (stop_reached) return Abort(true);
+        if (stop_reached) {
+            const bool result = Abort(true);
+
+            float overshoot_m = 0.0f;
+            switch (stop_type) {
+                case StopCondition::DISTANCE:
+                    overshoot_m = cumulative_distance_m - stop_value;
+                    break;
+                case StopCondition::LATERAL_ONE:
+                case StopCondition::LATERAL_TWO:
+                    overshoot_m = cumulative_distance_m - lateral_aligner.target_m;
+                    break;
+                case StopCondition::TIME_ONLY:
+                    break;
+            }
+            if (overshoot_m > kOvershootDeadbandM && HasOppositeDirection(dir)) {
+                // Best-effort crawl back to the true stop point; a
+                // missed/timed-out correction still leaves `result` standing.
+                follow_tape(ctx, OppositeDirection(dir), kOvershootCorrectionSpeedMps,
+                            StopCondition::DISTANCE, overshoot_m, kOvershootCorrectionTimeoutS);
+            }
+            return result;
+        }
     }
 }
