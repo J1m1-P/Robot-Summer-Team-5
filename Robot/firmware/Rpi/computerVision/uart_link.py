@@ -51,11 +51,12 @@ def encode_frame(msg_type, payload=b""):
 
 
 # ─────────────────────────────────────────────
-# COMMAND PAYLOAD — mirrors robot_common/command_packet.h's CommandOpcode.
+# COMMAND PAYLOAD — PROPOSAL. Must match the ESP firmware's decode. Coordinate!
 # ─────────────────────────────────────────────
 CMD_STOP   = 0
-CMD_TURN   = 1   # value = steering error (-1..+1), used only during ALIGN
-CMD_SCAN   = 2   # start the initial scan sweep (angle TBD; value unused)
+CMD_TURN   = 1   # value = steering error (-1..+1). A PIVOT IN PLACE — used by the
+                 #   stop-and-pivot ALIGN in detector_reactive.py.
+CMD_SCAN90 = 2   # start the initial 90° sweep (value unused)
 CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
 CMD_FLASH  = 4
 CMD_DONE   = 5
@@ -261,7 +262,7 @@ class RobotLink:
 
     def stop(self):          self.send_command(CMD_STOP)
     def turn(self, error):   self.send_command(CMD_TURN, error)
-    def scan(self):          self.send_command(CMD_SCAN)
+    def scan90(self):        self.send_command(CMD_SCAN90)
     def follow(self):        self.send_command(CMD_FOLLOW)
     def flash(self):         self.send_command(CMD_FLASH)
     def done(self):          self.send_command(CMD_DONE)
@@ -300,9 +301,10 @@ class RobotLink:
 if __name__ == "__main__":
     for name, pkt in [("STOP", encode_command(CMD_STOP)),
                       ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
-                      ("SCAN", encode_command(CMD_SCAN)),
+                      ("SCAN90", encode_command(CMD_SCAN90)),
                       ("FOLLOW", encode_command(CMD_FOLLOW)),
-                      ("RESUME", encode_command(CMD_RESUME))]:
+                      ("RESUME R", encode_command(CMD_RESUME, 1.0)),
+                      ("STEER -0.3", encode_command(CMD_STEER, -0.3))]:
         print(f"{name:10s}:", pkt.hex(" "))
 
     # Round-trip: encode a packet, feed its bytes to the parser, confirm it decodes.

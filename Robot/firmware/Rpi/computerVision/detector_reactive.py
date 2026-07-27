@@ -1,8 +1,7 @@
 """
-Teletubby Detector — (YOLO-only)
+Teletubby Detector — UNIFIED REACTIVE (YOLO-only)
 ================================================================================
-The merge of the continuous and incremental detectors into ONE program. There is
-no "mode" flag: the Pi is fully REACTIVE. It looks only while the ESP holds a
+The Pi is fully REACTIVE, it looks only while the ESP holds a
 look-window open, stops when it sees a tubby, confirms/aligns/flashes, then tells
 the ESP to carry on. Which SEARCH STRATEGY runs is therefore decided entirely by
 the ESP — the same Pi binary serves both:
@@ -12,15 +11,11 @@ the ESP — the same Pi binary serves both:
   INCREMENTAL: ESP brackets each in-place sweep with LOOK_START/LOOK_END and drives
                DARK (window closed) between sweeps. The Pi looks only during sweeps.
 
-The two standalone versions are kept for reference / A-B snapshots:
-  teletubby_detector_headless.py  — continuous only (Pi-initiated SCAN/FOLLOW)
-  detector_incremental.py         — incremental only (WAIT/LOOK)
-This file supersedes both once the ESP-side look-window protocol is settled.
 
 THE STATE MACHINE
 --------------------------------------------------------------------------------
   WAIT     Not looking (ESP driving / between sweeps). YOLO doesn't run.
-           ESP signals LOOK_START -> LOOK.  ROUTINE_DONE -> DONE(no more sweeps left, but 2 teletubbies still remain).
+           ESP signals LOOK_START -> LOOK.  ROUTINE_DONE -> DONE (couldn't find two).
   LOOK     ESP has the window open; Pi runs YOLO each sampled frame.
            See a tubby -> STOP -> CONFIRM.  ESP signals LOOK_END -> WAIT.
   CONFIRM  Stopped. Vote over frames. Consistent -> ALIGN; false positive -> RESUME -> WAIT.
@@ -28,20 +23,16 @@ THE STATE MACHINE
            we know the robot actually finished turning and stopped -> FLASH.
            Lost the target -> RESUME -> WAIT.
   FLASH    Robot is settled on the tubby. FLASH IS A PI ACTION (flash_once) — not a
-           UART command. Flash, record, TURN(undo the align turn), RESUME -> WAIT.
-  DONE     Reached two ways: both tubbies flashed (success), OR the ESP ran out of
-           sweeps via ROUTINE_DONE while a tubby was still unfound (gave up). Either
-           way: tell the ESP to cancel/stand down its routine and stop looking for
-           good. NOTE: the Pi process itself keeps running (still serving the
-           stream) — it doesn't exit. If you want it to actually shut down here,
-           that needs to be added explicitly (e.g. stop_event.set()).
+           UART command. Flash, record, undo the align turn, RESUME -> WAIT.
+  DONE     Both tubbies flashed. Tell the ESP to stop; PI also stops looking.
+
   flow:  WAIT <-> LOOK -> CONFIRM -> ALIGN -> FLASH -> RESUME -> WAIT ... -> DONE
 
-THE Pi <-> ESP CONTRACT (still to finalize)
+THE Pi <-> ESP CONTRACT (*still to finalize*)
 --------------------------------------------------------------------------------
   ESP -> Pi (STATUS packets, payload format TBD):
      LOOK_START    open the look-window (begin looking)
-     LOOK_END      close it (sweep done)
+     LOOK_END      close it (sweep done, nothing found)
      ROUTINE_DONE  (optional) ESP ran out of sweeps and we still lack two
   Pi -> ESP (COMMAND packets):
      STOP     freeze to inspect/align      TURN:x  steer (ALIGN only)
@@ -57,29 +48,23 @@ from collections import Counter
 import cv2
 from flask import Flask, Response, render_template_string
 from ultralytics import YOLO
-from uart_link import (
-    RobotLink,
-    PACKET_TYPE_PI_REQUEST,
-    PACKET_TYPE_STATUS,
-    PI_ACTION_SCAN_TELETUBBIES,
-    PI_RESULT_NOT_FOUND,
-    STATUS_LOOK_START,
-    STATUS_LOOK_END,
-    STATUS_ROUTINE_DONE,
-    decode_pi_request,
-)
+from uart_link import RobotLink, PACKET_TYPE_STATUS   # the ESP32 serial link
+
+try:
+    import RPi.GPIO as GPIO       # only present on the Pi itself
+except (ImportError, RuntimeError):
+    GPIO = None                   # dev machine — flash_once() just logs
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION — everything you tune lives here
 # ══════════════════════════════════════════════════════════════════════════════
 # ── camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 0         # ADJUST: 0 if one camera, 1 for built-in + USB
+CAMERA_INDEX = 1          # ADJUST: 0 if one camera, 1 for built-in + USB
 
 # ── model / detection ─────────────────────────────────────────────────────────
-MODEL_PATH  = r"/home/admin5/robotSummer/teamRepo/Robot-Summer-Team-5/Robot/firmware/Rpi/best_ncnn_model"  # !!! SET TO YOUR PI PATH
-                          #     e.g. "/home/admin5/robotSummer/.../best_ncnn_model"
-IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — must match the ncnn export size
+MODEL_PATH  = r"E:\runs\detect\train-9\weights\best_ncnn_model"  # ADJUST: .pt or ncnn folder
+IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — smaller = faster, less accurate
 DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── how often YOLO runs while LOOKing ─────────────────────────────────────────
@@ -90,6 +75,10 @@ YOLO_EVERY_N = 2          # ADJUST: run YOLO every Nth frame while LOOKing. CONF
 CONFIRM_FRAMES   = 5      # ADJUST: frames to sample while stopped in CONFIRM
 CONFIRM_VOTES    = 3      # ADJUST: how many must agree before we commit to ALIGN
 ALIGN_THRESHOLD  = 0.08   # ADJUST: |error| below this counts as "centered"
+MISS_GRACE       = 2      # ADJUST: no-detection frames to ride through (YOLO flicker /
+                          #         blur) before we treat the target as lost. The robot
+                          #         is already stopped in ALIGN, so this just protects the
+                          #         settle from a single dropped frame.
 ALIGN_MAX_MISSES = 4      # ADJUST: no-detection frames ALIGN tolerates before giving up
 SETTLE_FRAMES    = 3      # ADJUST: consecutive centered frames required before flashing.
                           #         This is the "wait until the robot has turned to its
@@ -98,80 +87,102 @@ SETTLE_FRAMES    = 3      # ADJUST: consecutive centered frames required before 
 FLASH_COUNT      = 3      # ADJUST: how many flashes once settled
 TARGETS_TO_FIND  = 2      # only two tubbies exist and we need both — leave at 2
 
-# ── standalone vision test ────────────────────────────────────────────────────
-DEV_FORCE_LOOK = False    # False = production UART mode.
-                          # True = standalone vision mode with no ESP serial link.
+# ── flash hardware ─────────────────────────────────────────────────────────────
+FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
+FLASH_ON_TIME = 0.05      # ADJUST: seconds the flash stays on per pulse
+
+if GPIO is not None:
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(FLASH_PIN, GPIO.OUT, initial=GPIO.LOW)
 
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
-SERIAL_PORT = "/dev/serial0"        # ADJUST: None = DEV MODE (commands just print). "COM5" /
+SERIAL_PORT = None        # ADJUST: None = DEV MODE (commands just print). "COM5" /
                           #         "/dev/serial0" / "/dev/ttyUSB0" to transmit.
 SERIAL_BAUD = 115200      # ADJUST: must match the ESP's baud rate
-link = None if DEV_FORCE_LOOK else (RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None)
+link = RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None
 
 # ── browser view ──────────────────────────────────────────────────────────────
-ENABLE_STREAM = True      # ADJUST: True to watch stream
-
-# ── flash hardware ─────────────────────────────────────────────────────────────
-FLASH_PIN = None          # ADJUST: BCM GPIO pin driving the flash (e.g. 18). None =
-                          #         DEV MODE (flash_once() just prints, no GPIO needed).
-FLASH_ON_SECONDS = 0.15   # ADJUST: how long the pin stays high per flash
-
-if FLASH_PIN is not None:
-    import RPi.GPIO as GPIO
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(FLASH_PIN, GPIO.OUT)
-    GPIO.output(FLASH_PIN, GPIO.LOW)
-
+ENABLE_STREAM = True      # ADJUST: True to watch (dev). False on the robot.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # YOLO DETECTION
 # ══════════════════════════════════════════════════════════════════════════════
-# (Unchanged from teletubby_detector_headless.py — all versions share brains.)
 
 model = YOLO(MODEL_PATH)
 YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"}
 
 
-def yolo_detect(frame, frame_w, exclude=None, want_id=None):
+def yolo_detect_all(frame, frame_w, exclude=None, want_id=None):
     """
-    Run YOLO on one frame and return a SINGLE detection, or None.
-    Returns (identity, (x, y, w, h), error). See headless file for full notes.
+    Run YOLO on one frame and return ALL selectable detections, highest-confidence
+    first. Each is (identity, (x, y, w, h), error), error in -1 (left) .. +1 (right).
+
+    `exclude`  : identities to drop (we pass `visited` = already-flashed tubbies).
+    `want_id`  : if set, keep only this identity. CONFIRM/ALIGN pass the committed
+                 target so a SECOND tubby in frame can't hijack the vote or the turn.
+
+    Returning the full list (not just the best box) lets LOOK see BOTH tubbies and
+    choose which to service first — see pick_target().
     """
     exclude = exclude or set()
     results = model(frame, conf=DETECT_CONF, imgsz=IMGSZ, verbose=False)
     boxes = results[0].boxes
     if len(boxes) == 0:
-        return None
+        return []
 
     xyxy = boxes.xyxy.cpu().numpy()
     cls  = boxes.cls.cpu().numpy().astype(int)
     conf = boxes.conf.cpu().numpy()
 
-    candidates = []
-    for i in range(len(boxes)):
+    dets = []
+    for i in conf.argsort()[::-1]:           # highest confidence first
         identity = YOLO_NAME_MAP[model.names[cls[i]]]
         if identity in exclude:
             continue
         if want_id is not None and identity != want_id:
             continue
-        candidates.append((identity, xyxy[i], conf[i]))
+        x1, y1, x2, y2 = xyxy[i]
+        x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
+        error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)
+        dets.append((identity, (x, y, w, h), error))
+    return dets
 
-    if not candidates:
-        return None
 
-    identity, box, _ = max(candidates, key=lambda c: c[2])   # highest confidence
-    x1, y1, x2, y2 = box
-    x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
-    error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)
-    return identity, (x, y, w, h), error
+def yolo_detect(frame, frame_w, exclude=None, want_id=None):
+    """Single best (highest-confidence) selectable detection, or None. Used by
+    CONFIRM/ALIGN where want_id has already narrowed to the one committed target."""
+    dets = yolo_detect_all(frame, frame_w, exclude, want_id)
+    return dets[0] if dets else None
+
+
+def pick_target(detections):
+    """
+    Choose which tubby to service FIRST and note where the OTHER one is.
+      detections : list from yolo_detect_all (already excludes visited tubbies).
+    Returns (target, other_side):  target = chosen detection tuple (or None);
+      other_side = -1 left / +1 right / None if it's alone.
+
+    Policy = closest-to-center first. Same side -> continuing that way keeps the far
+    one in view. Opposite sides -> other_side is the direction to turn BACK after the
+    flash (we lose the far one from frame during the first turn — this makes the
+    re-acquisition directed rather than a blind sweep).
+    """
+    if not detections:
+        return None, None
+    ordered = sorted(detections, key=lambda d: abs(d[2]))   # nearest center first
+    target = ordered[0]
+    other_side = None
+    if len(ordered) > 1:
+        other_side = -1 if ordered[1][2] < 0 else 1
+    return target, other_side
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TALKING TO THE ROBOT
 # ══════════════════════════════════════════════════════════════════════════════
-#   Command set for the reactive Pi.
+# Command set for the reactive Pi. NO FLASH (the Pi flashes itself, see flash_once).
 #   STOP    freeze to inspect/align        TURN:x  steer (ALIGN only)
-#   RESUME  continue your sweep/drive      DONE    finished teletubby task— stop everything
+#   RESUME  continue your sweep/drive      DONE    finished — stop everything
 
 def send(message):
     """
@@ -185,23 +196,29 @@ def send(message):
         link.turn(float(message.split(":", 1)[1]))
     elif message == "STOP":     link.stop()
     elif message == "DONE":     link.done()
-    elif message == "RESUME":   link.resume()
+    elif message.startswith("RESUME"):
+        # "RESUME" or "RESUME:L" / "RESUME:R". The suffix is a search-direction hint
+        # for the turn-back to the other tubby; firmware may ignore it and plain-resume.
+        parts = message.split(":")
+        direction = -1.0 if parts[1:] == ["L"] else (1.0 if parts[1:] == ["R"] else 0.0)
+        link.resume(direction)
     else:
         print(f"[TX] unknown command: {message}")
 
 
 def flash_once():
     """
-    Fire the Pi's OWN flash once. Flashing is a Pi action now (not a UART command),
-    so its timing is fully under Pi control — we only get here after the robot has
-    settled centered on the tubby (see ALIGN's SETTLE_FRAMES guard).
+    Fire the Pi's OWN flash once via GPIO18. Flashing is a Pi action now (not a UART
+    command), so its timing is fully under Pi control — we only get here after the
+    robot has settled centered on the tubby (see ALIGN's SETTLE_FRAMES guard).
     """
-    if FLASH_PIN is None:
-        print("[FLASH] (Pi-side, DEV MODE — set FLASH_PIN to drive real hardware)")
+    if GPIO is None:
+        print("[FLASH] (Pi-side, no GPIO — dev machine)")
         return
     GPIO.output(FLASH_PIN, GPIO.HIGH)
-    time.sleep(FLASH_ON_SECONDS)
+    time.sleep(FLASH_ON_TIME)
     GPIO.output(FLASH_PIN, GPIO.LOW)
+    print("[FLASH] (Pi-side)")
 
 
 # ── ESP -> Pi signals ─────────────────────────────────────────────────────────
@@ -215,42 +232,22 @@ esp_routine_done = False   # (optional) ESP ran all its sweeps, we still lack tw
 def handle_incoming():
     """
     Drain packets from the ESP and set the matching signal flag. Call once/loop.
-    payload[0] is the StatusCode (see robot_common/status_packet.h); payload[1],
-    the detail byte, is unused by any of these three signals.
+
+    TODO (needs the teammate's STATUS payload format — same open item as the COMMAND
+    sub-format): decode WHICH signal this packet carries and set only that flag. The
+    placeholder can't tell them apart, so it just trips LOOK_START — REPLACE it before
+    hardware, or the Pi will look at the wrong times.
     """
     global esp_look_start, esp_look_end, esp_routine_done
     if link is None:
         return
     for msg_type, payload in link.poll():
-        if msg_type == PACKET_TYPE_PI_REQUEST:
-            try:
-                request_id, action, _ = decode_pi_request(payload)
-            except ValueError:
-                continue
-
-            if action == PI_ACTION_SCAN_TELETUBBIES:
-                # PLACEHOLDER: connect this request to the detector and return
-                # PI_RESULT_OK with its target id, normalized horizontal error,
-                # and confidence. Until then, report a clean scan miss.
-                link.send_pi_report(
-                    request_id,
-                    action,
-                    PI_RESULT_NOT_FOUND,
-                    target_id=0,
-                    horizontal_error=0.0,
-                    confidence_percent=0,
-                )
-            continue
-
-        if msg_type != PACKET_TYPE_STATUS or not payload:
-            continue
-        code = payload[0]
-        if code == STATUS_LOOK_START:
+        if msg_type == PACKET_TYPE_STATUS:
+            # TODO: inspect `payload` and set exactly one of:
+            #   esp_look_start   = True
+            #   esp_look_end     = True
+            #   esp_routine_done = True
             esp_look_start = True
-        elif code == STATUS_LOOK_END:
-            esp_look_end = True
-        elif code == STATUS_ROUTINE_DONE:
-            esp_routine_done = True
 
 
 def consume(flag_name):
@@ -264,6 +261,7 @@ def consume(flag_name):
 # ══════════════════════════════════════════════════════════════════════════════
 # FRAME HAND-OFF — the one thing the control thread and Flask share
 # ══════════════════════════════════════════════════════════════════════════════
+# (Unchanged from the other detectors.)
 
 class FrameBuffer:
     def __init__(self):
@@ -296,7 +294,7 @@ stop_event = threading.Event()
 WAIT, LOOK, CONFIRM, ALIGN, FLASH, DONE = "WAIT", "LOOK", "CONFIRM", "ALIGN", "FLASH", "DONE"
 
 cap             = cv2.VideoCapture(CAMERA_INDEX)
-state           = LOOK if DEV_FORCE_LOOK else WAIT   # DEV_FORCE_LOOK skips the ESP wait
+state           = WAIT     # boot idle; ESP's first LOOK_START -> LOOK
 target_id       = None
 confirm_votes   = []
 confirmed_ids   = set()
@@ -307,14 +305,17 @@ flash_sent      = 0
 done_sent       = False
 frame_count     = 0
 last_detection  = None
+last_look_dets  = []       # most recent multi-detect list (reused on skipped LOOK frames)
+pending_other_side = None  # where the OTHER tubby was when we committed (-1/+1/None)
 align_misses    = 0
+start_sent      = False    # one-shot kick-off (see WAIT)
 
 
 def control_loop():
     """Owns the camera and the state machine. Runs on its own thread, forever."""
     global state, target_id, confirm_votes, confirmed_ids, visited
     global align_error, centered_streak, flash_sent, done_sent, frame_count
-    global last_detection, align_misses
+    global last_detection, last_look_dets, pending_other_side, align_misses, start_sent
 
     consecutive_failures = 0
     MAX_FAILURES = 30        # ADJUST: bad reads in a row before we give up (~1s @30fps)
@@ -337,55 +338,52 @@ def control_loop():
         frame_count += 1
         handle_incoming()
 
-        # ── Decide whether to run YOLO on this frame ─────────────────────────────
+        # ── Decide whether to run YOLO this frame ─────────────────────────────
         # Only LOOK/CONFIRM/ALIGN look. WAIT and DONE run NO inference — that's the
         # "stop looking" behaviour and why WAIT is cheap while the ESP drives.
+        # CONFIRM/ALIGN are narrowed to the committed target via want_id. LOOK keeps
+        # the WHOLE list so it can choose between two tubbies (see pick_target).
+        look_dets = []
         if state in (CONFIRM, ALIGN):
-            want = target_id if state == ALIGN else None
-            detection = yolo_detect(frame, frame_w, exclude=visited, want_id=want)
+            detection = yolo_detect(frame, frame_w, exclude=visited, want_id=target_id)
             last_detection = detection
         elif state == LOOK and frame_count % YOLO_EVERY_N == 0:
-            last_detection = yolo_detect(frame, frame_w, exclude=visited) ## process frame
-            detection = last_detection
+            look_dets = yolo_detect_all(frame, frame_w, exclude=visited)
+            last_look_dets = look_dets
+            detection = look_dets[0] if look_dets else None   # best, for the overlay
         elif state == LOOK:
-            detection = last_detection    # skipped frame -> reuse most recent
+            look_dets = last_look_dets                        # skipped frame -> reuse
+            detection = look_dets[0] if look_dets else None
         else:
             detection = None              # WAIT / DONE -> not looking
 
         # ── State machine ─────────────────────────────────────────────────────
         if state == DONE:
             if not done_sent:
-                send("DONE")              # ESP stops sweeping; we've already stopped looking
-                done_sent = True
+                send("DONE")              # Have found two teletubbies
+                done_sent = True          # Tells ESP to stop sweeping, PI exists control loop
+                stop_event.set();
 
         # ── WAIT: idle while the ESP drives. Wait for it to open the window. ──
-        # No Pi-side kick-off: the ESP owns the routine and self-starts it at
-        # power-on (that's the whole point of "reactive" — the Pi never drives).
-        # If the ESP needs an explicit go-ahead instead, send it here once, guarded
-        # by a one-shot flag.
         elif state == WAIT:
-            if DEV_FORCE_LOOK:
-                state = LOOK              # test mode: never idle, re-open the window ourselves
-            elif consume("esp_look_start"):
-                # Discard any stale esp_look_end left over from the PREVIOUS look
-                # window. handle_incoming() runs every tick regardless of state, so
-                # if the ESP's LOOK_END for that old window arrived while we were
-                # off in CONFIRM/ALIGN/FLASH (e.g. we found a tubby right as that
-                # sweep ended), it would otherwise sit unconsumed and get misread as
-                # "this brand-new window just ended" the instant we start LOOK.
-                consume("esp_look_end")
+            if not start_sent:
+                send("START")
+                start_sent = True
+            if consume("esp_look_start"):        # a look-window opened -> start looking
                 state = LOOK
-            elif consume("esp_routine_done"):
+            elif consume("esp_routine_done"):    # ESP ran out of sweeps, still < 2 found
                 state = DONE
 
         # ── LOOK: ESP holds the window open; we watch each sampled frame. ─────
         elif state == LOOK:
-            if detection is not None:
-                target_id = detection[0]
+            target, other_side = pick_target(look_dets)   # closest-to-center first
+            if target is not None:
+                target_id = target[0]
+                pending_other_side = other_side           # which way the 2nd tubby sits
                 confirm_votes = []
-                send("STOP")             # freeze so CONFIRM sees a stable frame
+                send("STOP")                               # freeze to inspect (stop-and-pivot)
                 state = CONFIRM
-            elif consume("esp_look_end"):
+            elif consume("esp_look_end"):                  # window closed, nothing found
                 state = WAIT
 
         # ── CONFIRM: stopped. Vote across frames. (from headless) ─────────────
@@ -402,7 +400,7 @@ def control_loop():
                     centered_streak = 0
                     state = ALIGN
                 else:
-                    target_id = None # False detection
+                    target_id = None
                     send("RESUME")
                     state = WAIT
 
@@ -410,12 +408,19 @@ def control_loop():
         elif state == ALIGN:
             if detection is None:
                 align_misses += 1
-                centered_streak = 0        # lost sight -> not settled
-                if align_misses > ALIGN_MAX_MISSES:
+                # The robot is already stopped here, so "lost" just means wait or give
+                # up — nothing to coast. Ride out a brief flicker WITHOUT resetting the
+                # settle; only a longer gap forces a re-settle; a long one gives up.
+                if align_misses <= MISS_GRACE:
+                    pass                   # flicker — hold position, keep centered_streak
+                elif align_misses <= ALIGN_MAX_MISSES:
+                    centered_streak = 0    # probably lost sight -> re-settle when it returns
+                else:
                     target_id = None
                     align_error = None
                     align_misses = 0
-                    send("RESUME")
+                    centered_streak = 0
+                    send("RESUME")         # truly lost -> hand back to the ESP to re-find
                     state = WAIT
             else:
                 align_misses = 0
@@ -428,10 +433,6 @@ def control_loop():
                     # SETTLE_FRAMES frames = "turned to its place and stopped moving".
                     send("STOP")
                     centered_streak += 1
-                    # Deliberately Pi-side only: there's no ESP "turn complete" ack on
-                    # the wire, so a vision-side streak is the settle signal for now.
-                    # If FLASH ever fires while the robot is visibly still drifting,
-                    # that's the sign to raise SETTLE_FRAMES or add a real ESP ack.
                     if centered_streak >= SETTLE_FRAMES:
                         flash_sent = 0
                         centered_streak = 0
@@ -453,16 +454,24 @@ def control_loop():
                 if len(confirmed_ids) >= TARGETS_TO_FIND:
                     state = DONE
                 else:
-                    # Undo the align turn so the ESP resumes roughly re-aimed, then
-                    # hand the routine back and go idle until the next look-window.
-                    # The ESP UART queue preserves both commands in order.
+                    # Undo the align pivot so the ESP resumes roughly re-aimed, then hand
+                    # the routine back with a direction hint toward where the OTHER tubby
+                    # was, so it turns the right way instead of sweeping blind. visited now
+                    # hides this tubby so the next CONFIRM can only pick B.
+                    # NOTE: TURN then RESUME go out back-to-back — if the ESP holds only
+                    # one unread packet, space them or fold the turn-back into RESUME on
+                    # the firmware side.
                     if align_error is not None:
                         send(f"TURN:{-align_error:.3f}")
-                    send("RESUME")
+                    if pending_other_side is not None:
+                        send("RESUME:R" if pending_other_side > 0 else "RESUME:L")
+                    else:
+                        send("RESUME")
                     state = WAIT
 
                 target_id = None
                 align_error = None
+                pending_other_side = None
                 flash_sent = 0
 
         # ── Publish an annotated frame for viewers (skipped when headless) ────
@@ -480,6 +489,7 @@ def control_loop():
 # ══════════════════════════════════════════════════════════════════════════════
 # DISPLAY + WEB SERVER — watch the robot from a browser
 # ══════════════════════════════════════════════════════════════════════════════
+# (Unchanged from the other detectors.)
 
 app = Flask(__name__)
 
@@ -542,11 +552,15 @@ if __name__ == '__main__':
     worker = threading.Thread(target=control_loop, daemon=True)
     worker.start()
 
-    if ENABLE_STREAM:
-        app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
-    else:
-        try:
-            stop_event.wait()
-        except KeyboardInterrupt:
-            stop_event.set()
-        worker.join(timeout=2.0)
+    try:
+        if ENABLE_STREAM:
+            app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+        else:
+            try:
+                stop_event.wait()
+            except KeyboardInterrupt:
+                stop_event.set()
+            worker.join(timeout=2.0)
+    finally:
+        if GPIO is not None:
+            GPIO.cleanup()
