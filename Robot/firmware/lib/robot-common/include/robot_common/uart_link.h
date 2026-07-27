@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+// Holds short packet bursts until the application consumes them.
+#define UART_LINK_RX_QUEUE_SIZE 8U
+
 // Identifies the byte currently expected by the packet parser.
 typedef enum {
     PACKET_PARSE_MAGIC_0 = 0,
@@ -49,7 +52,7 @@ typedef struct {
     size_t tx_buffer_size;
 } UartLinkConfig;
 
-// Holds the runtime state, latest packet, and diagnostic counters for a UART link.
+// Holds parser state, received-packet queue, and link diagnostics.
 typedef struct {
     const UartLinkConfig *config;
     PacketParser parser;
@@ -59,8 +62,10 @@ typedef struct {
     uint32_t packets_overwritten;
     uint32_t checksum_errors;
     uint32_t parse_errors;
-    bool has_new_packet;
-    PacketFrame latest_packet;
+    PacketFrame rx_queue[UART_LINK_RX_QUEUE_SIZE];
+    uint8_t rx_queue_head;
+    uint8_t rx_queue_tail;
+    uint8_t rx_queue_count;
 } UartLink;
 
 // Installs and configures the UART driver. The link must be zero-initialized before its first call.
@@ -77,10 +82,10 @@ esp_err_t uart_link_update(UartLink *link);
 esp_err_t uart_link_send(UartLink *link, PacketMessageType message_type, const uint8_t *payload,
                          uint8_t payload_len);
 
-// Copies out the latest complete packet and marks it as consumed.
+// Removes and returns the oldest queued packet.
 esp_err_t uart_link_take_packet(UartLink *link, PacketFrame *packet_out);
 
-// Reports whether a complete packet is waiting to be consumed.
+// Reports whether at least one complete packet is queued.
 bool uart_link_has_packet(const UartLink *link);
 
 #ifdef __cplusplus

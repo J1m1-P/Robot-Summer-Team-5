@@ -1,18 +1,17 @@
 """
 uart_link.py — Python (detector) end of the ESP32 packet link
 ================================================================================
-Mirrors the wire format in your teammate's robot_common/uart_link.c so the ESP32
-accepts packets we send, and so we can decode packets it sends back. The detector
-sends COMMANDs; the ESP sends telemetry (ODOMETRY / STATUS).
+Mirrors the wire format in robot_common/uart_link.c so the ESP32 accepts packets
+we send and so we can decode packets it sends. In the arm-controlled flow, the
+Pi receives PI_REQUEST packets and answers with PI_REPORT packets.
 
 TWO LAYERS:
   1. OUTER FRAME — fully defined by the C files, so this code is exact:
         [0xAA][0x55][VERSION=0x01][TYPE][LEN][PAYLOAD...][CHECKSUM]
         CHECKSUM = XOR(version, type, len, every payload byte)   (magic excluded)
-  2. COMMAND / STATUS PAYLOAD — defined by robot_common/command_packet.h and
-     robot_common/status_packet.h. The CMD_*/STATUS_* values and the ×100 value
-     scaling below are a Python mirror of those headers, not an independent
-     spec — if you change one side, change both.
+  2. PAYLOADS — defined by the matching robot_common packet headers. The
+     constants and scaling below mirror those headers, so both copies must be
+     changed together.
 """
 
 import struct
@@ -29,7 +28,9 @@ PACKET_TYPE_INVALID  = 0
 PACKET_TYPE_ODOMETRY = 1
 PACKET_TYPE_COMMAND  = 2
 PACKET_TYPE_STATUS   = 3
-PACKET_TYPE_MAX      = 4
+PACKET_TYPE_PI_REQUEST = 4
+PACKET_TYPE_PI_REPORT  = 5
+PACKET_TYPE_MAX        = 6
 
 PACKET_MAX_PAYLOAD_SIZE = 64
 
@@ -79,6 +80,17 @@ CMD_HABITAT_OPEN_LEFT_CLAW = 23
 CMD_HABITAT_CLOSE_LEFT_CLAW = 24
 CMD_HABITAT_OPEN_RIGHT_CLAW = 25
 CMD_HABITAT_CLOSE_RIGHT_CLAW = 26
+CMD_PI_SCAN_TELETUBBIES = 27
+
+# PiAction and PiResultCode, from pi_action_packet.h
+PI_ACTION_SCAN_TELETUBBIES = 0
+
+PI_RESULT_OK = 0
+PI_RESULT_NOT_FOUND = 1
+PI_RESULT_TIMEOUT = 2
+PI_RESULT_CAMERA_FAULT = 3
+PI_RESULT_LINK_ERROR = 4
+PI_RESULT_INVALID_REQUEST = 5
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -124,6 +136,37 @@ def encode_command(opcode, value=0.0):
     scaled = max(-127, min(127, int(round(value * 100))))
     payload = struct.pack("<Bb", opcode, scaled)   # B = opcode (uint8), b = value (int8)
     return encode_frame(PACKET_TYPE_COMMAND, payload)
+
+
+def decode_pi_request(payload):
+    """Return (request_id, action, parameter) for a valid Pi request."""
+    if len(payload) != 3:
+        raise ValueError("invalid Pi request length")
+    request_id, action, raw_parameter = struct.unpack("<BBb", payload)
+    if action != PI_ACTION_SCAN_TELETUBBIES:
+        raise ValueError("invalid Pi action")
+    return request_id, action, raw_parameter / 100.0
+
+
+def encode_pi_report(request_id, action, result, target_id=0,
+                     horizontal_error=0.0, confidence_percent=0):
+    """Encode the report the arm ESP32 will relay to the drivetrain."""
+    if action != PI_ACTION_SCAN_TELETUBBIES:
+        raise ValueError("invalid Pi action")
+    if result < PI_RESULT_OK or result > PI_RESULT_INVALID_REQUEST:
+        raise ValueError("invalid Pi result")
+    confidence_percent = max(0, min(100, int(confidence_percent)))
+    error_x1000 = int(round(max(-1.0, min(1.0, horizontal_error)) * 1000))
+    payload = struct.pack(
+        "<BBBBhB",
+        request_id & 0xFF,
+        action,
+        result,
+        target_id & 0xFF,
+        error_x1000,
+        confidence_percent,
+    )
+    return encode_frame(PACKET_TYPE_PI_REPORT, payload)
 
 
 # ─────────────────────────────────────────────
@@ -209,6 +252,12 @@ class RobotLink:
     # --- sending ---
     def send_command(self, opcode, value=0.0):
         self.ser.write(encode_command(opcode, value))
+
+    def send_pi_report(self, request_id, action, result, target_id=0,
+                       horizontal_error=0.0, confidence_percent=0):
+        self.ser.write(encode_pi_report(
+            request_id, action, result, target_id,
+            horizontal_error, confidence_percent))
 
     def stop(self):          self.send_command(CMD_STOP)
     def turn(self, error):   self.send_command(CMD_TURN, error)

@@ -1,5 +1,5 @@
 /*
- * Defines commands exchanged between the Pi and the two ESP32 boards.
+ * Defines commands issued by the drivetrain to arm-side action controllers.
  * The API sends, identifies, and decodes its fixed wire representation.
  */
 #pragma once
@@ -51,6 +51,9 @@ typedef enum {
     CMD_HABITAT_OPEN_RIGHT_CLAW,
     CMD_HABITAT_CLOSE_RIGHT_CLAW,
 
+    // Raspberry Pi Tasks
+    CMD_PI_SCAN_TELETUBBIES,
+
     CMD_MAX
 } CommandOpcode;
 
@@ -65,6 +68,7 @@ typedef struct {
     //                       matching DrivetrainBodyVelocity.omega).
     // Tower/Habitat stepper commands: requested travel in units of 100 mm.
     // For example, 0.50 requests 50 mm and 0.30 requests 30 mm.
+    // Pi commands: optional action parameter forwarded in the Pi request.
     // Unused (0) for all other opcodes.
     float value;
 } CommandPacket;

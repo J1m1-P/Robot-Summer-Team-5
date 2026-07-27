@@ -170,9 +170,9 @@ void receive_packets() {
 }
 ```
 
-The link stores only the latest complete packet. If another packet arrives
-before the current one is taken, `packets_overwritten` increments. The other
-runtime counters are `packets_sent`, `packets_received`, `checksum_errors`, and
+The link queues up to eight complete packets. If the queue is full, the oldest
+packet is replaced and `packets_overwritten` increments. The other runtime
+counters are `packets_sent`, `packets_received`, `checksum_errors`, and
 `parse_errors`.
 
 ### Complete fused-data example

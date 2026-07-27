@@ -18,9 +18,6 @@ struct TowerActionController {
     bool action_is_timed;
     uint32_t action_complete_ms;
     uint8_t active_command_detail;
-    bool completion_pending;
-    uint32_t repeat_status_until_ms;
-    uint32_t last_status_ms;
 };
 
 // Connects the controller to initialized UART and stepper hardware.
@@ -42,8 +39,7 @@ void tower_action_controller_start(
     TowerActionController *controller,
     const CommandPacket *command);
 
-// Reports completed actions repeatedly so the drivetrain cannot easily miss
-// them. Returns true while completion packets take priority over odometry.
+// Updates the action and reports completion once over the queued UART link.
 bool tower_action_controller_update(
     TowerActionController *controller,
     uint32_t now_ms);

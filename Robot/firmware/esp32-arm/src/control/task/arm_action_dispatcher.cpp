@@ -1,4 +1,4 @@
-/* Implements shared UART routing for Tower and Habitat actions. */
+/* Implements shared UART routing for Tower, Habitat, and Pi actions. */
 #include "control/task/arm_action_dispatcher.h"
 
 #include <Arduino.h>
@@ -23,8 +23,8 @@ void send_status(
     (void)status_packet_send(dispatcher->drivetrain_uart, &status);
 }
 
-// Receives one drivetrain command and routes it to Tower or Habitat.
-void service_command(ArmActionDispatcher *dispatcher) {
+// Receives one drivetrain command and routes it to Tower, Habitat, or RPI.
+void service_command(ArmActionDispatcher *dispatcher, uint32_t now_ms) {
     
     // Read available drivetrain UART data into the packet parser.
     const esp_err_t update_error =
@@ -40,7 +40,7 @@ void service_command(ArmActionDispatcher *dispatcher) {
     }
     dispatcher->uart_fault_logged = false;
 
-    // Take the latest complete packet.
+    // Take the oldest queued packet.
     PacketFrame frame = {};
     if (uart_link_take_packet(
             dispatcher->drivetrain_uart, &frame) != ESP_OK) {
@@ -63,12 +63,15 @@ void service_command(ArmActionDispatcher *dispatcher) {
         tower_action_controller_accepts(command.opcode);
     const bool is_habitat =
         habitat_action_controller_accepts(command.opcode);
-    const bool supported = is_tower || is_habitat;
+    const bool is_pi =
+        pi_action_controller_accepts(command.opcode);
+    const bool supported = is_tower || is_habitat || is_pi;
 
-    // Do not allow Tower and Habitat hardware to operate concurrently.
+    // Keep remote and physical arm actions sequential.
     const bool arm_busy =
         tower_action_controller_is_busy(dispatcher->tower_controller) ||
-        habitat_action_controller_is_busy(dispatcher->habitat_controller);
+        habitat_action_controller_is_busy(dispatcher->habitat_controller) ||
+        pi_action_controller_is_busy(dispatcher->pi_controller);
 
     // Reject unsupported commands or commands received while busy.
     if (!supported || arm_busy) {
@@ -92,9 +95,12 @@ void service_command(ArmActionDispatcher *dispatcher) {
     if (is_tower) {
         tower_action_controller_start(
             dispatcher->tower_controller, &command);
-    } else {
+    } else if (is_habitat) {
         habitat_action_controller_start(
             dispatcher->habitat_controller, &command);
+    } else {
+        pi_action_controller_start(
+            dispatcher->pi_controller, &command, now_ms);
     }
 }
 
@@ -105,12 +111,14 @@ void arm_action_dispatcher_init(
     ArmActionDispatcher *dispatcher,
     UartLink *drivetrain_uart,
     TowerActionController *tower_controller,
-    HabitatActionController *habitat_controller) {
+    HabitatActionController *habitat_controller,
+    PiActionController *pi_controller) {
 
     *dispatcher = {};
     dispatcher->drivetrain_uart = drivetrain_uart;
     dispatcher->tower_controller = tower_controller;
     dispatcher->habitat_controller = habitat_controller;
+    dispatcher->pi_controller = pi_controller;
     dispatcher->readiness_pending = true;
 }
 
@@ -119,7 +127,7 @@ bool arm_action_dispatcher_update(
     ArmActionDispatcher *dispatcher,
     uint32_t now_ms) {
     
-    service_command(dispatcher);
+    service_command(dispatcher, now_ms);
 
     if (dispatcher->readiness_pending) {
         if (now_ms - dispatcher->last_ready_status_ms >=
@@ -140,7 +148,11 @@ bool arm_action_dispatcher_update(
     // Update Habitat
     const bool reporting_habitat = habitat_action_controller_update(
         dispatcher->habitat_controller, now_ms);
-    
-    // Reserve the shared UART while either controller reports completion.
-    return reporting_tower || reporting_habitat;
+
+    // Update the Pi request/report transaction.
+    const bool reporting_pi = pi_action_controller_update(
+        dispatcher->pi_controller, now_ms);
+
+    // Reserve the shared UART while any controller reports completion.
+    return reporting_tower || reporting_habitat || reporting_pi;
 }

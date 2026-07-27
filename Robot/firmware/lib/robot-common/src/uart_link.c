@@ -1,6 +1,6 @@
 /*
  * Implements the shared UART packet transport and streaming packet parser.
- * Incoming bytes are validated and stored as the latest complete packet.
+ * Incoming bytes are validated and queued for ordered consumption.
  */
 #include <robot_common/uart_link.h>
 
@@ -31,6 +31,9 @@
 // The wire format stores payload length in one byte.
 _Static_assert(PACKET_MAX_PAYLOAD_SIZE <= UINT8_MAX,
                "PACKET_MAX_PAYLOAD_SIZE must fit in uint8_t");
+_Static_assert(UART_LINK_RX_QUEUE_SIZE > 0U &&
+                   UART_LINK_RX_QUEUE_SIZE <= UINT8_MAX,
+               "UART receive queue size must fit in uint8_t");
 
 // Adds one byte to the packet's XOR checksum.
 static uint8_t checksum_update(uint8_t checksum, uint8_t byte) {
@@ -60,10 +63,11 @@ static void parser_reset(PacketParser *parser) {
     parser->state = PACKET_PARSE_MAGIC_0;
 }
 
-// Publishes a validated parser payload as the link's latest packet.
+// Queues one validated packet. If full, the oldest packet is discarded so
+// current commands and reports are retained.
 static void parser_finish_packet(UartLink *link) {
     PacketParser *parser = &link->parser;
-    PacketFrame *frame = &link->latest_packet;
+    PacketFrame *frame = &link->rx_queue[link->rx_queue_tail];
 
     memset(frame, 0, sizeof(*frame));
     frame->message_type = parser->message_type;
@@ -73,11 +77,18 @@ static void parser_finish_packet(UartLink *link) {
         memcpy(frame->payload, parser->payload, parser->payload_len);
     }
 
-    if (link->has_new_packet) {
+    if (link->rx_queue_count == UART_LINK_RX_QUEUE_SIZE) {
+        link->rx_queue_head =
+            (uint8_t)((link->rx_queue_head + 1U) %
+                      UART_LINK_RX_QUEUE_SIZE);
         link->packets_overwritten++;
+    } else {
+        link->rx_queue_count++;
     }
 
-    link->has_new_packet = true;
+    link->rx_queue_tail =
+        (uint8_t)((link->rx_queue_tail + 1U) %
+                  UART_LINK_RX_QUEUE_SIZE);
     link->packets_received++;
 }
 
@@ -282,19 +293,22 @@ esp_err_t uart_link_send(UartLink *link, PacketMessageType message_type, const u
     return ESP_OK;
 }
 
-// Returns the latest complete packet and clears its availability flag.
+// Dequeues the oldest complete packet.
 esp_err_t uart_link_take_packet(UartLink *link, PacketFrame *packet_out) {
     if (link == NULL || packet_out == NULL) return ESP_ERR_INVALID_ARG;
     if (!link->initialized || link->config == NULL) return ESP_ERR_INVALID_STATE;
-    if (!link->has_new_packet) return ESP_ERR_NOT_FOUND;
+    if (link->rx_queue_count == 0U) return ESP_ERR_NOT_FOUND;
 
-    *packet_out = link->latest_packet;
-    link->has_new_packet = false;
+    *packet_out = link->rx_queue[link->rx_queue_head];
+    link->rx_queue_head =
+        (uint8_t)((link->rx_queue_head + 1U) %
+                  UART_LINK_RX_QUEUE_SIZE);
+    link->rx_queue_count--;
     return ESP_OK;
 }
 
-// Checks whether the initialized link currently holds an unread packet.
+// Checks whether the initialized link has a queued packet.
 bool uart_link_has_packet(const UartLink *link) {
     if (link == NULL || !link->initialized) return false;
-    return link->has_new_packet;
+    return link->rx_queue_count > 0U;
 }

@@ -9,8 +9,6 @@
 
 namespace {
 
-constexpr uint32_t kStatusRepeatPeriodMs = 20;
-constexpr uint32_t kStatusRepeatDurationMs = 500;
 constexpr uint32_t kClawServoSettleMs = 750;
 constexpr uint32_t kHomeSettleMs = 1000;
 
@@ -87,7 +85,6 @@ void start_habitat_action(
     }
 
     // Clear parameters from last step
-    controller->completion_pending = false;
     controller->active_stepper = nullptr;
     controller->action_is_timed = false;
     controller->active_command_detail =
@@ -250,11 +247,7 @@ bool habitat_action_controller_update(
 
         if (action_complete) {
             controller->action_active = false;
-            controller->completion_pending = true;
             controller->active_stepper = nullptr;
-            controller->repeat_status_until_ms =
-                now_ms + kStatusRepeatDurationMs;
-            controller->last_status_ms = now_ms;
             send_status(
                 controller->drivetrain_uart,
                 STATUS_ACTION_COMPLETE,
@@ -263,21 +256,5 @@ bool habitat_action_controller_update(
             return true;
         }
     }
-
-    if (!controller->completion_pending) return false;
-
-    if (deadline_reached(now_ms, controller->repeat_status_until_ms)) {
-        controller->completion_pending = false;
-        return false;
-    }
-
-    if (now_ms - controller->last_status_ms >= kStatusRepeatPeriodMs) {
-        controller->last_status_ms = now_ms;
-        send_status(
-            controller->drivetrain_uart,
-            STATUS_ACTION_COMPLETE,
-            controller->active_command_detail);
-    }
-
-    return true;
+    return false;
 }
