@@ -105,6 +105,10 @@ static esp_err_t start_robot_step(
     size_t step_index,
     uint32_t now_ms);
 
+static void advance_sequence(
+    RobotSequenceController *controller,
+    uint32_t now_ms);
+
 static bool service_pi_report(
     RobotSequenceController *controller,
     const PacketFrame *frame) {
@@ -151,61 +155,60 @@ static bool service_pi_report(
     return true;
 }
 
-static bool service_arm_uart(
+// Processes one already-dequeued frame from arm_uart. Callers own reading
+// arm_uart (see comm/pose_service.h) since it's shared with odometry frames.
+void robot_sequence_controller_handle_frame(
     RobotSequenceController *controller,
+    const PacketFrame *frame,
     uint32_t now_ms) {
-    const esp_err_t update_error = uart_link_update(controller->arm_uart);
-    if (update_error != ESP_OK) {
-        enter_fault(controller, "arm UART update failed", update_error);
-        return false;
-    }
+    if (controller == NULL || frame == NULL || !controller->running) return;
 
-    PacketFrame frame = {0};
-    if (uart_link_take_packet(controller->arm_uart, &frame) != ESP_OK) {
-        return false;
-    }
+    bool step_complete = false;
 
-    if (pi_report_packet_is(&frame)) {
-        return service_pi_report(controller, &frame);
-    }
-    if (!status_packet_is(&frame)) return false;
-
-    StatusPacket status = {0};
-    if (status_packet_decode(&frame, &status) != ESP_OK) return false;
-    if (status.code == STATUS_FAULT) {
-        enter_fault(controller, "arm reported a fault", ESP_FAIL);
-        return false;
-    }
-
-    if (controller->waiting_for_arm_ready) {
-        if (status.code != STATUS_ACTION_COMPLETE ||
-            status.detail != STATUS_DETAIL_NONE) {
-            return false;
+    if (pi_report_packet_is(frame)) {
+        step_complete = service_pi_report(controller, frame);
+    } else if (status_packet_is(frame)) {
+        StatusPacket status = {0};
+        if (status_packet_decode(frame, &status) != ESP_OK) return;
+        if (status.code == STATUS_FAULT) {
+            enter_fault(controller, "arm reported a fault", ESP_FAIL);
+            return;
         }
 
-        controller->waiting_for_arm_ready = false;
-        const esp_err_t start_error = start_robot_step(
-            controller,
-            controller->current_step,
-            now_ms);
-        if (start_error != ESP_OK) {
-            enter_fault(
+        if (controller->waiting_for_arm_ready) {
+            if (status.code != STATUS_ACTION_COMPLETE ||
+                status.detail != STATUS_DETAIL_NONE) {
+                return;
+            }
+
+            controller->waiting_for_arm_ready = false;
+            const esp_err_t start_error = start_robot_step(
                 controller,
-                "failed to start first robot step",
-                start_error);
-        } else {
-            printf("# Arm ready; robot sequence started\n");
+                controller->current_step,
+                now_ms);
+            if (start_error != ESP_OK) {
+                enter_fault(
+                    controller,
+                    "failed to start first robot step",
+                    start_error);
+            } else {
+                printf("# Arm ready; robot sequence started\n");
+            }
+            return;
         }
-        return false;
+
+        if (status.code != STATUS_ACTION_COMPLETE) return;
+
+        const RobotSequenceStep *step =
+            &kRobotSequence[controller->current_step];
+        step_complete = step->type == ROBOT_STEP_ARM &&
+            status.detail ==
+                (uint8_t)arm_action_status_detail(step->action.arm);
+    } else {
+        return;
     }
 
-    if (status.code != STATUS_ACTION_COMPLETE) return false;
-
-    const RobotSequenceStep *step =
-        &kRobotSequence[controller->current_step];
-    return step->type == ROBOT_STEP_ARM &&
-           status.detail ==
-               (uint8_t)arm_action_status_detail(step->action.arm);
+    if (step_complete) advance_sequence(controller, now_ms);
 }
 
 static esp_err_t start_robot_step(
@@ -274,23 +277,19 @@ void robot_sequence_controller_update(
     RobotSequenceController *controller,
     uint32_t now_ms) {
     if (controller == NULL || !controller->running) return;
-
-    if (controller->waiting_for_arm_ready) {
-        (void)service_arm_uart(controller, now_ms);
-        return;
-    }
+    if (controller->waiting_for_arm_ready) return;
 
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
-    const bool step_complete = step_is_movement(step->type)
-        ? movement_action_controller_update(
-            &controller->movement_action_controller)
-        : service_arm_uart(controller, now_ms);
-    if (!controller->running) return;
+    if (step_is_movement(step->type)) {
+        if (movement_action_controller_update(
+                &controller->movement_action_controller)) {
+            advance_sequence(controller, now_ms);
+            return;
+        }
+    }
 
-    if (step_complete) {
-        advance_sequence(controller, now_ms);
-    } else if (deadline_reached(now_ms, controller->step_deadline_ms)) {
+    if (deadline_reached(now_ms, controller->step_deadline_ms)) {
         enter_fault(controller, "robot step timed out", ESP_ERR_TIMEOUT);
     }
 }

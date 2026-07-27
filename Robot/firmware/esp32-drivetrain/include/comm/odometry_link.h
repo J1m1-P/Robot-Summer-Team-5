@@ -30,7 +30,18 @@ void odometry_link_reset(Pmw3610OdometryLink *link);
 // (there is currently nothing else on this link to dispatch them to).
 // Malformed odometry frames are dropped silently, leaving the previously
 // cached packet in place. Call once per loop iteration.
+//
+// Only safe when nothing else also reads `uart_link` -- if arm_uart is
+// shared with other traffic (e.g. robot_sequence_controller's status/
+// pi-report frames), use odometry_link_ingest() from a single shared
+// dispatch point instead (see comm/pose_service.h).
 void odometry_link_poll(Pmw3610OdometryLink *link, UartLink *uart_link);
+
+// Decodes and caches `frame` if it's an odometry frame; otherwise a no-op.
+// Malformed odometry frames are dropped silently, leaving the previously
+// cached packet in place. Use this to consume a frame someone else already
+// dequeued from a shared uart_link.
+void odometry_link_ingest(Pmw3610OdometryLink *link, const PacketFrame *frame);
 
 #ifdef __cplusplus
 }

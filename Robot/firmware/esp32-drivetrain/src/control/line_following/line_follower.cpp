@@ -100,7 +100,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     float prev_error = 0.0f;
     float last_error_sign = 1.0f;
     float lost_elapsed_s = 0.0f;
-    Pose previous_pose = pose_tracker_get_pose(ctx->pose_tracker);
+    Pose previous_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
 
     while (true) {
         const int64_t now_us = esp_timer_get_time();
@@ -116,11 +116,11 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
 
         if (tape_sensor_driver_read_all(ctx->sensors) != ESP_OK) return Abort(false);
 
-        const DrivetrainWheelCounts wheel_counts = drivetrain_get_wheel_counts(ctx->drivetrain);
-        if (pose_tracker_update(ctx->pose_tracker, &wheel_counts, nullptr) != ESP_OK) {
+        if (pose_service_update(ctx->pose_service, static_cast<uint32_t>(now_us / 1000)) !=
+            ESP_OK) {
             return Abort(false);
         }
-        const Pose current_pose = pose_tracker_get_pose(ctx->pose_tracker);
+        const Pose current_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
         cumulative_distance_m += std::hypot(current_pose.x_m - previous_pose.x_m,
                                             current_pose.y_m - previous_pose.y_m);
         previous_pose = current_pose;

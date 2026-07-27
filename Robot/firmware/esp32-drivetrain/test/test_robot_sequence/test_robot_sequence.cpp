@@ -12,8 +12,6 @@ extern "C" {
 namespace {
 
 uint32_t fake_millis = 0;
-esp_err_t fake_uart_update_result = ESP_OK;
-bool packet_queued = false;
 PacketFrame queued_packet = {};
 CommandOpcode sent_commands[16] = {};
 size_t sent_command_count = 0;
@@ -37,7 +35,6 @@ void queue_status(StatusCode code, uint8_t detail) {
     queued_packet.payload_len = STATUS_PACKET_PAYLOAD_SIZE;
     queued_packet.payload[0] = static_cast<uint8_t>(code);
     queued_packet.payload[1] = detail;
-    packet_queued = true;
 }
 
 void queue_pi_report(
@@ -57,7 +54,12 @@ void queue_pi_report(
     queued_packet.payload[5] =
         static_cast<uint8_t>((static_cast<uint16_t>(raw_error) >> 8) & 0xFF);
     queued_packet.payload[6] = 90;
-    packet_queued = true;
+}
+
+// Delivers the most recently queued frame directly, the way pose_service's
+// dispatcher would after dequeuing it from arm_uart.
+void deliver_frame(RobotSequenceController *controller, uint32_t now_ms) {
+    robot_sequence_controller_handle_frame(controller, &queued_packet, now_ms);
 }
 
 }  // namespace
@@ -77,19 +79,6 @@ extern "C" esp_err_t command_packet_send(
         return ESP_ERR_INVALID_ARG;
     }
     sent_commands[sent_command_count++] = packet->opcode;
-    return ESP_OK;
-}
-
-extern "C" esp_err_t uart_link_update(UartLink *) {
-    return fake_uart_update_result;
-}
-
-extern "C" esp_err_t uart_link_take_packet(
-    UartLink *,
-    PacketFrame *packet_out) {
-    if (!packet_queued) return ESP_ERR_NOT_FOUND;
-    *packet_out = queued_packet;
-    packet_queued = false;
     return ESP_OK;
 }
 
@@ -184,8 +173,6 @@ extern "C" ActionStatusDetail arm_action_status_detail(
 
 void setUp() {
     fake_millis = 100;
-    fake_uart_update_result = ESP_OK;
-    packet_queued = false;
     queued_packet = {};
     memset(sent_commands, 0, sizeof(sent_commands));
     sent_command_count = 0;
@@ -208,7 +195,7 @@ void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    robot_sequence_controller_update(&controller, 101);
+    deliver_frame(&controller, 101);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
     TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
@@ -223,7 +210,7 @@ void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
         TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[scan]);
 
         queue_pi_report(scan + 1, PI_RESULT_NOT_FOUND);
-        robot_sequence_controller_update(&controller, tick + 1);
+        deliver_frame(&controller, tick + 1);
         TEST_ASSERT_FLOAT_WITHIN(
             0.01f, 0.0f,
             controller.movement_action_controller.action_value);
@@ -241,18 +228,14 @@ void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
         const uint8_t mismatched_detail =
             static_cast<uint8_t>(STATUS_DETAIL_NONE);
         queue_status(STATUS_ACTION_COMPLETE, mismatched_detail);
-        robot_sequence_controller_update(
-            &controller,
-            static_cast<uint32_t>(111 + index * 2));
+        deliver_frame(&controller, static_cast<uint32_t>(111 + index * 2));
         TEST_ASSERT_EQUAL_UINT32(9 + index, controller.current_step);
 
         queue_status(
             STATUS_ACTION_COMPLETE,
             static_cast<uint8_t>(
                 arm_action_status_detail(kExpectedTowerCommands[index])));
-        robot_sequence_controller_update(
-            &controller,
-            static_cast<uint32_t>(112 + index * 2));
+        deliver_frame(&controller, static_cast<uint32_t>(112 + index * 2));
 
         if (index + 1 < sizeof(kExpectedTowerCommands) /
                 sizeof(kExpectedTowerCommands[0])) {
@@ -276,12 +259,12 @@ void test_detected_target_sets_rotation_angle() {
         robot_sequence_controller_init(&controller, &arm_uart));
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    robot_sequence_controller_update(&controller, 100);
+    deliver_frame(&controller, 100);
     robot_sequence_controller_update(&controller, 101);
     TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[0]);
 
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
-    robot_sequence_controller_update(&controller, 102);
+    deliver_frame(&controller, 102);
     TEST_ASSERT_EQUAL(MOVEMENT_ACTION_ROTATE,
                       controller.movement_action_controller.action);
     TEST_ASSERT_FLOAT_WITHIN(
@@ -301,10 +284,10 @@ void test_arm_fault_stops_sequence() {
         robot_sequence_controller_init(&controller, &arm_uart));
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    robot_sequence_controller_update(&controller, 100);
+    deliver_frame(&controller, 100);
     robot_sequence_controller_update(&controller, 101);
     queue_status(STATUS_FAULT, STATUS_DETAIL_TOWER_HOME);
-    robot_sequence_controller_update(&controller, 102);
+    deliver_frame(&controller, 102);
 
     TEST_ASSERT_FALSE(controller.running);
 }
@@ -317,7 +300,7 @@ void test_missing_arm_completion_times_out() {
         robot_sequence_controller_init(&controller, &arm_uart));
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    robot_sequence_controller_update(&controller, 100);
+    deliver_frame(&controller, 100);
     robot_sequence_controller_update(&controller, 101);
     robot_sequence_controller_update(&controller, 15102);
 

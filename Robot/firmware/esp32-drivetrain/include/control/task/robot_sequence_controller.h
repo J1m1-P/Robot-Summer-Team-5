@@ -7,6 +7,7 @@
 
 #include "esp_err.h"
 
+#include <robot_common/packet_protocol.h>
 #include <robot_common/uart_link.h>
 
 #include "control/task/movement_action_controller.h"
@@ -34,6 +35,14 @@ esp_err_t robot_sequence_controller_init(
 // Updates only the current step and advances when it completes.
 void robot_sequence_controller_update(
     RobotSequenceController *controller,
+    uint32_t now_ms);
+
+// Processes one arm_uart frame the caller has already dequeued. arm_uart is
+// shared with odometry traffic, so this controller no longer reads it
+// itself -- see comm/pose_service.h for the single reader/dispatcher.
+void robot_sequence_controller_handle_frame(
+    RobotSequenceController *controller,
+    const PacketFrame *frame,
     uint32_t now_ms);
 
 #ifdef __cplusplus

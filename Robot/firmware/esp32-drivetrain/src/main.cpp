@@ -7,6 +7,7 @@
 #include "config/drivetrain/drivetrain_config.h"
 #include "config/tape_following/tape_following_config.h"
 #include "control/drivetrain/drivetrain.h"
+#include "control/odometry/pose_service.h"
 #include "control/odometry/pose_tracker.h"
 #include "control/task/robot_sequence_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
@@ -26,6 +27,8 @@ TapeSensor *tape_sensor_list[TAPE_SENSOR_MODULE_COUNT] = {
     &tape_sensors[0], &tape_sensors[1], &tape_sensors[2]};
 DrivetrainOdometrySourceConfig pose_encoder_config = {};
 PoseTracker pose_tracker = {};
+Pmw3610OdometryLink arm_odometry_link = {};
+PoseService pose_service = {};
 
 // Brings up the drivetrain, tape sensors, and pose tracker so pose is live
 // from startup for whatever lego block needs it later.
@@ -90,25 +93,30 @@ void setup() {
     if (err != ESP_OK) {
         Serial.printf("# FAULT: pose tracking init failed (%s)\n", esp_err_to_name(err));
     }
+
+    pose_service = {
+        .pose_tracker = &pose_tracker,
+        .drivetrain = &drivetrain,
+        .arm_uart = &arm_uart,
+        .odometry_link = &arm_odometry_link,
+        .sequence_controller = &robot_sequence_controller,
+    };
 }
 
 void loop() {
-    robot_sequence_controller_update(
-        &robot_sequence_controller,
-        millis());
+    const uint32_t now_ms = millis();
 
-    // Zero-command keeps the drivetrain's watchdog fed so it actually
-    // samples encoders each cycle -- without this, pose would stay frozen
-    // even if the robot were pushed by hand, since nothing else commands
-    // a velocity yet.
+    // Runs every tick regardless of sequence/tape state, so pose and
+    // arm_uart never stall behind either one.
+    pose_service_update(&pose_service, now_ms);
+    robot_sequence_controller_update(&robot_sequence_controller, now_ms);
+
+    // Feed data to drivetrain watchdog to sample encoders when not stationary
     drivetrain_set_body_velocity(&drivetrain, 0.0f, 0.0f, 0.0f);
-    const int64_t now_us = static_cast<int64_t>(millis()) * 1000;
+    const int64_t now_us = static_cast<int64_t>(now_ms) * 1000;
     drivetrain_update(&drivetrain, now_us);
 
-    if (tape_sensor_driver_read_all(tape_sensor_list) == ESP_OK) {
-        const DrivetrainWheelCounts wheel_counts = drivetrain_get_wheel_counts(&drivetrain);
-        pose_tracker_update(&pose_tracker, &wheel_counts, nullptr);
-    }
+    (void)tape_sensor_driver_read_all(tape_sensor_list);
 
     delay(1);
 }
