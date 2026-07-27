@@ -421,10 +421,10 @@
     const arm = geom.l * sine + geom.w * cosine;
     const r = geom.r;
     return {
-      fl: (cosine * vx + sine * vy - arm * omega) / r,
-      fr: (cosine * vx - sine * vy + arm * omega) / r,
-      bl: (cosine * vx - sine * vy - arm * omega) / r,
-      br: (cosine * vx + sine * vy + arm * omega) / r,
+      fl: (cosine * vx - sine * vy - arm * omega) / r,
+      fr: (cosine * vx + sine * vy + arm * omega) / r,
+      bl: (cosine * vx + sine * vy - arm * omega) / r,
+      br: (cosine * vx - sine * vy + arm * omega) / r,
     };
   }
 

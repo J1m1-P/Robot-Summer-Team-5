@@ -16,9 +16,10 @@ extern const TapeSensorDriverConfig FRONT_TAPE_SENSOR_CONFIG;
 extern const TapeSensorDriverConfig BACK_TAPE_SENSOR_CONFIG;
 extern const TapeSensorDriverConfig LEFT_TAPE_SENSOR_CONFIG;
 
-/* Channel geometry for the front and back guidance modules. */
+/* Channel geometry for the front, back, and +y side guidance modules. */
 extern const TapeLineEstimatorConfig FRONT_TAPE_LINE_ESTIMATOR_CONFIG;
 extern const TapeLineEstimatorConfig BACK_TAPE_LINE_ESTIMATOR_CONFIG;
+extern const TapeLineEstimatorConfig SIDE_TAPE_LINE_ESTIMATOR_CONFIG;
 
 /* Complete behavior configurations for line following and task detection. */
 extern const TapeFollowerConfig TAPE_FOLLOWER_CONFIG;

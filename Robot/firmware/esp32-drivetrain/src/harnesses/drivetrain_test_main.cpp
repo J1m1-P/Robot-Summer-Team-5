@@ -8,8 +8,16 @@
 #include "config/tape_following/tape_following_config.h"
 #include "control/drivetrain/drivetrain.h"
 #include "control/tape_following/tape_follower.h"
+#include "control/tape_following/tape_following_session.h"
+#include "control/tape_following/tape_alignment.h"
 #include "control/tape_following/tape_following_controller.h"
 #include "sensing/tape_following/tape_line_estimator.h"
+
+#ifdef SYSTEM_TEST_BUILD
+#include "system_test_mode.h"
+#define setup drivetrain_test_setup
+#define loop drivetrain_test_loop
+#endif
 
 namespace {
 
@@ -45,6 +53,8 @@ enum class TestMode {
     DISTANCE,
     ANGLE,
     TAPE_CENTER,
+    TAPE_SESSION,
+    TAPE_ALIGNMENT,
     STOPPING,
 };
 
@@ -136,6 +146,14 @@ TapeFollowerConfig tape_follower_config = {};
 TapeFollowerConfig live_tape_config = {};
 TapeLineEstimatorConfig tape_front_estimator_config = {};
 TapeLineEstimatorConfig tape_back_estimator_config = {};
+TapeFollowingSession tape_session = {};
+TapeFollowingSessionConfig tape_session_config = {};
+TapeAlignment tape_alignment = {};
+TapeAlignmentConfig tape_alignment_config = {};
+TapeAlignmentMode tape_alignment_mode = TAPE_ALIGNMENT_I_ALIGN_LONGITUDINAL;
+DrivetrainBodyVelocity tape_previous_odometry = {};
+TapeFollowingSessionStatus tape_session_status = TAPE_SESSION_IDLE;
+TapeAlignmentStatus tape_alignment_status = TAPE_ALIGNMENT_IDLE;
 
 // Real-time tuning implementations are grouped at the bottom of this namespace.
 void print_controller_config();
@@ -152,6 +170,8 @@ void update_distance_tolerance_tuning(float value_m);
 void update_angle_tolerance_tuning(float value_deg);
 void update_telemetry_period_tuning(long value_ms);
 void update_motion_timeout_tuning(long value_ms);
+const char *tape_session_status_name(TapeFollowingSessionStatus status);
+const char *tape_alignment_status_name(TapeAlignmentStatus status);
 
 bool time_reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
@@ -168,6 +188,8 @@ void print_help() {
     Serial.println("#   sequence [m/s] [ms_each]  - all 8 translations, then CW and CCW");
     Serial.println("#   tape | tape-center front|back [max_mps] [ms] [polarity]");
     Serial.println("#   tape-follow front|back [travel_mps] [max_strafe_mps] [ms] [polarity]");
+    Serial.println("#   tape-session px|mx|py cw|ccw none|one|two [distance_m] [speed_mps] [timeout_ms]");
+    Serial.println("#   tape-align i|l [timeout_ms]  - bounded I/L alignment");
     Serial.println("#   invert motor|encoder <wheel> [0|1] - RAM-only inversion (omit value to toggle)");
     Serial.println("#   pi show|reset [wheel] | pi <wheel|all> kff|offset|kp|ki|slew <value>");
     Serial.println("#   tape-tune show|reset | tape-tune <field> <value>");
@@ -217,6 +239,7 @@ bool parse_duration(const String &token, uint32_t &duration_out,
 
 void report_error(const char *operation, esp_err_t error) {
     Serial.printf("# ERROR: %s failed: %s\n", operation, esp_err_to_name(error));
+    Serial.printf("DRIVE,ERROR,%s,%s\n", operation, esp_err_to_name(error));
     if (drivetrain.status.initialized) drivetrain_brake(&drivetrain);
     drivetrain_ready = false;
     mode = TestMode::IDLE;
@@ -230,6 +253,8 @@ bool mode_uses_closed_loop(TestMode current_mode) {
     return current_mode == TestMode::BODY || current_mode == TestMode::DISTANCE ||
            current_mode == TestMode::ANGLE ||
            current_mode == TestMode::TAPE_CENTER ||
+           current_mode == TestMode::TAPE_SESSION ||
+           current_mode == TestMode::TAPE_ALIGNMENT ||
            current_mode == TestMode::STOPPING ||
            (current_mode == TestMode::SEQUENCE && sequence_step_active);
 }
@@ -306,12 +331,12 @@ bool direction_vector(const String &name, float *x_out, float *y_out) {
     *y_out = 0.0f;
     if (name == "forward") *x_out = 1.0f;
     else if (name == "backward") *x_out = -1.0f;
-    else if (name == "left") *y_out = -1.0f;
-    else if (name == "right") *y_out = 1.0f;
-    else if (name == "forward-left") { *x_out = kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
-    else if (name == "forward-right") { *x_out = kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
-    else if (name == "backward-left") { *x_out = -kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
-    else if (name == "backward-right") { *x_out = -kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "left") *y_out = 1.0f;
+    else if (name == "right") *y_out = -1.0f;
+    else if (name == "forward-left") { *x_out = kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "forward-right") { *x_out = kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
+    else if (name == "backward-left") { *x_out = -kInverseSqrtTwo; *y_out = kInverseSqrtTwo; }
+    else if (name == "backward-right") { *x_out = -kInverseSqrtTwo; *y_out = -kInverseSqrtTwo; }
     else return false;
     return true;
 }
@@ -359,7 +384,25 @@ void stop_test(bool announce = true) {
     command_vx = command_vy = command_omega = 0.0f;
     applied_vx = applied_vy = applied_omega = 0.0f;
     reset_tape_center_state();
+    if (tape_session.config != nullptr) tape_following_session_reset(&tape_session);
+    if (tape_alignment.config != nullptr) tape_alignment_reset(&tape_alignment);
+    tape_session_status = TAPE_SESSION_IDLE;
+    tape_alignment_status = TAPE_ALIGNMENT_IDLE;
     if (announce) Serial.println("# stopped; all motors coasting");
+}
+
+bool tape_session_is_terminal() {
+    return tape_session_status == TAPE_SESSION_COMPLETE_DISTANCE ||
+           tape_session_status == TAPE_SESSION_COMPLETE_LOCATING ||
+           tape_session_status == TAPE_SESSION_TIMEOUT ||
+           tape_session_status == TAPE_SESSION_TAPE_LOST ||
+           tape_session_status == TAPE_SESSION_FAULT;
+}
+
+bool tape_alignment_is_terminal() {
+    return tape_alignment_status == TAPE_ALIGNMENT_COMPLETE ||
+           tape_alignment_status == TAPE_ALIGNMENT_TIMEOUT ||
+           tape_alignment_status == TAPE_ALIGNMENT_FAULT;
 }
 
 void brake_test() {
@@ -470,6 +513,19 @@ void print_tape_telemetry(uint32_t now_ms) {
         Serial.printf("# tape-turn,target=%.3f_rad_s,applied=%.3f_rad_s\n",
                       command_omega, applied_omega);
     }
+    if (mode == TestMode::TAPE_SESSION) {
+        Serial.printf("TAPE_SESSION,%lu,%s,%.4f,%d\n",
+                      static_cast<unsigned long>(now_ms),
+                      tape_session_status_name(tape_session_status),
+                      tape_session.progress_m,
+                      static_cast<int>(tape_session.locating_marker));
+    } else if (mode == TestMode::TAPE_ALIGNMENT) {
+        Serial.printf("TAPE_ALIGNMENT,%lu,%s,%s\n",
+                      static_cast<unsigned long>(now_ms),
+                      tape_alignment_mode == TAPE_ALIGNMENT_L_ALIGN_PY_MX
+                          ? "l-py-mx" : "i-longitudinal",
+                      tape_alignment_status_name(tape_alignment_status));
+    }
 }
 
 void print_telemetry(uint32_t now_ms) {
@@ -526,8 +582,10 @@ void start_tape_center(int sensor_index, float maximum_strafe_mps,
             &tape_front_estimator_config;
         tape_follower_config.estimators[TAPE_FOLLOWER_BACK] =
             &tape_back_estimator_config;
-        tape_follower_config.controller.correction_min = -maximum_strafe_mps;
-        tape_follower_config.controller.correction_max = maximum_strafe_mps;
+        tape_follower_config.lateral_motion.controller.correction_min =
+            -maximum_strafe_mps;
+        tape_follower_config.lateral_motion.controller.correction_max =
+            maximum_strafe_mps;
         tape_follower = {};
         const esp_err_t follower_error = tape_follower_init(
             &tape_follower, &tape_follower_config);
@@ -552,7 +610,10 @@ void start_tape_center(int sensor_index, float maximum_strafe_mps,
 void service_tape_center(float dt_s) {
     if (tape_follow_velocity_mps != 0.0f) {
         const TapeFollowerInput input = {{
-            &tape_sensors[0], &tape_sensors[1]}, tape_follow_velocity_mps};
+            &tape_sensors[0], &tape_sensors[1], &tape_sensors[2]},
+            tape_follow_velocity_mps > 0.0f ? TAPE_FOLLOWER_PX
+                                            : TAPE_FOLLOWER_MX,
+            fabsf(tape_follow_velocity_mps), 0.0f};
         TapeFollowerOutput output = {};
         const esp_err_t error = tape_follower_update(
             &tape_follower, &input, dt_s, &output);
@@ -590,7 +651,8 @@ void service_tape_center(float dt_s) {
         return;
     }
 
-    TapeFollowingControllerConfig controller = live_tape_config.controller;
+    TapeFollowingControllerConfig controller =
+        live_tape_config.lateral_motion.controller;
     controller.correction_min = -tape_center_max_mps;
     controller.correction_max = tape_center_max_mps;
     tape_center_correction_mps = tape_center_polarity *
@@ -600,8 +662,197 @@ void service_tape_center(float dt_s) {
     command_vy = tape_center_correction_mps;
 }
 
+const char *tape_session_status_name(TapeFollowingSessionStatus status) {
+    switch (status) {
+        case TAPE_SESSION_IDLE: return "idle";
+        case TAPE_SESSION_HOMING: return "homing";
+        case TAPE_SESSION_FOLLOWING: return "following";
+        case TAPE_SESSION_CONTROLLED_STOP: return "controlled-stop";
+        case TAPE_SESSION_END_CORRECTION: return "end-correction";
+        case TAPE_SESSION_COMPLETE_DISTANCE: return "complete-distance";
+        case TAPE_SESSION_COMPLETE_LOCATING: return "complete-locating";
+        case TAPE_SESSION_TIMEOUT: return "timeout";
+        case TAPE_SESSION_TAPE_LOST: return "tape-lost";
+        case TAPE_SESSION_FAULT: return "fault";
+        case TAPE_SESSION_STOPPED: return "stopped";
+    }
+    return "unknown";
+}
+
+const char *tape_alignment_status_name(TapeAlignmentStatus status) {
+    switch (status) {
+        case TAPE_ALIGNMENT_IDLE: return "idle";
+        case TAPE_ALIGNMENT_RUNNING: return "running";
+        case TAPE_ALIGNMENT_COMPLETE: return "complete";
+        case TAPE_ALIGNMENT_TIMEOUT: return "timeout";
+        case TAPE_ALIGNMENT_FAULT: return "fault";
+    }
+    return "unknown";
+}
+
+void start_tape_session(TapeFollowerDirection direction,
+                        TapeLocatingSide locating_side,
+                        TapeLocatingMarker marker,
+                        float distance_m, float speed_mps,
+                        uint32_t timeout_ms) {
+    if (!tape_sensors_ready) {
+        Serial.println("# tape sensors are not ready");
+        return;
+    }
+    if (coast_all() != ESP_OK) {
+        report_error("tape session start", ESP_FAIL);
+        return;
+    }
+    tape_session_config = {};
+    tape_session_config.direction = direction;
+    tape_session_config.locating_side = locating_side;
+    tape_session_config.travel_velocity_mps = speed_mps;
+    tape_session_config.stop_at_distance = distance_m > 0.0f;
+    tape_session_config.distance_m = distance_m;
+    tape_session_config.stop_at_locating_event =
+        marker != TAPE_LOCATING_MARKER_NONE;
+    tape_session_config.timeout_s = static_cast<float>(timeout_ms) / 1000.0f;
+    tape_session_config.stop_settle_time_s = 0.10f;
+    tape_session_config.correction_speed_mps = 0.08f;
+    tape_session_config.correction_tolerance_m = 0.010f;
+    tape_session_config.correction_max_distance_m = 0.20f;
+    tape_session_config.home_before_following = false;
+    tape_session_config.locating_detector.locating_side = locating_side;
+    tape_session_config.locating_detector.expected_marker =
+        marker == TAPE_LOCATING_MARKER_NONE
+            ? TAPE_LOCATING_MARKER_SINGLE : marker;
+    tape_session_config.locating_detector.minimum_active_channels = 1;
+    tape_session_config.locating_detector.confirmation_samples = 1;
+    tape_session_config.locating_detector.release_samples = 1;
+    tape_session_config.locating_detector.tape_width_m = 0.01905f;
+    tape_session_config.locating_detector.double_center_distance_m = 0.045f;
+    tape_session_config.locating_detector.spacing_tolerance_m = 0.005f;
+
+    tape_session = {};
+    esp_err_t error = tape_following_session_init(
+        &tape_session, &tape_session_config, &live_tape_config);
+    if (error == ESP_OK) error = tape_following_session_start(&tape_session);
+    if (error != ESP_OK) {
+        report_error("tape session init", error);
+        return;
+    }
+    tape_previous_odometry = {};
+    capture_motion_start_counts();
+    command_vx = command_vy = command_omega = 0.0f;
+    applied_vx = applied_vy = applied_omega = 0.0f;
+    tape_session_status = TAPE_SESSION_FOLLOWING;
+    mode = TestMode::TAPE_SESSION;
+    Serial.printf("# START tape-session direction=%s marker=%s speed=%.3f timeout=%lu ms\n",
+                  direction == TAPE_FOLLOWER_PX ? "px" :
+                  direction == TAPE_FOLLOWER_MX ? "mx" : "py",
+                  marker == TAPE_LOCATING_MARKER_DOUBLE ? "two" :
+                  marker == TAPE_LOCATING_MARKER_SINGLE ? "one" : "none",
+                  speed_mps, static_cast<unsigned long>(timeout_ms));
+}
+
+void service_tape_session(float dt_s) {
+    DrivetrainBodyVelocity current_odometry = {};
+    if (get_relative_body_motion(&current_odometry) != ESP_OK) {
+        tape_session_status = TAPE_SESSION_FAULT;
+        command_vx = command_vy = command_omega = 0.0f;
+        return;
+    }
+    const DrivetrainBodyVelocity delta = {
+        current_odometry.vx - tape_previous_odometry.vx,
+        current_odometry.vy - tape_previous_odometry.vy,
+        current_odometry.omega - tape_previous_odometry.omega,
+    };
+    tape_previous_odometry = current_odometry;
+    float along_delta = delta.vx;
+    if (tape_session_config.direction == TAPE_FOLLOWER_MX) {
+        along_delta = -delta.vx;
+    } else if (tape_session_config.direction == TAPE_FOLLOWER_PY) {
+        along_delta = delta.vy;
+    }
+    TapeFollowingSessionInput input = {{
+        &tape_sensors[0], &tape_sensors[1], &tape_sensors[2]},
+        along_delta, dt_s};
+    TapeFollowingSessionOutput output = {};
+    const esp_err_t error = tape_following_session_update(
+        &tape_session, &input, &output);
+    if (error != ESP_OK) tape_session_status = TAPE_SESSION_FAULT;
+    else tape_session_status = output.status;
+    command_vx = output.requested_velocity.vx;
+    command_vy = output.requested_velocity.vy;
+    command_omega = output.requested_velocity.omega;
+    if (!output.motion_valid) command_vx = command_vy = command_omega = 0.0f;
+}
+
+void start_tape_alignment(TapeAlignmentMode alignment_mode,
+                          uint32_t timeout_ms) {
+    if (!tape_sensors_ready) {
+        Serial.println("# tape sensors are not ready");
+        return;
+    }
+    if (coast_all() != ESP_OK) {
+        report_error("tape alignment start", ESP_FAIL);
+        return;
+    }
+    tape_alignment_config = {};
+    tape_alignment_config.mode = alignment_mode;
+    for (int sensor = 0; sensor < TAPE_FOLLOWER_SENSOR_COUNT; ++sensor) {
+        tape_alignment_config.estimators[sensor] =
+            live_tape_config.estimators[sensor];
+    }
+    tape_alignment_config.correction_speed_mps = 0.08f;
+    tape_alignment_config.error_tolerance = 0.25f;
+    tape_alignment_config.timeout_s = static_cast<float>(timeout_ms) / 1000.0f;
+    tape_alignment_config.settle_samples = 2;
+    tape_alignment = {};
+    esp_err_t error = tape_alignment_init(
+        &tape_alignment, &tape_alignment_config);
+    if (error == ESP_OK) error = tape_alignment_start(&tape_alignment);
+    if (error != ESP_OK) {
+        report_error("tape alignment init", error);
+        return;
+    }
+    tape_alignment_mode = alignment_mode;
+    tape_alignment_status = TAPE_ALIGNMENT_RUNNING;
+    command_vx = command_vy = command_omega = 0.0f;
+    applied_vx = applied_vy = applied_omega = 0.0f;
+    mode = TestMode::TAPE_ALIGNMENT;
+    Serial.printf("# START tape-align mode=%s timeout=%lu ms\n",
+                  alignment_mode == TAPE_ALIGNMENT_L_ALIGN_PY_MX
+                      ? "l-py-mx" : "i-longitudinal",
+                  static_cast<unsigned long>(timeout_ms));
+}
+
+void service_tape_alignment(float dt_s) {
+    TapeAlignmentInput input = {{
+        &tape_sensors[0], &tape_sensors[1], &tape_sensors[2]}, dt_s};
+    TapeAlignmentOutput output = {};
+    const esp_err_t error = tape_alignment_update(
+        &tape_alignment, &input, &output);
+    if (error != ESP_OK) tape_alignment_status = TAPE_ALIGNMENT_FAULT;
+    else tape_alignment_status = output.status;
+    command_vx = output.requested_velocity.vx;
+    command_vy = output.requested_velocity.vy;
+    command_omega = output.requested_velocity.omega;
+    if (!output.motion_valid) command_vx = command_vy = command_omega = 0.0f;
+}
+
 bool start_body(float vx, float vy, float omega, uint32_t duration_ms,
                 TestMode requested_mode, const char *name) {
+    // Keyboard driving renews its 10-second command lease while a key remains
+    // held. Update an active manual body command in place so each renewal (or
+    // WASD direction change) does not coast the motors and reset the velocity
+    // ramp to zero.
+    if (mode == TestMode::BODY && requested_mode == TestMode::BODY) {
+        command_vx = vx;
+        command_vy = vy;
+        command_omega = omega;
+        motion_end_ms = millis() + duration_ms;
+        Serial.printf("# UPDATE %s: vx=%.3f vy=%.3f omega=%.3f for %lu ms\n",
+                      name, vx, vy, omega,
+                      static_cast<unsigned long>(duration_ms));
+        return true;
+    }
+
     esp_err_t error = coast_all();
     if (error == ESP_OK) {
         error = drivetrain_set_body_velocity(&drivetrain, vx, vy, omega);
@@ -761,11 +1012,17 @@ void start_sequence(float speed, uint32_t duration_ms) {
 
 void process_command(String line) {
     line.trim();
+#ifdef SYSTEM_TEST_BUILD
+    if (system_test_handle_mode_command(line)) return;
+#endif
     line.toLowerCase();
     if (line.length() == 0) return;
+    // Machine-readable acknowledgement lets the browser distinguish a command
+    // received by this runtime from text merely written to the serial port.
+    Serial.printf("DRIVE,RX,%s\n", line.c_str());
 
-    String tokens[6];
-    const int count = split_tokens(line, tokens, 6);
+    String tokens[8];
+    const int count = split_tokens(line, tokens, 8);
     const String &command = tokens[0];
     if (command == "help") { print_help(); return; }
     if (command == "config") { print_config(); return; }
@@ -938,6 +1195,56 @@ void process_command(String line) {
         start_tape_center(moving_forward ? 0 : 1, maximum_strafe,
                           duration, polarity,
                           moving_forward ? travel_speed : -travel_speed);
+        return;
+    }
+
+    if (command == "tape-align") {
+        if (count < 2 || (tokens[1] != "i" && tokens[1] != "l")) {
+            Serial.println("# usage: tape-align i|l [timeout_ms]");
+            return;
+        }
+        const uint32_t timeout = count >= 3 ? tokens[2].toInt() : 5000;
+        if (timeout == 0 || timeout > kMaxTapeDurationMs) {
+            Serial.println("# alignment timeout must be 1..60000 ms");
+            return;
+        }
+        start_tape_alignment(
+            tokens[1] == "l" ? TAPE_ALIGNMENT_L_ALIGN_PY_MX
+                              : TAPE_ALIGNMENT_I_ALIGN_LONGITUDINAL,
+            timeout);
+        return;
+    }
+
+    if (command == "tape-session") {
+        if (count < 4 ||
+            (tokens[1] != "px" && tokens[1] != "mx" && tokens[1] != "py") ||
+            (tokens[2] != "cw" && tokens[2] != "ccw") ||
+            (tokens[3] != "none" && tokens[3] != "one" && tokens[3] != "two")) {
+            Serial.println("# usage: tape-session px|mx|py cw|ccw none|one|two [distance_m] [speed_mps] [timeout_ms]");
+            return;
+        }
+        const TapeFollowerDirection direction = tokens[1] == "px"
+            ? TAPE_FOLLOWER_PX : tokens[1] == "mx" ? TAPE_FOLLOWER_MX
+                                                    : TAPE_FOLLOWER_PY;
+        const TapeLocatingSide side = tokens[2] == "cw"
+            ? TAPE_LOCATING_CW : TAPE_LOCATING_CCW;
+        const TapeLocatingMarker marker = tokens[3] == "one"
+            ? TAPE_LOCATING_MARKER_SINGLE
+            : tokens[3] == "two" ? TAPE_LOCATING_MARKER_DOUBLE
+                                  : TAPE_LOCATING_MARKER_NONE;
+        const float distance = count >= 5 ? tokens[4].toFloat() : 0.0f;
+        const float speed = count >= 6 ? tokens[5].toFloat()
+                                      : kDefaultTapeFollowSpeedMps;
+        const uint32_t timeout = count >= 7 ? tokens[6].toInt() : 10000;
+        if (!isfinite(distance) || distance < 0.0f || distance > 100.0f ||
+            !isfinite(speed) || speed <= 0.0f ||
+            speed > test_config.max_vx_mps || timeout == 0 ||
+            timeout > kMaxTapeDurationMs ||
+            (distance == 0.0f && marker == TAPE_LOCATING_MARKER_NONE)) {
+            Serial.println("# tape-session requires a valid distance or marker; speed/timeout are out of range");
+            return;
+        }
+        start_tape_session(direction, side, marker, distance, speed, timeout);
         return;
     }
 
@@ -1132,6 +1439,7 @@ void service_sequence(uint32_t now_ms) {
 }  // namespace
 
 void setup() {
+    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
     Serial.begin(115200);
     Serial.setTimeout(20);
     delay(1000);
@@ -1143,11 +1451,13 @@ void setup() {
     if (error == ESP_OK) error = drivetrain_enable(&drivetrain);
     if (error != ESP_OK) {
         Serial.printf("# drivetrain initialization failed: %s\n", esp_err_to_name(error));
+        Serial.printf("DRIVE,READY,0,%s\n", esp_err_to_name(error));
         return;
     }
 
     drivetrain_ready = true;
     last_control_us = esp_timer_get_time();
+    Serial.println("DRIVE,READY,1");
     print_config();
     print_help();
     Serial.print("> ");
@@ -1182,6 +1492,13 @@ void loop() {
     } else if (mode == TestMode::TAPE_CENTER &&
                time_reached(now_ms, motion_end_ms)) {
         begin_controlled_stop("tape-center duration complete");
+    } else if ((mode == TestMode::TAPE_SESSION && tape_session_is_terminal()) ||
+               (mode == TestMode::TAPE_ALIGNMENT && tape_alignment_is_terminal())) {
+        command_vx = command_vy = command_omega = 0.0f;
+        if (wheels_are_stopped()) {
+            stop_test(false);
+            Serial.println("# tape harness operation complete; all motors coasting");
+        }
     } else if (mode == TestMode::STOPPING &&
                (wheels_are_stopped() || time_reached(now_ms, motion_end_ms))) {
         stop_test(false);
@@ -1196,6 +1513,8 @@ void loop() {
         const bool closed_loop = mode_uses_closed_loop(mode);
         if (closed_loop) {
             if (mode == TestMode::TAPE_CENTER) service_tape_center(dt_s);
+            else if (mode == TestMode::TAPE_SESSION) service_tape_session(dt_s);
+            else if (mode == TestMode::TAPE_ALIGNMENT) service_tape_alignment(dt_s);
             update_ramped_command(dt_s);
             error = drivetrain_set_body_velocity(
                 &drivetrain, applied_vx, applied_vy, applied_omega);
@@ -1315,16 +1634,16 @@ void print_tape_tuning() {
     Serial.printf("# TAPE kp=%.4f ki=%.4f kd=%.4f integral_limit=%.3f "
                   "heading=%.3f max_omega=%.3f angular_accel=%.3f "
                   "search_omega=%.3f lost_timeout=%.3f dt_max=%.3f\n",
-                  live_tape_config.controller.proportional_gain,
-                  live_tape_config.controller.integral_gain,
-                  live_tape_config.controller.derivative_gain,
-                  live_tape_config.controller.integral_limit,
+                  live_tape_config.lateral_motion.controller.proportional_gain,
+                  live_tape_config.lateral_motion.controller.integral_gain,
+                  live_tape_config.lateral_motion.controller.derivative_gain,
+                  live_tape_config.lateral_motion.controller.integral_limit,
                   live_tape_config.heading.gain_s_inv,
                   live_tape_config.heading.max_omega_rad_s,
                   live_tape_config.heading.max_acceleration_rad_s2,
                   live_tape_config.search.angular_velocity_rad_s,
                   live_tape_config.search.timeout_s,
-                  live_tape_config.controller_dt_max_s);
+                  live_tape_config.lateral_motion.controller_dt_max_s);
 }
 
 void set_inversion(const String &kind, int wheel, const String *value) {
@@ -1405,10 +1724,10 @@ void update_tape_parameter(const String &field, float value) {
     }
 
     TapeFollowerConfig candidate = live_tape_config;
-    if (field == "kp") candidate.controller.proportional_gain = value;
-    else if (field == "ki") candidate.controller.integral_gain = value;
-    else if (field == "kd") candidate.controller.derivative_gain = value;
-    else if (field == "integral-limit") candidate.controller.integral_limit = value;
+    if (field == "kp") candidate.lateral_motion.controller.proportional_gain = value;
+    else if (field == "ki") candidate.lateral_motion.controller.integral_gain = value;
+    else if (field == "kd") candidate.lateral_motion.controller.derivative_gain = value;
+    else if (field == "integral-limit") candidate.lateral_motion.controller.integral_limit = value;
     else if (field == "heading") candidate.heading.gain_s_inv = value;
     else if (field == "max-omega") candidate.heading.max_omega_rad_s = value;
     else if (field == "angular-accel") candidate.heading.max_acceleration_rad_s2 = value;
@@ -1416,7 +1735,7 @@ void update_tape_parameter(const String &field, float value) {
         candidate.search.angular_velocity_rad_s = value;
     }
     else if (field == "lost-timeout") candidate.search.timeout_s = value;
-    else if (field == "dt-max") candidate.controller_dt_max_s = value;
+    else if (field == "dt-max") candidate.lateral_motion.controller_dt_max_s = value;
     else {
         Serial.println("# unknown tape tuning field");
         return;

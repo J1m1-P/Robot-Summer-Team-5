@@ -1,5 +1,55 @@
 #include <Arduino.h>
+#include <driver/timer.h>
+#include <hal/gpio_ll.h>
 #include "drivers/stepper_driver.h"
+
+namespace {
+
+constexpr uint8_t kHardwareTimerCount = 4;
+constexpr uint16_t kTimerDivider = 80;  // 80 MHz APB / 80 = one tick per microsecond.
+
+StepperDriver *timerDrivers[kHardwareTimerCount] = {};
+
+inline timer_group_t IRAM_ATTR timer_group(uint8_t index) {
+    return (index & 1U) == 0U ? TIMER_GROUP_0 : TIMER_GROUP_1;
+}
+
+inline timer_idx_t IRAM_ATTR timer_number(uint8_t index) {
+    return index < 2U ? TIMER_0 : TIMER_1;
+}
+
+// Alternates the STEP pin between its configured high pulse and low delay.
+bool IRAM_ATTR stepper_timer_interrupt(void *argument) {
+    StepperDriver *driver = static_cast<StepperDriver *>(argument);
+    if (!driver->isMoving) return false;
+
+    if (driver->state == 0) {
+        gpio_ll_set_level(
+            &GPIO, static_cast<gpio_num_t>(driver->config.stepPin), HIGH);
+        driver->state = 1;
+    } else {
+        gpio_ll_set_level(
+            &GPIO, static_cast<gpio_num_t>(driver->config.stepPin), LOW);
+        driver->state = 0;
+        if (--driver->stepsRemaining <= 0) {
+            driver->isMoving = false;
+            return false;
+        }
+    }
+
+    const uint32_t interval_us =
+        driver->state == 1 ? driver->config.stepPulseUs
+                           : driver->config.stepDelayUs;
+    const timer_group_t group = timer_group(driver->timerIndex);
+    const timer_idx_t number = timer_number(driver->timerIndex);
+    const uint64_t next_alarm =
+        timer_group_get_counter_value_in_isr(group, number) + interval_us;
+    timer_group_set_alarm_value_in_isr(group, number, next_alarm);
+    timer_group_enable_alarm_in_isr(group, number);
+    return false;
+}
+
+}  // namespace
 
 // Stepper motor constants
 const float stepAngle = 1.8;
@@ -21,6 +71,7 @@ static void stepper_set_direction(StepperDriver *driver, bool direction) {
 
 // Internal stop helper: clear motion state and lower the step pin.
 static void stepper_stop_internal(StepperDriver *driver) {
+    timerAlarmDisable(driver->timer);
     driver->isMoving = false;
     driver->stepsRemaining = 0;
     driver->state = 0;
@@ -44,17 +95,39 @@ static bool stepper_is_valid_config(StepperConfig config) {
 }
 
 esp_err_t stepper_init(StepperDriver *driver, StepperConfig config) {
-    if (!stepper_is_valid_config(config)) {
+    if (driver == nullptr || !stepper_is_valid_config(config)) {
         return ESP_ERR_INVALID_ARG;
     }
+
+    uint8_t timer_index = 0;
+    while (timer_index < kHardwareTimerCount &&
+           timerDrivers[timer_index] != nullptr) {
+        ++timer_index;
+    }
+    if (timer_index == kHardwareTimerCount) return ESP_ERR_NO_MEM;
 
     driver->config = config;
     driver->isMoving = false;
     driver->stepsRemaining = 0;
     driver->direction = true;
-    driver->lastEventUs = micros();
-    driver->pulseStartUs = 0;
     driver->state = 0;
+    driver->timerIndex = timer_index;
+    driver->timer = timerBegin(timer_index, kTimerDivider, true);
+    if (driver->timer == nullptr) return ESP_FAIL;
+    timerDrivers[timer_index] = driver;
+    const esp_err_t timer_error = timer_isr_callback_add(
+        timer_group(timer_index),
+        timer_number(timer_index),
+        stepper_timer_interrupt,
+        driver,
+        ESP_INTR_FLAG_IRAM);
+    if (timer_error != ESP_OK) {
+        timerDrivers[timer_index] = nullptr;
+        timerEnd(driver->timer);
+        driver->timer = nullptr;
+        return timer_error;
+    }
+    timerAlarmDisable(driver->timer);
 
     pinMode(driver->config.stepPin, OUTPUT);
     pinMode(driver->config.dirPin, OUTPUT);
@@ -70,6 +143,7 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
         return;
     }
 
+    timerAlarmDisable(driver->timer);
     if (steps < 0) {
         stepper_set_direction(driver, false);
         steps = -steps;
@@ -77,13 +151,14 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
         stepper_set_direction(driver, true);
     }
 
-    // Arm the state machine to begin generating pulses in stepper_update().
+    // Start the first pulse now; subsequent edges are hardware timed.
     driver->stepsRemaining = steps;
     driver->isMoving = true;
-    driver->state = 0;
-    driver->lastEventUs = micros() - driver->config.stepDelayUs;
-    driver->pulseStartUs = 0;
-    digitalWrite(driver->config.stepPin, LOW);
+    driver->state = 1;
+    digitalWrite(driver->config.stepPin, HIGH);
+    timerRestart(driver->timer);
+    timerAlarmWrite(driver->timer, driver->config.stepPulseUs, false);
+    timerAlarmEnable(driver->timer);
 }
 
 static void stepper_x_move_distanceMM(StepperDriver *driver, float distanceMM) {
@@ -118,42 +193,7 @@ void stepper_move_distanceMM(StepperDriver *driver, float distanceMM) {
 }
 
 void stepper_update(StepperDriver *driver) {
-    if (!driver->isMoving || driver->stepsRemaining <= 0) {
-        return;
-    }
-
-    unsigned long now = micros();
-
-    switch (driver->state) {
-        case 0:
-            // Wait the configured delay between steps before asserting the next pulse.
-            if ((unsigned long)(now - driver->lastEventUs) >= driver->config.stepDelayUs) {
-                digitalWrite(driver->config.stepPin, HIGH);
-                driver->pulseStartUs = now;
-                driver->state = 1;
-            }
-            break;
-
-        case 1:
-            // Keep the step pin high for the configured pulse width.
-            if ((unsigned long)(now - driver->pulseStartUs) >= driver->config.stepPulseUs) {
-                digitalWrite(driver->config.stepPin, LOW);
-                driver->stepsRemaining--;
-
-                if (driver->stepsRemaining <= 0) {
-                    stepper_stop_internal(driver);
-                } else {
-                    driver->lastEventUs = now;
-                    driver->state = 0;
-                }
-            }
-            break;
-
-        default:
-            // Recover from invalid state by stopping motion.
-            stepper_stop_internal(driver);
-            break;
-    }
+    (void)driver;
 }
 
 bool stepper_is_moving(StepperDriver *driver) {

@@ -57,8 +57,17 @@ from collections import Counter
 import cv2
 from flask import Flask, Response, render_template_string
 from ultralytics import YOLO
-from uart_link import (RobotLink, PACKET_TYPE_STATUS,           # the ESP32 serial link
-                       STATUS_LOOK_START, STATUS_LOOK_END, STATUS_ROUTINE_DONE)
+from uart_link import (
+    RobotLink,
+    PACKET_TYPE_PI_REQUEST,
+    PACKET_TYPE_STATUS,
+    PI_ACTION_SCAN_TELETUBBIES,
+    PI_RESULT_NOT_FOUND,
+    STATUS_LOOK_START,
+    STATUS_LOOK_END,
+    STATUS_ROUTINE_DONE,
+    decode_pi_request,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -90,10 +99,8 @@ FLASH_COUNT      = 3      # ADJUST: how many flashes once settled
 TARGETS_TO_FIND  = 2      # only two tubbies exist and we need both — leave at 2
 
 # ── standalone vision test ────────────────────────────────────────────────────
-DEV_FORCE_LOOK = True     # ADJUST: True = standalone test — boot into LOOK and ignore
-                          #         the ESP entirely (no serial). False = normal
-                          #         reactive mode (boot WAIT, wait for ESP LOOK_START).
-                          #         !!! SET BACK TO False BEFORE THE COMPETITION !!!
+DEV_FORCE_LOOK = False    # False = production UART mode.
+                          # True = standalone vision mode with no ESP serial link.
 
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
 SERIAL_PORT = "/dev/serial0"        # ADJUST: None = DEV MODE (commands just print). "COM5" /
@@ -215,6 +222,26 @@ def handle_incoming():
     if link is None:
         return
     for msg_type, payload in link.poll():
+        if msg_type == PACKET_TYPE_PI_REQUEST:
+            try:
+                request_id, action, _ = decode_pi_request(payload)
+            except ValueError:
+                continue
+
+            if action == PI_ACTION_SCAN_TELETUBBIES:
+                # PLACEHOLDER: connect this request to the detector and return
+                # PI_RESULT_OK with its target id, normalized horizontal error,
+                # and confidence. Until then, report a clean scan miss.
+                link.send_pi_report(
+                    request_id,
+                    action,
+                    PI_RESULT_NOT_FOUND,
+                    target_id=0,
+                    horizontal_error=0.0,
+                    confidence_percent=0,
+                )
+            continue
+
         if msg_type != PACKET_TYPE_STATUS or not payload:
             continue
         code = payload[0]
@@ -428,9 +455,7 @@ def control_loop():
                 else:
                     # Undo the align turn so the ESP resumes roughly re-aimed, then
                     # hand the routine back and go idle until the next look-window.
-                    # NOTE: TURN then RESUME go out back-to-back — if the ESP holds
-                    # only one unread packet, space them or fold the turn-back into
-                    # RESUME on the firmware side.
+                    # The ESP UART queue preserves both commands in order.
                     if align_error is not None:
                         send(f"TURN:{-align_error:.3f}")
                     send("RESUME")

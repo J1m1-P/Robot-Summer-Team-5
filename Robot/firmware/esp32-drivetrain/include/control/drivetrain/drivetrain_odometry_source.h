@@ -47,6 +47,23 @@ typedef struct {
 // Clears the tracked previous-count baseline (not the odometry pose itself).
 void drivetrain_odometry_source_reset(DrivetrainOdometrySource *source);
 
+/* Converts this cycle's raw wheel counts into a body-frame delta without
+ * integrating it anywhere -- lets a caller fuse this delta with another
+ * source before deciding what (if anything) to feed drivetrain_odometry_update().
+ * The first call after reset only captures a baseline -- there is no
+ * previous count to diff against yet -- so it reports *has_delta_out =
+ * false and leaves *delta_out untouched; the caller must treat that as
+ * "nothing to do yet", not a failure. When a delta is available,
+ * *valid_out reflects whether the wheel-to-body kinematics conversion
+ * itself succeeded (independent of whether a baseline existed). */
+esp_err_t drivetrain_odometry_source_compute_delta(
+    DrivetrainOdometrySource *source,
+    const DrivetrainOdometrySourceConfig *config,
+    const DrivetrainWheelCounts *counts,
+    DrivetrainOdometryDelta *delta_out,
+    bool *has_delta_out,
+    bool *valid_out);
+
 /* Converts this cycle's raw wheel counts into a body-frame delta and
  * integrates it into `odometry` via drivetrain_odometry_update(). The first
  * call after reset only captures a baseline -- there is no previous count to

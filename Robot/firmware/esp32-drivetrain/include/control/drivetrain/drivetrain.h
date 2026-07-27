@@ -76,6 +76,20 @@ typedef struct {
     DrivetrainStatus status;
 } Drivetrain;
 
+// Engages the brake and holds every PWM GPIO low before longer startup work.
+// This does not initialize or enable the drivetrain.
+//
+// SAFETY-CRITICAL: call this as the very first statement in setup(), before
+// Serial.begin(), delay(), UART/sensor init, or anything else that can block
+// or take time. Motor GPIOs power up in an undefined/floating state; until
+// this call configures and latches them, the robot can drive uncommanded at
+// full power. Every setup() in this repository that touches a motor --
+// directly or through Drivetrain -- must call this first, with no exception,
+// including new harnesses, tuning/debug tools, and one-off test firmware.
+// The only firmware exempt from this call is one that never drives a motor
+// GPIO at all (e.g. src/harnesses/tof_test_main.cpp).
+esp_err_t drivetrain_hold_safe_outputs(const DrivetrainConfig *config);
+
 // Validates configuration and initializes the brake, motors, and encoders.
 esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config);
 

@@ -32,20 +32,30 @@ const TapeLineEstimatorConfig BACK_TAPE_LINE_ESTIMATOR_CONFIG = {
     .channel_weights = {-3.0f, -1.0f, 1.0f, 3.0f},
 };
 
+/* The +y side module is the px sensor rotated 90 degrees CCW, so its local
+ * channel polarity is the same as the front module. */
+const TapeLineEstimatorConfig SIDE_TAPE_LINE_ESTIMATOR_CONFIG = {
+    .channel_weights = {3.0f, 1.0f, -1.0f, -3.0f},
+};
+
 /* Conservative initial values. Verify correction polarity and tune the
  * proportional gain at low speed on the assembled robot. */
 const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
     .estimators = {
         [TAPE_FOLLOWER_BACK] = &BACK_TAPE_LINE_ESTIMATOR_CONFIG,
         [TAPE_FOLLOWER_FRONT] = &FRONT_TAPE_LINE_ESTIMATOR_CONFIG,
+        [TAPE_FOLLOWER_SIDE] = &SIDE_TAPE_LINE_ESTIMATOR_CONFIG,
     },
-    .controller = {
-        .proportional_gain = 20.0f,
-        .integral_gain = 0.0f,
-        .derivative_gain = 0.0f,
-        .integral_limit = 1.0f,
-        .correction_min = -0.30f,
-        .correction_max = 0.30f,
+    .lateral_motion = {
+        .controller = {
+            .proportional_gain = 20.0f,
+            .integral_gain = 0.0f,
+            .derivative_gain = 0.0f,
+            .integral_limit = 1.0f,
+            .correction_min = -0.30f,
+            .correction_max = 0.30f,
+        },
+        .controller_dt_max_s = 0.05f,
     },
     .heading = {
         .gain_s_inv = 2.0f,
@@ -56,7 +66,13 @@ const TapeFollowerConfig TAPE_FOLLOWER_CONFIG = {
         .angular_velocity_rad_s = 1.0f,
         .timeout_s = 4.00f,
     },
-    .controller_dt_max_s = 0.05f,
+    /* Untuned starting point (not verified on hardware): allows the full
+     * +-0.30 m/s correction range to be reached in ~0.2s (4 cycles at
+     * controller_dt_max_s=0.05) instead of instantly, damping single-cycle
+     * jumps from line_error's channel-boundary steps without slowing down
+     * genuine multi-cycle drift correction. Loosen/tighten after watching
+     * hardware behavior the same way the lateral PID gains need to be. */
+    .max_lateral_accel_mps2 = 3.0f,
 };
 
 /* Require a short, stable left-module observation before reporting a task. */

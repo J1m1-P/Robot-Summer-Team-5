@@ -1,5 +1,5 @@
 /*
- * Defines the command packet the Pi sends to gate and steer ESP-owned motion.
+ * Defines commands issued by the drivetrain to arm-side action controllers.
  * The API sends, identifies, and decodes its fixed wire representation.
  */
 #pragma once
@@ -16,8 +16,7 @@ extern "C" {
 // Stores one opcode byte and one signed, x100-scaled value byte.
 #define COMMAND_PACKET_PAYLOAD_SIZE 2U
 
-// Identifies the action a command packet requests. TURN carries a steering
-// value in CommandPacket.value; every other opcode ignores it.
+// Identifies the action a command packet requests.
 typedef enum {
     CMD_STOP = 0,
     CMD_TURN,
@@ -26,19 +25,46 @@ typedef enum {
     CMD_FLASH,
     CMD_DONE,
     CMD_RESUME,   // continue an interrupted sweep/drive routine (reactive detector)
+
+    // Tower Tasks
+    CMD_TOWER_HOME,
+    CMD_TOWER_Z_UP,
+    CMD_TOWER_Z_DOWN,
+    CMD_TOWER_X_LEFT,
+    CMD_TOWER_X_RIGHT,
+    CMD_TOWER_ROTATE_VERTICAL,
+    CMD_TOWER_ROTATE_HORIZONTAL,
+    CMD_TOWER_OPEN_CLAW,
+    CMD_TOWER_CLOSE_CLAW,
+
+    // Habitat Tasks
+    CMD_HABITAT_HOME,
+    CMD_HABITAT_Z_UP,
+    CMD_HABITAT_Z_DOWN,
+    CMD_HABITAT_X_LEFT,
+    CMD_HABITAT_X_RIGHT,
+    CMD_HABITAT_OPEN_CLAWS,
+    CMD_HABITAT_CLOSE_CLAWS,
+    CMD_HABITAT_OPEN_LEFT_CLAW,
+    CMD_HABITAT_CLOSE_LEFT_CLAW,
+    CMD_HABITAT_OPEN_RIGHT_CLAW,
+    CMD_HABITAT_CLOSE_RIGHT_CLAW,
+
+    // Raspberry Pi Tasks
+    CMD_PI_SCAN_TELETUBBIES,
+
     CMD_MAX
 } CommandOpcode;
 
-// Represents one decoded command: an opcode plus its (optional) steering value.
+// Represents one decoded command: an opcode plus its optional action value.
 typedef struct {
     CommandOpcode opcode;
-    // TURN: meaning depends on which link this travels over -- the bridge
-    // between them (esp32-arm/src/comms/pi_bridge.c) converts one to the
-    // other, it isn't the same number on both hops:
-    //   Pi -> arm:         normalized visual steering error, roughly -1.0..1.0.
-    //   arm -> drivetrain:  commanded angular velocity in rad/s (positive CCW,
-    //                       matching DrivetrainBodyVelocity.omega).
-    // Unused (0) for every other opcode.
+    // Legacy TURN commands use a normalized visual steering error, roughly
+    // -1.0..1.0.
+    // Tower/Habitat stepper commands: requested travel in units of 100 mm.
+    // For example, 0.50 requests 50 mm and 0.30 requests 30 mm.
+    // Pi commands: optional action parameter forwarded in the Pi request.
+    // Unused (0) for all other opcodes.
     float value;
 } CommandPacket;
 

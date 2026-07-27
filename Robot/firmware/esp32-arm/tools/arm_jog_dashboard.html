@@ -75,6 +75,37 @@
     font-size: 13px;
     line-height: 1.45;
   }
+  .sequence-card { margin-bottom: 18px; border-top: 3px solid var(--accent); }
+  .sequence-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 18px;
+  }
+  .sequence-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 9px;
+  }
+  .sequence-field {
+    padding: 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .sequence-field label {
+    display: block;
+    color: var(--secondary);
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 5px;
+  }
+  .sequence-field input { width: 100%; }
+  .sequence-field small {
+    display: block;
+    color: var(--secondary);
+    font-size: 11px;
+    line-height: 1.35;
+    margin-top: 5px;
+  }
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(335px, 1fr));
@@ -150,6 +181,7 @@
   #status.error { color: var(--danger); font-weight: 700; }
   .offline { color: var(--danger) !important; }
   .moving { color: var(--stepper) !important; }
+  .stale { color: var(--muted) !important; }
 
   #log {
     height: 150px;
@@ -162,6 +194,7 @@
   }
   @media (max-width: 430px) {
     .grid { grid-template-columns: 1fr; }
+    .sequence-groups { grid-template-columns: 1fr; }
     .fixed-jogs { grid-template-columns: repeat(3, 1fr); }
     .position { font-size: 16px; }
   }
@@ -178,7 +211,15 @@
     <button id="connectBtn" class="primary">Connect (USB)</button>
     <button id="disconnectBtn" disabled>Disconnect</button>
     <button id="refreshBtn" data-command disabled>Refresh state</button>
-    <button id="stopAllBtn" class="stop" data-command disabled>STOP ALL STEPPERS</button>
+    <button id="towerPickupBtn" data-command disabled
+      title="Requires Tower Z at logical home (0 mm) and all steppers stopped">Tower pickup sequence</button>
+    <button id="towerAssemblyBtn" data-command disabled
+      title="Requires the configured start Z position, Tower X at logical home, and all steppers stopped">Tower assembly sequence</button>
+    <button id="habitatPickupBtn" data-command disabled
+      title="Requires Habitat Z at logical home (0 mm) and all steppers stopped">Habitat pickup sequence</button>
+    <button id="habitatPlacedownBtn" data-command disabled
+      title="Requires Habitat X at logical home, Habitat Z near the configured start height, and all steppers stopped">Habitat placedown sequence</button>
+    <button id="stopAllBtn" class="stop" data-command disabled>STOP / ABORT SEQUENCE</button>
     <span id="status">Not connected</span>
   </div>
 
@@ -187,6 +228,153 @@
     stepper position are commanded/open-loop estimates, not sensor feedback. A stepper starts at
     logical 0 wherever it is when the board boots; “Set home” also changes only that logical
     coordinate. STOP halts step pulses but servos continue holding their angles.</div>
+
+  <section class="card sequence-card">
+    <div class="card-head">
+      <div>
+        <h3>Automated sequence dimensions</h3>
+        <p class="hint"><strong>To</strong> is an absolute position measured from logical home.
+          <strong>By</strong> is a relative distance measured from the current position.
+          The operation order is fixed.</p>
+      </div>
+    </div>
+    <div class="sequence-groups">
+      <div>
+        <div class="group-title">Tower pickup sequence</div>
+        <div class="sequence-fields">
+          <div class="sequence-field">
+            <label for="pickup-first-raise">First Z raise (by, mm)</label>
+            <input id="pickup-first-raise" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Relative raise from the home position.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="pickup-return-lower">Return Z lower (by, mm)</label>
+            <input id="pickup-return-lower" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Relative lower; match the first raise to return home.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="pickup-second-raise">Second Z raise (by, mm)</label>
+            <input id="pickup-second-raise" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Relative raise after all three tower claws close.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="pickup-final-raise">Final Z raise (by, mm)</label>
+            <input id="pickup-final-raise" type="number" min="0.1" max="10000" step="0.1" value="30" />
+            <small>Relative raise after rotating back to vertical.</small>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">Tower assembly sequence</div>
+        <div class="sequence-fields">
+          <div class="sequence-field">
+            <label for="assembly-start-z">Required starting Z (to, mm)</label>
+            <input id="assembly-start-z" type="number" min="0.1" max="10000" step="0.1" value="80" />
+            <small>Absolute Z expected at the end of pickup, with ±0.5 mm tolerance; no move occurs in step 1.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-first-z">First Z target (to, mm)</label>
+            <input id="assembly-first-z" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Absolute Z target; 80 to 50 mm produces a 30 mm downward move.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-middle-z">Middle release Z (to, mm)</label>
+            <input id="assembly-middle-z" type="number" min="0.1" max="10000" step="0.1" value="150" />
+            <small>Absolute Z target after opening the middle claw.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-left-x">Left X move (by, mm)</label>
+            <input id="assembly-left-x" type="number" min="0.1" max="10000" step="0.1" value="68" />
+            <small>Relative left move from the current Tower X position.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-lower-middle">First Z lower (by, mm)</label>
+            <input id="assembly-lower-middle" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Relative lower after the left X move.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-right-z">Right release Z (to, mm)</label>
+            <input id="assembly-right-z" type="number" min="0.1" max="10000" step="0.1" value="250" />
+            <small>Absolute Z target after opening the right claw.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-right-x">Right X move (by, mm)</label>
+            <input id="assembly-right-x" type="number" min="0.1" max="10000" step="0.1" value="136" />
+            <small>Relative right move from the current Tower X position.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="assembly-lower-right">Second Z lower (by, mm)</label>
+            <input id="assembly-lower-right" type="number" min="0.1" max="10000" step="0.1" value="50" />
+            <small>Relative lower before opening the left claw.</small>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">Habitat pickup sequence</div>
+        <p class="hint">Uses the current Habitat Left and Habitat Right servo A angles as open
+          and B angles as close. Tune those angles in the servo cards below.</p>
+        <div class="sequence-fields">
+          <div class="sequence-field">
+            <label for="habitat-first-raise">First Z raise (by, mm)</label>
+            <input id="habitat-first-raise" type="number" min="0.1" max="10000" step="0.1" value="30" />
+            <small>Relative raise after both habitat claws open.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-return-lower">Z lower (by, mm)</label>
+            <input id="habitat-return-lower" type="number" min="0.1" max="10000" step="0.1" value="30" />
+            <small>Relative lower before both habitat claws close.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-final-raise">Final Z raise (by, mm)</label>
+            <input id="habitat-final-raise" type="number" min="0.1" max="10000" step="0.1" value="35" />
+            <small>Relative raise after both habitat claws close.</small>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">Habitat placedown sequence</div>
+        <p class="hint">Starts with both claws closed. Position A opens each claw independently
+          at its release point; tune the A angles in the habitat servo cards below.</p>
+        <div class="sequence-fields">
+          <div class="sequence-field">
+            <label for="habitat-placedown-start-z">Required starting Z (to, mm)</label>
+            <input id="habitat-placedown-start-z" type="number" min="0" max="10000" step="0.1" value="35" />
+            <small>Absolute starting Z, accepted within ±0.5 mm; Habitat X must start at home.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-right-x">First X right (by, mm)</label>
+            <input id="habitat-placedown-right-x" type="number" min="0.1" max="10000" step="0.1" value="92" />
+            <small>Relative right move from Habitat X home.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-first-z">Left placement Z (to, mm)</label>
+            <input id="habitat-placedown-first-z" type="number" min="0" max="10000" step="0.1" value="0" />
+            <small>Absolute Z target before opening the left habitat claw.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-raised-z">Transfer Z (to, mm)</label>
+            <input id="habitat-placedown-raised-z" type="number" min="0" max="10000" step="0.1" value="35" />
+            <small>Absolute Z target before moving across to the right placement.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-left-x">Second X left (by, mm)</label>
+            <input id="habitat-placedown-left-x" type="number" min="0.1" max="10000" step="0.1" value="184" />
+            <small>Relative left move from the current Habitat X position.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-second-z">Right placement Z (to, mm)</label>
+            <input id="habitat-placedown-second-z" type="number" min="0" max="10000" step="0.1" value="0" />
+            <small>Absolute Z target before opening the right habitat claw.</small>
+          </div>
+          <div class="sequence-field">
+            <label for="habitat-placedown-final-z">Final Z (to, mm)</label>
+            <input id="habitat-placedown-final-z" type="number" min="0" max="10000" step="0.1" value="20" />
+            <small>Absolute Z position at the end of the placedown sequence.</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <h2>Servos</h2>
   <p class="subtitle">Position A and B are both targets and the inclusive motion limits. Neutral
@@ -222,7 +410,12 @@
     readableClosed: null,
     keepReading: false,
     rxBuffer: "",
-    connected: false
+    connected: false,
+    lastTelemetryMs: 0,
+    lastStateRequestMs: 0,
+    lastSnapshotMs: 0,
+    freshnessTimer: null,
+    telemetryStale: false
   };
 
   const statusEl = document.getElementById("status");
@@ -235,7 +428,7 @@
     return `
       <article class="card servo-card" id="servo-card-${id}">
         <div class="card-head">
-          <div><h3>Servo ${id} · ${name}</h3><p class="hint">Awaiting telemetry</p></div>
+          <div><h3>Servo ${id} · ${name}</h3><p class="hint" id="servo-state-${id}">Awaiting telemetry</p></div>
           <div class="position" id="servo-position-${id}">--°<small>commanded angle</small></div>
         </div>
         <div class="group">
@@ -352,11 +545,17 @@
 
   function setConnected(connected, mode = "", isError = false) {
     state.connected = connected;
+    if (connected) {
+      state.lastTelemetryMs = Date.now();
+      state.lastStateRequestMs = 0;
+      state.telemetryStale = false;
+    }
     statusEl.textContent = connected ? `Connected (${mode})` : (isError ? "Connection error" : "Not connected");
     statusEl.className = connected ? "connected" : (isError ? "error" : "");
     connectBtn.disabled = connected;
     disconnectBtn.disabled = !connected;
     document.querySelectorAll("[data-command]").forEach(element => { element.disabled = !connected; });
+    if (!connected) markAllStale("Not connected");
   }
 
   async function connectSerial() {
@@ -376,7 +575,8 @@
       setConnected(true, "USB");
       log("# connected over USB");
       readLoop();
-      send("state");
+      requestState();
+      startFreshnessTimer();
     } catch (error) {
       log("# USB connection error: " + error.message);
       setConnected(false, "", true);
@@ -384,10 +584,14 @@
   }
 
   async function readLoop() {
+    let unexpectedEnd = "";
     try {
       while (state.keepReading && state.reader) {
         const { value, done } = await state.reader.read();
-        if (done) break;
+        if (done) {
+          if (state.keepReading) unexpectedEnd = "USB read stream ended";
+          break;
+        }
         state.rxBuffer += value;
         let newline;
         while ((newline = state.rxBuffer.indexOf("\n")) >= 0) {
@@ -397,8 +601,48 @@
         }
       }
     } catch (error) {
-      if (state.keepReading) log("# USB read error: " + error.message);
+      if (state.keepReading) unexpectedEnd = "USB read error: " + error.message;
     }
+    if (unexpectedEnd) {
+      await handleUnexpectedDisconnect(unexpectedEnd);
+    }
+  }
+
+  async function handleUnexpectedDisconnect(reason) {
+    state.keepReading = false;
+    stopFreshnessTimer();
+    try {
+      if (state.reader) {
+        try {
+          await state.reader.cancel();
+        } catch (_) {
+          // A failed stream may already be cancelled.
+        }
+        state.reader.releaseLock();
+        state.reader = null;
+      }
+      if (state.readableClosed) {
+        await state.readableClosed;
+        state.readableClosed = null;
+      }
+      if (state.writer) {
+        state.writer.releaseLock();
+        state.writer = null;
+      }
+      if (state.port) {
+        try {
+          await state.port.close();
+        } catch (_) {
+          // A reset or unplug can make the port already unavailable.
+        }
+        state.port = null;
+      }
+    } catch (error) {
+      log("# USB cleanup error: " + error.message);
+    }
+    state.rxBuffer = "";
+    setConnected(false, "", true);
+    log(`# ${reason}. Reconnect to resume telemetry.`);
   }
 
   async function disconnect() {
@@ -425,6 +669,7 @@
       log("# disconnect error: " + error.message);
     }
     state.rxBuffer = "";
+    stopFreshnessTimer();
     setConnected(false);
     log("# disconnected");
   }
@@ -441,6 +686,63 @@
     }
   }
 
+  function requestState() {
+    state.lastStateRequestMs = Date.now();
+    send("state");
+  }
+
+  function startFreshnessTimer() {
+    stopFreshnessTimer();
+    state.freshnessTimer = window.setInterval(checkFreshness, 1000);
+  }
+
+  function stopFreshnessTimer() {
+    if (state.freshnessTimer) {
+      window.clearInterval(state.freshnessTimer);
+      state.freshnessTimer = null;
+    }
+  }
+
+  function markAllStale(message) {
+    for (let id = 1; id <= SERVOS.length; id += 1) {
+      const hint = document.getElementById(`servo-state-${id}`);
+      const position = document.getElementById(`servo-position-${id}`);
+      if (hint) hint.textContent = message;
+      if (position) position.classList.add("stale");
+    }
+    for (let id = 1; id <= STEPPERS.length; id += 1) {
+      const hint = document.getElementById(`stepper-state-${id}`);
+      const position = document.getElementById(`stepper-position-${id}`);
+      if (hint) hint.textContent = message;
+      if (position) position.classList.add("stale");
+    }
+  }
+
+  function checkFreshness() {
+    if (!state.connected) return;
+    const now = Date.now();
+    const ageMs = now - state.lastTelemetryMs;
+    if (ageMs > 2000 && now - state.lastStateRequestMs > 2000) {
+      requestState();
+    }
+    if (ageMs > 6000 && !state.telemetryStale) {
+      state.telemetryStale = true;
+      statusEl.textContent = "Connected (USB) - telemetry stale";
+      markAllStale("Telemetry stale - automatic refresh requested");
+      log("# No valid telemetry for 6 seconds; requesting a fresh state snapshot.");
+    }
+  }
+
+  function noteTelemetryReceived() {
+    const recovered = state.telemetryStale;
+    state.lastTelemetryMs = Date.now();
+    state.telemetryStale = false;
+    if (recovered) {
+      statusEl.textContent = "Connected (USB) - telemetry recovered";
+      log("# telemetry recovered");
+    }
+  }
+
   function updateInput(id, value) {
     const input = document.getElementById(id);
     if (input && document.activeElement !== input) input.value = value;
@@ -450,10 +752,12 @@
     if (parts.length !== 9) return false;
     const [id, current, angleA, angleB, frequency, minUs, maxUs, ready] = parts.slice(1).map(Number);
     if ([id, current, angleA, angleB, frequency, minUs, maxUs, ready].some(Number.isNaN) || id < 1 || id > SERVOS.length) return false;
+    noteTelemetryReceived();
     const position = document.getElementById(`servo-position-${id}`);
     position.innerHTML = `${current}°<small>commanded angle</small>`;
     position.classList.toggle("offline", !ready);
-    const hint = document.querySelector(`#servo-card-${id} .card-head .hint`);
+    position.classList.remove("stale");
+    const hint = document.getElementById(`servo-state-${id}`);
     hint.textContent = ready ? `PWM ${frequency} Hz · ${minUs}–${maxUs} µs` : "Initialization failed";
     updateInput(`servo-angle-${id}`, current);
     updateInput(`servo-a-${id}`, angleA);
@@ -474,10 +778,12 @@
     if (parts.length !== 10) return false;
     const [id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready] = parts.slice(1).map(Number);
     if ([id, steps, mm, rangeMm, rangeSteps, pulseUs, delayUs, moving, ready].some(Number.isNaN) || id < 1 || id > STEPPERS.length) return false;
+    noteTelemetryReceived();
     const position = document.getElementById(`stepper-position-${id}`);
     position.innerHTML = `${mm.toFixed(3)} mm<small>${steps} steps</small>`;
     position.classList.toggle("offline", !ready);
     position.classList.toggle("moving", Boolean(moving && ready));
+    position.classList.remove("stale");
     const stateText = document.getElementById(`stepper-state-${id}`);
     stateText.textContent = !ready ? "Initialization failed" : (moving ? "Moving" : `Idle · max jog ±${rangeMm.toFixed(3)} mm`);
     updateInput(`stepper-range-${id}`, rangeMm);
@@ -495,6 +801,12 @@
   function handleLine(rawLine) {
     const line = rawLine.trim();
     if (!line) return;
+    if (line === "state_begin") return;
+    if (line === "state_end") {
+      state.lastSnapshotMs = Date.now();
+      statusEl.textContent = "Connected (USB) - state current";
+      return;
+    }
     if (line.startsWith("#")) {
       log(line);
       return;
@@ -564,7 +876,49 @@
 
   connectBtn.addEventListener("click", connectSerial);
   disconnectBtn.addEventListener("click", disconnect);
-  document.getElementById("refreshBtn").addEventListener("click", () => send("state"));
+  document.getElementById("refreshBtn").addEventListener("click", requestState);
+  document.getElementById("towerPickupBtn").addEventListener("click", () => {
+    const values = [
+      validValue("pickup-first-raise"),
+      validValue("pickup-return-lower"),
+      validValue("pickup-second-raise"),
+      validValue("pickup-final-raise")
+    ];
+    if (values.every(value => value !== null)) send(`tower pickup ${values.join(" ")}`);
+  });
+  document.getElementById("towerAssemblyBtn").addEventListener("click", () => {
+    const values = [
+      validValue("assembly-start-z"),
+      validValue("assembly-first-z"),
+      validValue("assembly-middle-z"),
+      validValue("assembly-left-x"),
+      validValue("assembly-lower-middle"),
+      validValue("assembly-right-z"),
+      validValue("assembly-right-x"),
+      validValue("assembly-lower-right")
+    ];
+    if (values.every(value => value !== null)) send(`tower assembly ${values.join(" ")}`);
+  });
+  document.getElementById("habitatPickupBtn").addEventListener("click", () => {
+    const values = [
+      validValue("habitat-first-raise"),
+      validValue("habitat-return-lower"),
+      validValue("habitat-final-raise")
+    ];
+    if (values.every(value => value !== null)) send(`habitat pickup ${values.join(" ")}`);
+  });
+  document.getElementById("habitatPlacedownBtn").addEventListener("click", () => {
+    const values = [
+      validValue("habitat-placedown-start-z"),
+      validValue("habitat-placedown-right-x"),
+      validValue("habitat-placedown-first-z"),
+      validValue("habitat-placedown-raised-z"),
+      validValue("habitat-placedown-left-x"),
+      validValue("habitat-placedown-second-z"),
+      validValue("habitat-placedown-final-z")
+    ];
+    if (values.every(value => value !== null)) send(`habitat placedown ${values.join(" ")}`);
+  });
   document.getElementById("stopAllBtn").addEventListener("click", () => send("stop"));
   setConnected(false);
 })();

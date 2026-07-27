@@ -236,6 +236,35 @@ static esp_err_t apply_wheel_duties(Drivetrain *drivetrain, const float duties[]
     return ESP_OK;
 }
 
+// Takes control of safety-critical outputs before any blocking startup work.
+esp_err_t drivetrain_hold_safe_outputs(const DrivetrainConfig *config) {
+    if (config == NULL || !GPIO_IS_VALID_OUTPUT_GPIO(config->brake_pin)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Latch the active-high brake before switching the pin to output.
+    esp_err_t error = gpio_set_level((gpio_num_t)config->brake_pin, 1);
+    if (error != ESP_OK) return error;
+
+    gpio_config_t brake_config = {0};
+    brake_config.pin_bit_mask = 1ULL << config->brake_pin;
+    brake_config.mode = GPIO_MODE_OUTPUT;
+    brake_config.pull_up_en = GPIO_PULLUP_ENABLE;
+    brake_config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    brake_config.intr_type = GPIO_INTR_DISABLE;
+    error = gpio_config(&brake_config);
+    if (error != ESP_OK) return error;
+
+    error = gpio_set_level((gpio_num_t)config->brake_pin, 1);
+    if (error != ESP_OK) return error;
+
+    for (int index = 0; index < DRIVETRAIN_MOTOR_MAX; index++) {
+        error = motor_driver_hold_pwm_low(config->motor_configs[index]);
+        if (error != ESP_OK) return error;
+    }
+    return ESP_OK;
+}
+
 // Initializes the brake plus all motor and encoder devices with rollback.
 esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config) {
     if (drivetrain == NULL || !drivetrain_config_is_valid(config)) {
@@ -249,19 +278,7 @@ esp_err_t drivetrain_init(Drivetrain *drivetrain, const DrivetrainConfig *config
         drivetrain->control.active_controller_config[index] = config->wheel_controller;
     }
 
-    gpio_config_t brake_config = {0};
-    brake_config.pin_bit_mask = 1ULL << config->brake_pin;
-    brake_config.mode = GPIO_MODE_OUTPUT;
-    brake_config.pull_up_en = GPIO_PULLUP_DISABLE;
-    brake_config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    brake_config.intr_type = GPIO_INTR_DISABLE;
-
-    esp_err_t error = gpio_config(&brake_config);
-    if (error != ESP_OK) {
-        memset(drivetrain, 0, sizeof(*drivetrain));
-        return error;
-    }
-    error = gpio_set_level((gpio_num_t)config->brake_pin, 1);
+    esp_err_t error = drivetrain_hold_safe_outputs(config);
     if (error != ESP_OK) {
         memset(drivetrain, 0, sizeof(*drivetrain));
         return error;

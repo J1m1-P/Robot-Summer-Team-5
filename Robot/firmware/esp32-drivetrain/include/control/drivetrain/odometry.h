@@ -55,6 +55,16 @@ esp_err_t drivetrain_odometry_set_pose(
     const DrivetrainPose *pose
 );
 
+/* Computes the body-frame delta between two world-frame poses, rotating by
+ * `from`'s heading -- the frame the motion actually happened in. Lets any
+ * observer of a shared cumulative pose (e.g. a task action diffing against
+ * its own locally-snapshotted starting pose) recover a per-cycle delta
+ * without re-deriving the rotation math. */
+DrivetrainOdometryDelta drivetrain_odometry_delta_between(
+    const DrivetrainPose *from,
+    const DrivetrainPose *to
+);
+
 #ifdef __cplusplus
 }
 #endif

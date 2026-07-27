@@ -487,9 +487,7 @@ def control_loop():
                 else:
                     # Undo the align turn (turn by -error) so the ESP starts
                     # roughly re-aimed at the tape, then hand driving back to it.
-                    # NOTE: these two commands go out back-to-back — if the ESP
-                    # can only hold one unread packet, space them out or fold the
-                    # turn-back into a single "resume" command on the firmware side.
+                    # The ESP UART queue preserves both commands in order.
                     if align_error is not None:
                         send(f"TURN:{-align_error:.3f}")
                     send("FOLLOW")

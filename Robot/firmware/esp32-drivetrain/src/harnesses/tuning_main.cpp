@@ -542,6 +542,7 @@ void service_run(unsigned long now, float dt_s, bool should_print) {
 
 // Initializes serial telemetry and the default front-left tuning channel.
 void setup() {
+    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
     Serial.begin(115200);
     delay(1000);
 

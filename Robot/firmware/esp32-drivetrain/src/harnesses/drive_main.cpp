@@ -230,6 +230,7 @@ void print_telemetry(unsigned long now_ms) {
 
 // Initializes the unified drivetrain plus its debug communication transports.
 void setup() {
+    (void)drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
     Serial.begin(115200);
     delay(1000);
     app_log_init();

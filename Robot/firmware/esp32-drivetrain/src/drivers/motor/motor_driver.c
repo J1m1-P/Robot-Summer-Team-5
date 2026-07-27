@@ -31,6 +31,26 @@ bool motor_driver_config_is_valid(const MotorDriverConfig *config) {
     return true;
 }
 
+// Latches a low level before enabling the GPIO output to avoid a startup pulse.
+esp_err_t motor_driver_hold_pwm_low(const MotorDriverConfig *config) {
+    if (!motor_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
+
+    esp_err_t err = gpio_set_level((gpio_num_t)config->pwm_pin, 0);
+    if (err != ESP_OK) return err;
+
+    gpio_config_t pwm_gpio_config = {
+        .pin_bit_mask = (1ULL << config->pwm_pin),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    err = gpio_config(&pwm_gpio_config);
+    if (err != ESP_OK) return err;
+
+    return gpio_set_level((gpio_num_t)config->pwm_pin, 0);
+}
+
 // Converts a non-negative, clamped duty fraction into an LEDC counter value.
 static uint32_t duty_to_ledc_count(const MotorDriver *motor, float duty) {
     const uint32_t max_count = (1UL << motor->config->pwm_resolution) - 1UL;
@@ -71,6 +91,11 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
     motor->coasting = true;
     motor->current_duty = 0.0f;
 
+    // Take control of PWM first. This also makes direct motor initialization
+    // safe when the caller did not perform the optional early startup hold.
+    esp_err_t err = motor_driver_hold_pwm_low(config);
+    if (err != ESP_OK) return err;
+
     // Configure GPIO pin for direction
     gpio_config_t dir_gpio_config = {
         .pin_bit_mask = (1ULL << config->dir_pin), 
@@ -79,8 +104,6 @@ esp_err_t motor_driver_init(MotorDriver *motor, const MotorDriverConfig *config)
         .pull_down_en = GPIO_PULLDOWN_DISABLE, 
         .intr_type = GPIO_INTR_DISABLE
     };
-
-    esp_err_t err; 
 
     err = gpio_config(&dir_gpio_config);
 

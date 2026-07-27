@@ -69,12 +69,8 @@ void test_first_update_only_captures_baseline() {
 // ticks via the forward Jacobian, round-trips back through the odometry
 // source into the same pose delta -- avoids hand-deriving wheel angles by
 // reusing x_drive_kinematics as the source of truth for what ticks a given
-// displacement should produce. At heading=0 the x/heading components pass
-// through directly, but y does not: DrivetrainBodyVelocity.vy is
-// positive-right while world y aligns with body "left" (standard
-// x-forward/y-left convention, matching CCW-positive heading), so the
-// expected y sign is negated relative to vy -- see odometry.c's own
-// right-vs-left derivation.
+// displacement should produce. At heading=0, body +x/+y align directly with
+// world +x/+y: forward is +x and left is +y.
 void test_integrates_known_displacement() {
     const DrivetrainOdometrySourceConfig config = make_config();
 

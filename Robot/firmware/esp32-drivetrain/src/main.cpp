@@ -1,75 +1,52 @@
-/* Runs the current drivetrain motor bench-test firmware. */
+/* Starts and services the ordered robot task sequence. */
 #include <Arduino.h>
 
-#include "esp_err.h"
-#include <robot_common/app_log.h>
+#include <robot_common/uart_link.h>
 
-#include "drivers/motor/motor_driver.h"
-#include "config/drivetrain/motor_config.h"
+#include "config/communication/uart_link_config.h"
+#include "config/drivetrain/drivetrain_config.h"
+#include "control/drivetrain/drivetrain.h"
+#include "control/task/robot_sequence_controller.h"
 
-// Runtime state for the single-motor bench test.
-static MotorDriver motor1 = {0};
-static MotorDriver motor2 = {0};
-static bool motor_ready = false;
+namespace {
 
-// Initializes logging and enables the front-left motor for bench testing.
-void setup()
-{
+UartLink arm_uart = {};
+RobotSequenceController robot_sequence_controller = {};
+
+}  // namespace
+
+void setup() {
+    // Must be called first, prevents weird motor behavior at start up
+    drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
+
     Serial.begin(115200);
-    delay(1000);
+    Serial.println("Starting...");
 
-    Serial.println("1. Serial started");
+    // Delay(5000) later need to be change to start button action
+    delay(5000);
 
-    app_log_init();
-    Serial.println("2. App log initialized");
+    Serial.println("# Starting Task Sequence");
 
-    esp_err_t err; 
-
-    err = motor_driver_init(&motor1, &FL_MOTOR_CONFIG);
+    // UART init
+    esp_err_t err = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG);
     if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor initialization: %s", esp_err_to_name(err));
+        Serial.printf("# FAULT: arm UART initialization failed (%s)\n", esp_err_to_name(err));
         return;
     }
-    err = motor_driver_init(&motor2, &FR_MOTOR_CONFIG);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor initialization: %s", esp_err_to_name(err));
-        return;
-    }
-    APP_LOGI(LOG_TAG_MOTOR, "Motor initialized");
 
-    err = motor_driver_enable(&motor1);
+    // Robot task sequence init
+    err = robot_sequence_controller_init(&robot_sequence_controller, &arm_uart);
     if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable: %s", esp_err_to_name(err));
+        Serial.printf(
+            "# FAULT: Robot sequence initialization failed (%s)\n",
+            esp_err_to_name(err));
         return;
     }
-    err = motor_driver_enable(&motor2);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed motor enable: %s", esp_err_to_name(err));
-        return;
-    }
-    APP_LOGI(LOG_TAG_MOTOR, "Motor enabled");
-    motor_ready = true;
 }
 
-// Repeatedly commands a fixed duty until a motor error occurs.
-void loop()
-{
-    if (!motor_ready) {
-        delay(100);
-        return;
-    }
-
-    esp_err_t err = motor_driver_set_duty(&motor1, 0.5f);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed to set motor duty: %s", esp_err_to_name(err));
-        motor_ready = false;
-    }
-    delay(100);
-
-    err = motor_driver_set_duty(&motor2, 0.5f);
-    if (err != ESP_OK) {
-        APP_LOGE(LOG_TAG_MOTOR, "Failed to set motor duty: %s", esp_err_to_name(err));
-        motor_ready = false;
-    }
-    delay(100);
+void loop() {
+    robot_sequence_controller_update(
+        &robot_sequence_controller,
+        millis());
+    delay(1);
 }

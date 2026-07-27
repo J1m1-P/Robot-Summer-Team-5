@@ -89,10 +89,36 @@ esp_err_t move_r_update(
     output->requested_velocity.vx = 0.0f;
     output->requested_velocity.vy = 0.0f;
     output->requested_velocity.omega = omega;
+
     if (fabsf(error) <= move->config->heading_tolerance_rad &&
         fabsf(omega) <= kStoppedOmegaRadS) {
         move->status = MOVE_R_COMPLETE;
         output->requested_velocity.omega = 0.0f;
+    } else if (fabsf(error) > move->config->heading_tolerance_rad &&
+               fabsf(target_omega) < rotational_settle_deadband_rad_s() &&
+               fabsf(omega) < rotational_settle_deadband_rad_s()) {
+        /* Both the PID's own target and the profile-tracked actual have
+         * dropped below the angular deadband (see rotational_settle.h)
+         * while heading error is still outside tolerance -- unlike a
+         * linear move's along-track profile, which intentionally brakes to
+         * exactly zero as a real maneuver end-state, this PID can converge
+         * to a steady sub-deadband value on its own with no separate
+         * "am I braking" signal to gate on, so continuing to feed it would
+         * be physically inert and the primitive would sit in RUNNING
+         * forever. Checking target_omega too (not just omega) excludes the
+         * initial jerk-limited ramp-up from a cold start, where target_omega
+         * is already near max_omega_rad_s (correctly not yet "small") even
+         * though the profile-tracked omega briefly passes through small
+         * values on its way up. Pulse above the deadband instead, the same
+         * pattern MoveL/MoveC use for their own linear residual correction. */
+        if (!move->settling) {
+            move->settling = true;
+            rotational_settle_reset(&move->settle);
+        }
+        const float hold_omega = rotational_settle_update(
+            &move->settle, fabsf(error),
+            move->config->heading_tolerance_rad, dt_s);
+        output->requested_velocity.omega = copysignf(hold_omega, error);
     }
     output->status = move->status;
     output->motion_valid = move->status != MOVE_R_FAULT;
