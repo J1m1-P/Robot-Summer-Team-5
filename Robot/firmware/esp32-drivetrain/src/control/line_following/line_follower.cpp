@@ -12,7 +12,7 @@
 namespace {
 
 constexpr int64_t kControlPeriodUs = 5000;  // 200 Hz
-constexpr int kSideSensorIndex = 2;
+constexpr int kBackSensorIndex = 1, kSideSensorIndex = 2;
 
 constexpr float kFrontWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
 constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // back is mounted mirrored
@@ -44,38 +44,11 @@ constexpr float kSearchTimeoutS = 2.0f;
 // Telemetry rate (throttled)
 constexpr int64_t kTelemetryPeriodUs = 200000;  // 5 Hz
 
-// Ramps vx down over the last stretch before a known DISTANCE/LATERAL stop
+// Ramps speed down over the last stretch before a known DISTANCE stop
 // point instead of driving at full speed right up to the abrupt stop.
 constexpr float kApproachRampDistanceM = 0.03f;
 
 constexpr float kMinRampSpeedMps = 0.1f;
-
-constexpr float kTapeWidthM = 0.019f;
-constexpr float kSensorPitchM = 0.019f;
-constexpr float kStripSpacingM = 0.045f;
-// extra distance past the leading channel's first detection to land the
-// array's center on the tape (ONE) or the gap between two strips (TWO)
-constexpr float kAlignTapeCenterM = 1.5f * kSensorPitchM + kTapeWidthM / 2.0f;
-constexpr float kAlignGapCenterM = kAlignTapeCenterM + kStripSpacingM / 2.0f;
-
-// Arms a distance target on first detection; reports done once reached.
-struct LateralAligner {
-    bool prev_active = false;
-    bool triggered = false;
-    float target_m = 0.0f;
-
-    bool Update(bool active, float distance_m, float offset_m) {
-        if (!triggered) {
-            if (active && !prev_active) {
-                triggered = true;
-                target_m = distance_m + offset_m;
-            }
-            prev_active = active;
-            return false;
-        }
-        return distance_m >= target_m;
-    }
-};
 
 struct DirectionInfo {
     int sensor_index;
@@ -118,7 +91,6 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     const DirectionInfo steer = GetDirectionInfo(dir);
     const int64_t start_us = esp_timer_get_time();
     FixedRateGate gate = {kControlPeriodUs, start_us};
-    LateralAligner lateral_aligner;
     float cumulative_distance_m = 0.0f;
     float filtered_error = 0.0f;
     BoundedPidState steering_pid_state = {};
@@ -149,21 +121,16 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                                             current_pose.y_m - previous_pose.y_m);
         previous_pose = current_pose;
 
-        const bool leading_active = ctx->sensors[kSideSensorIndex]->channel_0;
-        const bool lateral_done = lateral_aligner.Update(
-            leading_active, cumulative_distance_m,
-            stop_type == StopCondition::LATERAL_TWO ? kAlignGapCenterM : kAlignTapeCenterM);
+        if ((stop_type == StopCondition::LATERAL_ONE ||
+             stop_type == StopCondition::LATERAL_TWO) &&
+            ctx->sensors[kBackSensorIndex]->channel_0) return Abort(true);
 
         // Ramp speed down over the last kApproachRampDistanceM before stop point
         float ramp_target_speed_mps = speed_mps;
         const float ramp_floor_mps = fminf(kMinRampSpeedMps, speed_mps);
-        const bool has_distance_target = stop_type == StopCondition::DISTANCE ||
-            ((stop_type == StopCondition::LATERAL_ONE || stop_type == StopCondition::LATERAL_TWO) &&
-             lateral_aligner.triggered);
+        const bool has_distance_target = stop_type == StopCondition::DISTANCE;
         if (has_distance_target) {
-            const float target_m =
-                stop_type == StopCondition::DISTANCE ? stop_value : lateral_aligner.target_m;
-            const float remaining_m = target_m - cumulative_distance_m;
+            const float remaining_m = stop_value - cumulative_distance_m;
             if (remaining_m < kApproachRampDistanceM) {
                 const float t = clamp(remaining_m / kApproachRampDistanceM, 0.0f, 1.0f);
                 ramp_target_speed_mps = ramp_floor_mps + t * (speed_mps - ramp_floor_mps);
@@ -230,7 +197,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             case StopCondition::TIME_ONLY: stop_reached = elapsed_s >= stop_value; break;
             case StopCondition::DISTANCE: stop_reached = cumulative_distance_m >= stop_value; break;
             case StopCondition::LATERAL_ONE:
-            case StopCondition::LATERAL_TWO: stop_reached = lateral_done; break;
+            case StopCondition::LATERAL_TWO: break;
         }
         if (!stop_reached) continue;
 
@@ -239,7 +206,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         switch (stop_type) {
             case StopCondition::DISTANCE: overshoot_m = cumulative_distance_m - stop_value; break;
             case StopCondition::LATERAL_ONE:
-            case StopCondition::LATERAL_TWO: overshoot_m = cumulative_distance_m - lateral_aligner.target_m; break;
+            case StopCondition::LATERAL_TWO: break;
             case StopCondition::TIME_ONLY: break;
         }
         Serial.printf(

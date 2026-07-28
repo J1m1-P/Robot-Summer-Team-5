@@ -11,7 +11,7 @@
 namespace {
 
 constexpr float kTapeFollowSpeedMps = 0.25f;
-constexpr float kTapeFollowTimeoutS = 12.0f;
+constexpr float kTapeFollowTimeoutS = 30.0f;
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 
@@ -47,7 +47,7 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape(
-                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
@@ -56,8 +56,17 @@ extern "C" bool movement_action_controller_update(
                 controller->action_value);
             break;
 
-        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED:
+        case MOVEMENT_ACTION_ROTATE:
+
             printf("# PLACEHOLDER: Rotate CW until aligned with tape again\n");
+            break;
+
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape(
+                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    StopCondition::LATERAL_ONE, 0.0f, kTapeFollowTimeoutS);
+            }
             break;
 
         case MOVEMENT_ACTION_GO_FORWARD:
@@ -66,11 +75,11 @@ extern "C" bool movement_action_controller_update(
                 controller->action_value);
             break;
 
-        case MOVEMENT_ACTION_ROTATE:
-            printf(
-                "# PLACEHOLDER: Rotate %.0f degrees\n",
-                controller->action_value);
-            break;
+        // case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED:
+        //     printf(
+        //         "# PLACEHOLDER: Rotate %.0f degrees\n",
+        //         controller->action_value);
+        //     break;
 
         default:
             return false;
