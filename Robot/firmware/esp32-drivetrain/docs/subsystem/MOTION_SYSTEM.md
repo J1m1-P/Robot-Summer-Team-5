@@ -43,7 +43,7 @@ const esp_err_t result = precision_move(&ctx, &target, /*timeout_s=*/15.0f);
 - Once execution starts, the drivetrain is stopped before the function
   returns. Invalid context arguments are rejected before execution begins.
 
-### Lateral tape stops
+### Tape stops
 
 The translator can optionally use the shared `TapeStopCondition` evaluator:
 
@@ -63,11 +63,12 @@ PrecisionMoveTarget target = {
 ```
 
 When enabled, the translator reads the selected tape modules each control cycle
-and returns `ESP_OK` when the requested sensor pattern is first detected. This
-initial implementation is intentionally uncalibrated; it does not yet center
-the sensors over a strip or gap. The position target acts as a safety bound;
-reaching it before detecting the marker returns `ESP_ERR_TIMEOUT`. The caller
-must provide all three tape sensors in the context when this mode is enabled.
+during translation or rotation and returns `ESP_OK` when the requested sensor
+pattern is first detected. This initial implementation is intentionally
+uncalibrated; it does not yet center the sensors over a strip or gap. The
+position or heading target acts as a safety bound; reaching it before detecting
+the marker returns `ESP_ERR_TIMEOUT`. The caller must provide all three tape
+sensors in the context when this mode is enabled.
 
 ## 3. Control Behaviour
 

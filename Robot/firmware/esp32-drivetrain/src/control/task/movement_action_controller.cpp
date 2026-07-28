@@ -24,6 +24,17 @@ constexpr int64_t kLocatorControlPeriodUs = 5000;
 constexpr float kPrecisionVxMps = 0.2f;
 constexpr float kPrecisionVyMps = 0.15f;
 constexpr float kPrecisionOmegaRadS = 1.0f;
+constexpr float kPrecisionTimeoutS = 15.0f;
+constexpr float kTapeSeekMaxDistanceM = 1.5f;
+// Stay just inside the +/-pi wrap boundary so the safety-bound turn is
+// unambiguously clockwise.
+constexpr float kTapeSeekMaxRotationRad =
+    static_cast<float>(M_PI) - 0.01f;
+constexpr TapeStopSpec kSideTapeStopSpec = {
+    .sensor_mask = 1U << 2,  // side sensor
+    .required_sensor_count = 1,
+    .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
+};
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 #ifdef ARDUINO
@@ -119,7 +130,11 @@ extern "C" void movement_action_controller_begin_sequence(void) {
 }
 
 #ifdef ARDUINO
-bool precision_action(float dx_body, float dy_body, float dhead_rad) {
+bool precision_action(
+    float dx_body,
+    float dy_body,
+    float dhead_rad,
+    const TapeStopSpec *tape_stop_spec = nullptr) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->pose_service == nullptr) {
         return false;
@@ -136,6 +151,10 @@ bool precision_action(float dx_body, float dy_body, float dhead_rad) {
         .delta_heading_rad = dhead_rad,
         .body_velocity = body_velocity,
     };
+    if (tape_stop_spec != nullptr) {
+        target.tape_stop_enabled = true;
+        target.tape_stop_spec = *tape_stop_spec;
+    }
     Pose planned_goal = {};
     if (g_planned_pose_valid) {
         const float c = std::cos(g_planned_pose.heading_rad);
@@ -148,8 +167,14 @@ bool precision_action(float dx_body, float dy_body, float dhead_rad) {
         target.world_goal_enabled = true;
         target.world_goal = planned_goal;
     }
-    const bool success = precision_move(g_precision_move_ctx, &target, 15.0f) == ESP_OK;
-    if (success && g_planned_pose_valid) g_planned_pose = planned_goal;
+    const bool success =
+        precision_move(g_precision_move_ctx, &target, kPrecisionTimeoutS) ==
+        ESP_OK;
+    if (success && tape_stop_spec != nullptr) {
+        sync_planned_pose();
+    } else if (success && g_planned_pose_valid) {
+        g_planned_pose = planned_goal;
+    }
     return success;
 }
 
@@ -373,10 +398,21 @@ extern "C" bool movement_action_controller_update(
             break;
 
         case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
+#ifdef ARDUINO
+            return precision_action(
+                kTapeSeekMaxDistanceM, 0.0f, 0.0f, &kSideTapeStopSpec);
+#else
             return false;
+#endif
 
-        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE:
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
+#ifdef ARDUINO
+            return precision_action(
+                0.0f, 0.0f, -kTapeSeekMaxRotationRad,
+                &kSideTapeStopSpec);
+#else
             return false;
+#endif
 
         case MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR:
 #ifdef ARDUINO

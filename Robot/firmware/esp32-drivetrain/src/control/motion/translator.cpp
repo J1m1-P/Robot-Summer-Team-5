@@ -122,7 +122,7 @@ esp_err_t precision_move(
                                             cur.y_m - prev.y_m);
         prev = cur;
 
-        if (target->tape_stop_enabled && state == State::Translate) {
+        if (target->tape_stop_enabled) {
             const esp_err_t sensor_error = tape_sensor_driver_read_all(
                 context->sensors);
             if (sensor_error != ESP_OK) {
@@ -185,12 +185,6 @@ esp_err_t precision_move(
             break;
         }
         case State::FinalRotate: {
-            if (target->tape_stop_enabled &&
-                !tape_stop_condition_triggered(&tape_stop)) {
-                stop();
-                return ESP_ERR_TIMEOUT;
-            }
-
             const float heading_error = wrap(goal.heading_rad -
                                              cur.heading_rad);
             if (std::fabs(heading_error) > kHeadTol) {
@@ -200,6 +194,12 @@ esp_err_t precision_move(
                     heading_error * kHeadingGain,
                     -kMotionOmegaRadS, kMotionOmegaRadS);
                 break;
+            }
+
+            if (target->tape_stop_enabled &&
+                !tape_stop_condition_triggered(&tape_stop)) {
+                stop();
+                return ESP_ERR_TIMEOUT;
             }
 
             if (distance_error > kPosTol) {
