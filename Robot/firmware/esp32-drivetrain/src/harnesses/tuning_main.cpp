@@ -127,8 +127,7 @@ constexpr int kMotorCount = 4;
 constexpr float kDefaultRunDuty = 0.0f;
 constexpr float kDefaultTargetMps = 1.0f;
 constexpr unsigned long kDefaultRunDurationMs = 3000;
-// Matches MoveSConfig's own placeholder default (move_s.c) -- not yet a
-// calibrated slip-avoidance ceiling, just a reasonable starting point.
+// Conservative profile default for the standalone tuning diagnostic.
 constexpr float kDefaultMaxAccelMps2 = 0.5f;
 // After the commanded duration elapses and duty/target are zeroed, keep
 // streaming telemetry (and keep the chart live) for this much longer before
