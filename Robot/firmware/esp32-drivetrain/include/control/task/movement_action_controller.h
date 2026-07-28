@@ -33,7 +33,10 @@ esp_err_t movement_action_controller_init(
     MovementAction action,
     float action_value);
 
-// Updates the active action and returns true when it is complete.
+// Updates the active action. Every action here blocks until it's fully
+// resolved, so the result is always final: true means it succeeded, false
+// means it failed (timeout, lost tape, error)
+// Must not call again after failure
 bool movement_action_controller_update(
     MovementActionController *controller);
 

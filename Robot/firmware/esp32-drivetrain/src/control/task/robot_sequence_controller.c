@@ -285,8 +285,11 @@ void robot_sequence_controller_update(
         if (movement_action_controller_update(
                 &controller->movement_action_controller)) {
             advance_sequence(controller, now_ms);
-            return;
+        } else {
+            // false is always a terminal failure (no repeats)
+            enter_fault(controller, "robot step failed", ESP_FAIL);
         }
+        return;
     }
 
     if (deadline_reached(now_ms, controller->step_deadline_ms)) {
