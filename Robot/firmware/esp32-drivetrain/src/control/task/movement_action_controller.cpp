@@ -282,7 +282,7 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(
-                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    g_line_follower_ctx, Direction::MX, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
