@@ -44,7 +44,7 @@ extern "C" bool movement_action_controller_update(
 
     // Decide what to do for this action
     switch (controller->action) {
-        case MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE:
+        case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape(
                     g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
