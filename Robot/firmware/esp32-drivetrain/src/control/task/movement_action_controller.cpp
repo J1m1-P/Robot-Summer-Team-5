@@ -25,9 +25,6 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE:
-        case MOVEMENT_ACTION_GO_LEFT_DISTANCE:
-        case MOVEMENT_ACTION_GO_RIGHT_DISTANCE:
-        case MOVEMENT_ACTION_GO_FORWARD:
             return true;
         default:
             return false;
@@ -125,16 +122,7 @@ extern "C" bool movement_action_controller_update(
                 "# PLACEHOLDER: Left tape following for %.1f m\n",
                 controller->action_value);
             break;
-
-        case MOVEMENT_ACTION_ROTATE:
-
-            printf("# PLACEHOLDER: Rotate CW until aligned with tape again\n");
-            break;
-
-        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
-            printf("# PLACEHOLDER: Tape follow until one task tape strip is detected\n");
-            break;
-
+            
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape(
@@ -143,7 +131,15 @@ extern "C" bool movement_action_controller_update(
             }
             break;
 
-        case MOVEMENT_ACTION_GO_FORWARD:
+        // use action_value to determine whether to use lateral one or lateral two stop condition
+        case MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN:
+            if (g_line_follower_ctx != nullptr) {
+                printf("# PLACEHOLDER: Back tape strafe align\n");
+            }
+            break;
+
+        // positive action value is forward, negative is backward
+        case MOVEMENT_ACTION_GO_X_DISTANCE:
 #ifdef ARDUINO
             return precision_action(controller->action_value, 0.0f, 0.0f);
 #else
@@ -151,7 +147,8 @@ extern "C" bool movement_action_controller_update(
 #endif
             break;
 
-        case MOVEMENT_ACTION_GO_LEFT_DISTANCE:
+        // positive action value is right, negative is left
+        case MOVEMENT_ACTION_GO_Y_DISTANCE:
 #ifdef ARDUINO
             return precision_action(0.0f, controller->action_value, 0.0f);
 #else
@@ -159,14 +156,7 @@ extern "C" bool movement_action_controller_update(
 #endif
             break;
 
-        case MOVEMENT_ACTION_GO_RIGHT_DISTANCE:
-#ifdef ARDUINO
-            return precision_action(0.0f, -controller->action_value, 0.0f);
-#else
-            printf("# PLACEHOLDER: Go right %.1f m\n", controller->action_value);
-#endif
-            break;
-
+        // positive action is counterclockwise, negative is clockwise
         case MOVEMENT_ACTION_ROTATE:
 #ifdef ARDUINO
             return precision_action(0.0f, 0.0f,
@@ -174,6 +164,25 @@ extern "C" bool movement_action_controller_update(
 #else
             printf("# PLACEHOLDER: Rotate %.0f degrees\n", controller->action_value);
 #endif
+            break;
+            
+        case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
+#ifdef ARDUINO
+            printf("placeholder");
+#else
+            printf("# PLACEHOLDER: Go forward until side tape\n");
+#endif
+            break;
+
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE:
+            if (g_line_follower_ctx != nullptr) {
+                printf("# PLACEHOLDER: Rotate CW until tape aligned\n");
+            }
+            break;
+
+        case MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR:
+            // Top ESP needs to tell bottom ESP when the locator is detected
+            printf("# PLACEHOLDER: Go backward until locator\n");
             break;
 
         default:

@@ -31,6 +31,15 @@ typedef struct {
 
 // Actual Robot Sequence (To be finished).
 static const RobotSequenceStep kRobotSequence[] = {
+    
+    // Retract the locator
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
+
+    // Move tower arm from home position to safe idle position
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_CLAW}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
+    
     // Scan at start
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     
@@ -59,20 +68,26 @@ static const RobotSequenceStep kRobotSequence[] = {
     // // Rotate to follow tape on the side to tower pickup, then align
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 90.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER},
-     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.05f}},
 
     // Tower: Picking up the pieces
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.20f},
+    // TODO: Do following arm steps in parallel with movement to save time
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_CLAW}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_DOWN}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_CLAW}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
+
+    // Move to the tower base
+    // TODO: make locator extend during movement to save time
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR}, 0.0f},
 
     // Habitat: Building actions (enable and tune when the sequence is ready)
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
