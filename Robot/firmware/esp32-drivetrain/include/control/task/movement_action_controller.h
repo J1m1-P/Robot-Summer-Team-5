@@ -28,6 +28,12 @@ typedef enum {
     MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE,
     MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR,
+    MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP,
+    MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_UNTIL_GAP,
+    MOVEMENT_ACTION_GO_LEFT_DISTANCE,
+    MOVEMENT_ACTION_GO_RIGHT_DISTANCE,
+    MOVEMENT_ACTION_GO_FORWARD,
+    MOVEMENT_ACTION_GENERAL_MOTION,
     MOVEMENT_ACTION_MAX,
 } MovementAction;
 
@@ -35,6 +41,9 @@ typedef struct {
     MovementAction action;
     float action_value;
     bool locator_contact_detected;
+    float dx_body_m;
+    float dy_body_m;
+    float delta_heading_rad;
 } MovementActionController;
 
 // Prepares one action.
@@ -42,6 +51,13 @@ esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
     float action_value);
+
+// Prepares a body-relative translation and rotation action.
+esp_err_t movement_action_controller_init_general_motion(
+    MovementActionController *controller,
+    float dx_body_m,
+    float dy_body_m,
+    float delta_heading_rad);
 
 // Updates the active action. Every action here blocks until it's fully
 // resolved, so the result is always final: true means it succeeded, false
@@ -52,9 +68,7 @@ bool movement_action_controller_update(
 
 // Injects the hardware/pose access the tape-follow-distance actions need.
 // Call once during setup, after pose_service is ready. Leaving this unset
-// (or passing NULL) keeps those actions on their placeholder
-// immediate-complete behavior -- what the native robot-sequence tests rely
-// on, since they have no drivetrain/sensors/pose_service to give it.
+// (or passing NULL) makes tape-follow actions fail cleanly.
 void movement_action_controller_set_line_follower_context(
     LineFollowerContext *ctx);
 
@@ -65,6 +79,9 @@ void movement_action_controller_set_precision_move_context(
 // Called when the arm ESP reports that the locator microswitch was pressed.
 void movement_action_controller_notify_locator_contact(
     MovementActionController *controller);
+
+// Anchors subsequent precision actions to one world-frame sequence origin.
+void movement_action_controller_begin_sequence(void);
 
 #ifdef __cplusplus
 }

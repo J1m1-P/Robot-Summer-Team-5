@@ -28,10 +28,16 @@ typedef struct {
     uint8_t last_pi_request_id;
 } RobotSequenceController;
 
-// Connects the action paths and waits for the arm before starting the sequence.
+// Initializes the sequence; call robot_sequence_controller_start() after
+// movement contexts are connected.
 esp_err_t robot_sequence_controller_init(
     RobotSequenceController *controller,
     UartLink *arm_uart);
+
+// Starts the current sequence step without waiting for an arm-ready frame.
+esp_err_t robot_sequence_controller_start(
+    RobotSequenceController *controller,
+    uint32_t now_ms);
 
 // Updates only the current step and advances when it completes.
 void robot_sequence_controller_update(

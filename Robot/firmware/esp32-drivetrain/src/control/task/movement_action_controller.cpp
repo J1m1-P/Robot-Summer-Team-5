@@ -3,7 +3,6 @@
 
 #include <cmath>
 #include <stddef.h>
-#include <stdio.h>
 
 #include "control/line_following/line_follower.hpp"
 #ifdef ARDUINO
@@ -22,11 +21,56 @@ constexpr float kLocatorApproachSpeedMps = -0.10f;
 constexpr float kLocatorApproachTimeoutS = 15.0f;
 constexpr int64_t kLocatorControlPeriodUs = 5000;
 #endif
+constexpr float kPrecisionVxMps = 0.2f;
+constexpr float kPrecisionVyMps = 0.15f;
+constexpr float kPrecisionOmegaRadS = 1.0f;
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 #ifdef ARDUINO
 PrecisionMoveContext *g_precision_move_ctx = nullptr;
+Pose g_planned_pose = {};
+bool g_planned_pose_valid = false;
 #endif
+
+float wrap_angle(float angle) {
+    while (angle > static_cast<float>(M_PI)) angle -= 2.0f * static_cast<float>(M_PI);
+    while (angle <= -static_cast<float>(M_PI)) angle += 2.0f * static_cast<float>(M_PI);
+    return angle;
+}
+
+#ifdef ARDUINO
+void sync_planned_pose() {
+    if (g_precision_move_ctx == nullptr ||
+        g_precision_move_ctx->pose_service == nullptr ||
+        g_precision_move_ctx->pose_service->pose_tracker == nullptr) {
+        return;
+    }
+    const Pose pose = pose_tracker_get_pose(
+        g_precision_move_ctx->pose_service->pose_tracker);
+    if (!std::isfinite(pose.x_m) || !std::isfinite(pose.y_m) ||
+        !std::isfinite(pose.heading_rad)) {
+        g_planned_pose_valid = false;
+        return;
+    }
+    g_planned_pose = pose;
+    g_planned_pose_valid = true;
+}
+#else
+void sync_planned_pose() {}
+#endif
+
+bool follow_tape_action(
+    LineFollowerContext *context,
+    Direction direction,
+    float speed_mps,
+    StopCondition stop_condition,
+    float distance_m,
+    float timeout_s) {
+    const bool success = follow_tape(
+        context, direction, speed_mps, stop_condition, distance_m, timeout_s);
+    if (success) sync_planned_pose();
+    return success;
+}
 
 bool action_requires_nonnegative_distance(MovementAction action) {
     switch (action) {
@@ -63,19 +107,50 @@ extern "C" void movement_action_controller_notify_locator_contact(
     }
 }
 
+extern "C" void movement_action_controller_begin_sequence(void) {
+#ifdef ARDUINO
+    g_planned_pose_valid = false;
+    if (g_precision_move_ctx != nullptr &&
+        g_precision_move_ctx->pose_service != nullptr &&
+        g_precision_move_ctx->pose_service->pose_tracker != nullptr) {
+        sync_planned_pose();
+    }
+#endif
+}
+
 #ifdef ARDUINO
 bool precision_action(float dx_body, float dy_body, float dhead_rad) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->pose_service == nullptr) {
         return false;
     }
-    const PrecisionMoveTarget target = {
+    const DrivetrainBodyVelocity body_velocity = {
+        .vx = dx_body == 0.0f ? 0.0f : std::copysign(kPrecisionVxMps, dx_body),
+        .vy = dy_body == 0.0f ? 0.0f : std::copysign(kPrecisionVyMps, dy_body),
+        .omega = dhead_rad == 0.0f
+            ? 0.0f : std::copysign(kPrecisionOmegaRadS, dhead_rad),
+    };
+    PrecisionMoveTarget target = {
         .dx_body_m = dx_body,
         .dy_body_m = dy_body,
         .delta_heading_rad = dhead_rad,
-        .body_velocity = {.vx = 0.15f, .vy = 0.0f, .omega = 0.0f},
+        .body_velocity = body_velocity,
     };
-    return precision_move(g_precision_move_ctx, &target, 15.0f) == ESP_OK;
+    Pose planned_goal = {};
+    if (g_planned_pose_valid) {
+        const float c = std::cos(g_planned_pose.heading_rad);
+        const float s = std::sin(g_planned_pose.heading_rad);
+        planned_goal = {
+            g_planned_pose.x_m + c * dx_body - s * dy_body,
+            g_planned_pose.y_m + s * dx_body + c * dy_body,
+            wrap_angle(g_planned_pose.heading_rad + dhead_rad),
+        };
+        target.world_goal_enabled = true;
+        target.world_goal = planned_goal;
+    }
+    const bool success = precision_move(g_precision_move_ctx, &target, 15.0f) == ESP_OK;
+    if (success && g_planned_pose_valid) g_planned_pose = planned_goal;
+    return success;
 }
 
 bool drive_backward_until_locator(MovementActionController *controller) {
@@ -147,6 +222,23 @@ extern "C" esp_err_t movement_action_controller_init(
     return ESP_OK;
 }
 
+extern "C" esp_err_t movement_action_controller_init_general_motion(
+    MovementActionController *controller,
+    float dx_body_m,
+    float dy_body_m,
+    float delta_heading_rad) {
+    if (controller == nullptr || !std::isfinite(dx_body_m) ||
+        !std::isfinite(dy_body_m) || !std::isfinite(delta_heading_rad)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *controller = MovementActionController{};
+    controller->action = MOVEMENT_ACTION_GENERAL_MOTION;
+    controller->dx_body_m = dx_body_m;
+    controller->dy_body_m = dy_body_m;
+    controller->delta_heading_rad = delta_heading_rad;
+    return ESP_OK;
+}
+
 extern "C" bool movement_action_controller_update(
     MovementActionController *controller) {
     if (controller == NULL) return false;
@@ -155,69 +247,75 @@ extern "C" bool movement_action_controller_update(
     switch (controller->action) {
         case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
-                return follow_tape(
+                return follow_tape_action(
                     g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
-            printf(
-                "# PLACEHOLDER: Front tape following for %.1f m\n",
-                controller->action_value);
-            break;
+            return false;
 
         case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
-                return follow_tape(
-                    g_line_follower_ctx, Direction::MX, kTapeFollowSpeedMps,
+                return follow_tape_action(
+                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
-            printf(
-                "# PLACEHOLDER: Back tape following for %.1f m\n",
-                controller->action_value);
-            break;
+            return false;
 
         case MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
-                return follow_tape(
+                return follow_tape_action(
                     g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
-            printf(
-                "# PLACEHOLDER: Left tape following for %.1f m\n",
-                controller->action_value);
-            break;
-            
+            return false;
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
             if (g_line_follower_ctx != nullptr) {
-                return follow_tape(
+                return follow_tape_action(
                     g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
-                    StopCondition::LATERAL_ONE, 0.0f, kTapeFollowTimeoutS);
+                    StopCondition::LATERAL_ONE, 0.0f,
+                    kTapeFollowTimeoutS);
             }
-            break;
+            return false;
+
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    StopCondition::LATERAL_TWO, 0.0f,
+                    kTapeFollowTimeoutS);
+            }
+            return false;
+
+        case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_UNTIL_GAP:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
+                    StopCondition::LATERAL_TWO, 0.0f,
+                    kTapeFollowTimeoutS);
+            }
+            return false;
 
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT:
             if (g_line_follower_ctx != nullptr) {
-                return follow_tape(
+                return follow_tape_action(
                     g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
                     StopCondition::LATERAL_TWO, 0.0f, kTapeFollowTimeoutS);
             }
-            break;
+            return false;
             
         // use action_value to determine whether to use lateral one or lateral two stop condition
         case MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN:
-            if (g_line_follower_ctx != nullptr) {
-                printf("# PLACEHOLDER: Back tape strafe align\n");
-            }
-            break;
+            return false;
 
         // positive action value is forward, negative is backward
         case MOVEMENT_ACTION_GO_X_DISTANCE:
 #ifdef ARDUINO
             return precision_action(controller->action_value, 0.0f, 0.0f);
 #else
-            printf("# PLACEHOLDER: Go forward %.1f m\n", controller->action_value);
+            return false;
 #endif
             break;
 
@@ -226,39 +324,65 @@ extern "C" bool movement_action_controller_update(
 #ifdef ARDUINO
             return precision_action(0.0f, controller->action_value, 0.0f);
 #else
-            printf("# PLACEHOLDER: Go left %.1f m\n", controller->action_value);
+            return false;
 #endif
             break;
 
         // positive action is counterclockwise, negative is clockwise
+
+        case MOVEMENT_ACTION_GO_RIGHT_DISTANCE:
+#ifdef ARDUINO
+            return precision_action(0.0f, -controller->action_value, 0.0f);
+#else
+            return false;
+#endif
+            break;
+
+        case MOVEMENT_ACTION_GO_FORWARD:
+#ifdef ARDUINO
+            return precision_action(controller->action_value, 0.0f, 0.0f);
+#else
+            return false;
+#endif
+            break;
+
+        case MOVEMENT_ACTION_GO_LEFT_DISTANCE:
+#ifdef ARDUINO
+            return precision_action(0.0f, controller->action_value, 0.0f);
+#else
+            return false;
+#endif
+            break;
         case MOVEMENT_ACTION_ROTATE:
 #ifdef ARDUINO
             return precision_action(0.0f, 0.0f,
                                     controller->action_value * static_cast<float>(M_PI) / 180.0f);
 #else
-            printf("# PLACEHOLDER: Rotate %.0f degrees\n", controller->action_value);
-#endif
-            break;
-            
-        case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
-#ifdef ARDUINO
-            printf("placeholder");
-#else
-            printf("# PLACEHOLDER: Go forward until side tape\n");
+            return false;
 #endif
             break;
 
-        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE:
-            if (g_line_follower_ctx != nullptr) {
-                printf("# PLACEHOLDER: Rotate CW until tape aligned\n");
-            }
+        case MOVEMENT_ACTION_GENERAL_MOTION:
+#ifdef ARDUINO
+            return precision_action(
+                controller->dx_body_m, controller->dy_body_m,
+                controller->delta_heading_rad);
+#else
+            return false;
+#endif
             break;
+
+        case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
+            return false;
+
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE:
+            return false;
 
         case MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR:
 #ifdef ARDUINO
             return drive_backward_until_locator(controller);
 #else
-            printf("# PLACEHOLDER: Go backward until locator\n");
+            return false;
 #endif
             break;
 
@@ -266,6 +390,5 @@ extern "C" bool movement_action_controller_update(
             return false;
     }
 
-    // Replace this immediate completion when the motion is implemented
-    return true;
+    return false;
 }

@@ -110,7 +110,8 @@ bool tape_sensor_driver_is_on_tape(const TapeSensor *sensor)
            TAPE_SENSOR_ACTIVE_LEVEL;
 }
 
-esp_err_t tape_sensor_driver_read_all(TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT])
+esp_err_t tape_sensor_driver_read_all(
+    TapeSensor *const sensors[TAPE_SENSOR_MODULE_COUNT])
 {
     if (sensors == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -154,7 +155,7 @@ esp_err_t tape_sensor_driver_read_all(TapeSensor *sensors[TAPE_SENSOR_MODULE_COU
 }
 
 esp_err_t tape_sensor_driver_read_all_raw(
-    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT],
+    TapeSensor *const sensors[TAPE_SENSOR_MODULE_COUNT],
     uint8_t out_bits[TAPE_SENSOR_MODULE_COUNT])
 {
     if (out_bits == NULL) {

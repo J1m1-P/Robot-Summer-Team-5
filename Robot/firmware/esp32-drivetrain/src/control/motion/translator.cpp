@@ -1,35 +1,27 @@
 #include "control/motion/translator.hpp"
 
 #include <cmath>
-#include <algorithm>
-
 #include <Arduino.h>
 #include "esp_timer.h"
-#include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/math_utils.h>
 
 namespace {
 
-constexpr float kMinDisp = 1.0e-4f;       // m: ignore tiny translations
 constexpr int64_t kCtrlPeriodUs = 5000;   // 200 Hz
-constexpr float kPosTol = 0.01f;          // m: final position tolerance
-constexpr float kHeadTol = 0.035f;        // rad: final heading tolerance (~2°)
-constexpr float kVelTol = 0.05f;          // m/s: practical stopped threshold
-constexpr float kStartHeadTol = 0.05f;    // rad: begin translation threshold
-constexpr float kApproach = 0.03f;        // m: start slowing near target
-constexpr float kMaxVy = 0.25f;           // m/s: correction limit
-constexpr float kMaxOmega = 1.0f;         // rad/s: correction limit
+constexpr float kPosTol = 0.003f;         // m: final position tolerance
+constexpr float kHeadTol = 0.0349066f;    // rad: final heading tolerance (2°)
+constexpr float kMotionOmegaRadS = 0.6f;
+constexpr float kApproachRampDistanceM = 0.03f;
+constexpr float kMinRampSpeedMps = 0.1f;
+constexpr float kPositionGain = 6.0f;
+constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
 
 float wrap(float a) {
     while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);
     while (a < -static_cast<float>(M_PI)) a += 2.0f * static_cast<float>(M_PI);
     return a;
-}
-
-BoundedPidConfig pid(float p, float i, float d, float limit) {
-    return {p, i, d, limit, -limit, limit};
 }
 
 }  // namespace
@@ -48,6 +40,12 @@ esp_err_t precision_move(
         !std::isfinite(timeout_s) || timeout_s <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (target->tape_stop_enabled &&
+        (context->sensors[0] == nullptr || context->sensors[1] == nullptr ||
+         context->sensors[2] == nullptr ||
+         !tape_stop_spec_is_valid(&target->tape_stop_spec))) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     const Pose start = pose_tracker_get_pose(context->pose_service->pose_tracker);
     if (!std::isfinite(start.x_m) || !std::isfinite(start.y_m) ||
@@ -55,30 +53,35 @@ esp_err_t precision_move(
         return ESP_ERR_INVALID_STATE;
     }
 
-    const float c0 = std::cos(start.heading_rad), s0 = std::sin(start.heading_rad);
-    const float dx = c0 * target->dx_body_m - s0 * target->dy_body_m;
-    const float dy = s0 * target->dx_body_m + c0 * target->dy_body_m;
-    const Pose goal = {start.x_m + dx, start.y_m + dy,
-                         wrap(start.heading_rad + target->delta_heading_rad)};
+    Pose goal = {};
+    float dx = 0.0f;
+    float dy = 0.0f;
+    if (target->world_goal_enabled) {
+        goal = target->world_goal;
+        dx = goal.x_m - start.x_m;
+        dy = goal.y_m - start.y_m;
+    } else {
+        const float c0 = std::cos(start.heading_rad), s0 = std::sin(start.heading_rad);
+        dx = c0 * target->dx_body_m - s0 * target->dy_body_m;
+        dy = s0 * target->dx_body_m + c0 * target->dy_body_m;
+        goal = {
+            start.x_m + dx,
+            start.y_m + dy,
+            wrap(start.heading_rad + target->delta_heading_rad),
+        };
+    }
+    const float cruise_speed = std::hypot(
+        target->body_velocity.vx, target->body_velocity.vy);
+    const float translation_distance = std::hypot(dx, dy);
 
-    const float disp = std::hypot(dx, dy);       // world-frame distance
-    const float path_head = disp > kMinDisp
-        ? std::atan2(dy, dx)
-        : goal.heading_rad;
-
-    const BoundedPidConfig x_pid = pid(1.0f, 0.1f, 0.3f, kMaxVy);
-    const BoundedPidConfig y_pid = pid(1.0f, 0.1f, 0.3f, kMaxVy);
-    const BoundedPidConfig h_pid = pid(1.0f, 0.1f, 0.3f, kMaxOmega);
-    const BoundedPidConfig r_pid = pid(2.0f, 0.2f, 0.6f, kMaxOmega);
-    BoundedPidState x_st = {}, y_st = {}, h_st = {}, r_st = {};  // PID history
-
-    enum class State { RotateStart, TranslateAndBlend, FinalSettle };
-    State state = disp > kMinDisp
-        ? State::RotateStart : State::FinalSettle;
+    enum class State { Translate, FinalRotate };
+    State state = translation_distance > 1.0e-4f
+        ? State::Translate : State::FinalRotate;
     const int64_t t0 = esp_timer_get_time();
     FixedRateGate gate = {kCtrlPeriodUs, t0};
     Pose prev = start;                           // previous estimate
-    float vx = 0.0f, vy = 0.0f;                  // world-frame velocity
+    float cumulative_distance_m = 0.0f;
+    TapeStopCondition tape_stop;
 
     auto stop = [&]() {
         drivetrain_stop(context->drivetrain);
@@ -114,65 +117,120 @@ esp_err_t precision_move(
             stop();
             return ESP_ERR_INVALID_STATE;
         }
-        vx = (cur.x_m - prev.x_m) / dt;
-        vy = (cur.y_m - prev.y_m) / dt;
+
+        cumulative_distance_m += std::hypot(cur.x_m - prev.x_m,
+                                            cur.y_m - prev.y_m);
         prev = cur;
 
-    const float exw = goal.x_m - cur.x_m, eyw = goal.y_m - cur.y_m;
-        const float dist = std::hypot(exw, eyw);  // remaining world distance
-        const float c = std::cos(cur.heading_rad), s = std::sin(cur.heading_rad);
-        const float ex = c * exw + s * eyw, ey = -s * exw + c * eyw;  // body error
-        const float speed = std::hypot(c * vx + s * vy, -s * vx + c * vy);
-        DrivetrainBodyVelocity cmd = {};
-
-        switch (state) {
-        case State::RotateStart: {
-            const float eh = wrap(path_head - cur.heading_rad);
-            if (std::fabs(eh) <= kStartHeadTol) {
-                bounded_pid_reset(&r_st);
-                state = State::TranslateAndBlend;
-            } else {
-                cmd.omega = bounded_pid_update(&r_st, &r_pid, eh, dt);
+        if (target->tape_stop_enabled && state == State::Translate) {
+            const esp_err_t sensor_error = tape_sensor_driver_read_all(
+                context->sensors);
+            if (sensor_error != ESP_OK) {
+                stop();
+                return sensor_error;
             }
-            break;
-        }
-        case State::TranslateAndBlend: {
-            const float turn = std::fabs(wrap(goal.heading_rad - path_head));
-            const float blend = std::max(0.05f, turn * 0.05f);
-            const float ratio = clamp(1.0f - dist / blend, 0.0f, 1.0f);
-            const float head = wrap(path_head + ratio * wrap(goal.heading_rad - path_head));
-            const float approach = clamp(dist / kApproach, 0.0f, 1.0f);
-            cmd.vx = target->body_velocity.vx * approach +
-                bounded_pid_update(&x_st, &x_pid, ex, dt);
-            cmd.vy = target->body_velocity.vy * approach +
-                bounded_pid_update(&y_st, &y_pid, ey, dt);
-            cmd.omega = target->body_velocity.omega * approach +
-                bounded_pid_update(&h_st, &h_pid, wrap(head - cur.heading_rad), dt);
-            if (dist <= kPosTol) {
-                bounded_pid_reset(&h_st);
-                state = State::FinalSettle;
-            }
-            break;
-        }
-        case State::FinalSettle: {
-            const float eh = wrap(goal.heading_rad - cur.heading_rad);
-            if (dist > kPosTol) {
-                state = State::TranslateAndBlend;
-                break;
-            }
-            if (std::fabs(eh) <= kHeadTol && speed <= kVelTol) {
+            const bool tape_stop_reached = tape_stop_condition_update(
+                &tape_stop, &target->tape_stop_spec, context->sensors,
+                cumulative_distance_m);
+            if (tape_stop_reached) {
                 stop();
                 return ESP_OK;
             }
-            cmd.omega = bounded_pid_update(&r_st, &r_pid, eh, dt);
+        }
+
+        const float error_world_x = goal.x_m - cur.x_m;
+        const float error_world_y = goal.y_m - cur.y_m;
+        const float distance_error = std::hypot(error_world_x, error_world_y);
+        const float c = std::cos(cur.heading_rad), s = std::sin(cur.heading_rad);
+        const float error_body_x = c * error_world_x + s * error_world_y;
+        const float error_body_y = -s * error_world_x + c * error_world_y;
+        DrivetrainBodyVelocity cmd = {};
+
+        switch (state) {
+        case State::Translate: {
+            if (distance_error <= kPosTol) {
+                if (target->tape_stop_enabled &&
+                    !tape_stop_condition_triggered(&tape_stop)) {
+                    stop();
+                    return ESP_ERR_TIMEOUT;
+                }
+                state = State::FinalRotate;
+                break;
+            }
+
+            float command_speed = cruise_speed;
+            if (distance_error < kApproachRampDistanceM) {
+                const float floor_speed = std::fmin(
+                    kMinRampSpeedMps, cruise_speed);
+                const float t = clamp(
+                    distance_error / kApproachRampDistanceM, 0.0f, 1.0f);
+                command_speed = floor_speed +
+                    t * (cruise_speed - floor_speed);
+            }
+            // Control each body axis independently so a small cross-track
+            // error receives enough velocity to overcome drivetrain deadband.
+            const float position_gain = std::fmax(
+                kPositionGain, command_speed / kApproachRampDistanceM);
+            cmd.vx = clamp(error_body_x * position_gain,
+                           -command_speed, command_speed);
+            cmd.vy = clamp(error_body_y * position_gain,
+                           -command_speed, command_speed);
+            const float command_norm = std::hypot(cmd.vx, cmd.vy);
+            if (command_norm > command_speed) {
+                const float scale = command_speed / command_norm;
+                cmd.vx *= scale;
+                cmd.vy *= scale;
+            }
+
             break;
+        }
+        case State::FinalRotate: {
+            if (target->tape_stop_enabled &&
+                !tape_stop_condition_triggered(&tape_stop)) {
+                stop();
+                return ESP_ERR_TIMEOUT;
+            }
+
+            const float heading_error = wrap(goal.heading_rad -
+                                             cur.heading_rad);
+            if (std::fabs(heading_error) > kHeadTol) {
+                // Rotate alone. Mixing translation correction into this
+                // command can saturate the wheel targets.
+                cmd.omega = clamp(
+                    heading_error * kHeadingGain,
+                    -kMotionOmegaRadS, kMotionOmegaRadS);
+                break;
+            }
+
+            if (distance_error > kPosTol) {
+                // Once heading is settled, correct any position movement
+                // caused by the turn before accepting the final pose.
+                const float direction_scale = kMinRampSpeedMps / distance_error;
+                cmd.vx = error_body_x * direction_scale;
+                cmd.vy = error_body_y * direction_scale;
+                break;
+            }
+
+            const Pose corrected_goal = {
+                goal.x_m, goal.y_m, goal.heading_rad};
+            const esp_err_t snap_error = pose_tracker_set_pose(
+                context->pose_service->pose_tracker, &corrected_goal);
+            if (snap_error != ESP_OK) {
+                stop();
+                return snap_error;
+            }
+            stop();
+            return ESP_OK;
         }
         }
 
         const esp_err_t command_err = drivetrain_set_advanced_body_velocity(
             context->drivetrain, cmd.vx, cmd.vy, cmd.omega);
         const esp_err_t update_err = command_err == ESP_OK
-            ? drivetrain_update(context->drivetrain, now) : command_err;
+            // set_* refreshes last_command_us, so sample time again before
+            // updating; the earlier loop timestamp may now be stale.
+            ? drivetrain_update(context->drivetrain, esp_timer_get_time())
+            : command_err;
         if (update_err != ESP_OK) {
             stop();
             return update_err;

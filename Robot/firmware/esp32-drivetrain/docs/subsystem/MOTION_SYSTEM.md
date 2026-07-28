@@ -15,7 +15,11 @@ responsible for wheel feasibility, acceleration response, and motor output.
 ```cpp
 #include "control/motion/translator.hpp"
 
-PrecisionMoveContext ctx = {&drivetrain, &pose_service};
+PrecisionMoveContext ctx = {
+    .drivetrain = &drivetrain,
+    .pose_service = &pose_service,
+    .sensors = {&front_sensor, &back_sensor, &left_sensor},
+};
 PrecisionMoveTarget target = {
     .dx_body_m = 0.25f,
     .dy_body_m = 0.0f,
@@ -38,6 +42,32 @@ const esp_err_t result = precision_move(&ctx, &target, /*timeout_s=*/15.0f);
   pass; timeout, invalid pose, and drivetrain errors are returned directly.
 - Once execution starts, the drivetrain is stopped before the function
   returns. Invalid context arguments are rejected before execution begins.
+
+### Lateral tape stops
+
+The translator can optionally use the shared `TapeStopCondition` evaluator:
+
+```cpp
+PrecisionMoveTarget target = {
+    .dx_body_m = 1.5f,       // maximum travel/safety bound
+    .dy_body_m = 0.0f,
+    .delta_heading_rad = 0.0f,
+    .body_velocity = {.vx = 0.15f, .vy = 0.0f, .omega = 0.0f},
+    .tape_stop_enabled = true,
+    .tape_stop_spec = {
+        .sensor_mask = 0b100,  // side sensor
+        .required_sensor_count = 1,
+        .channel_mask = 0b0001,
+    },
+};
+```
+
+When enabled, the translator reads the selected tape modules each control cycle
+and returns `ESP_OK` when the requested sensor pattern is first detected. This
+initial implementation is intentionally uncalibrated; it does not yet center
+the sensors over a strip or gap. The position target acts as a safety bound;
+reaching it before detecting the marker returns `ESP_ERR_TIMEOUT`. The caller
+must provide all three tape sensors in the context when this mode is enabled.
 
 ## 3. Control Behaviour
 
@@ -72,6 +102,8 @@ Sequence entries use body-relative action values:
 
 `GO_FORWARD`, `GO_LEFT_DISTANCE`, `GO_RIGHT_DISTANCE`, and `ROTATE` are
 blocking actions. The sequence advances only after the action returns success.
+`MOVEMENT_ACTION_GENERAL_MOTION` accepts body-relative X, Y, and heading values
+in one movement action.
 
 ## 5. Current Limitations
 

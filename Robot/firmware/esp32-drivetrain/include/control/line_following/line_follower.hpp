@@ -2,13 +2,14 @@
 #define LINE_FOLLOWER_HPP
 
 #include "control/drivetrain/drivetrain.h"
+#include "control/line_following/tape_stop_condition.hpp"
 #include "control/odometry/pose_service.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
 
 enum class Direction { PX, MX, PY };
 
-// LATERAL_ONE and LATERAL_TWO stop immediately on rear/MX tape detection.
-// Only valid for dir == PY.
+// LATERAL_ONE stops on first detection; LATERAL_TWO stops on a full outer-tape
+// / centre-gap pattern. PX uses side, PY uses back, and MX has no -y sensor.
 enum class StopCondition { LATERAL_ONE, LATERAL_TWO, DISTANCE, TIME_ONLY };
 
 // Caller owns/initializes drivetrain, sensors, and pose_service once and

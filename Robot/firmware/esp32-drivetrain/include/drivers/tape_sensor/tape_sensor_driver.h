@@ -63,11 +63,12 @@ esp_err_t tape_sensor_driver_init(TapeSensor *sensor,
 bool tape_sensor_driver_is_on_tape(const TapeSensor *sensor);
 
 // Selects and samples every channel for all three tape sensor modules.
-esp_err_t tape_sensor_driver_read_all(TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT]);
+esp_err_t tape_sensor_driver_read_all(
+    TapeSensor *const sensors[TAPE_SENSOR_MODULE_COUNT]);
 
 // Samples every channel and packs each module's readings into one nibble.
 esp_err_t tape_sensor_driver_read_all_raw(
-    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT],
+    TapeSensor *const sensors[TAPE_SENSOR_MODULE_COUNT],
     uint8_t out_bits[TAPE_SENSOR_MODULE_COUNT]);
 
 #ifdef __cplusplus

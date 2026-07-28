@@ -66,6 +66,10 @@ esp_err_t pose_tracker_update(PoseTracker *tracker,
 // Returns the current cumulative world-frame pose.
 Pose pose_tracker_get_pose(const PoseTracker *tracker);
 
+// Re-anchors the fused pose without resetting encoder or optical baselines.
+// The next delta is applied from this corrected world-frame pose.
+esp_err_t pose_tracker_set_pose(PoseTracker *tracker, const Pose *pose);
+
 #ifdef __cplusplus
 }
 #endif

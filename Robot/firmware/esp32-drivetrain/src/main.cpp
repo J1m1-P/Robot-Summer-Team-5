@@ -117,9 +117,23 @@ void setup() {
     precision_move_ctx = {
         .drivetrain = &drivetrain,
         .pose_service = &pose_service,
+        .sensors = {
+            tape_sensor_list[0],
+            tape_sensor_list[1],
+            tape_sensor_list[2],
+        },
     };
     movement_action_controller_set_line_follower_context(&line_follower_ctx);
     movement_action_controller_set_precision_move_context(&precision_move_ctx);
+    movement_action_controller_begin_sequence();
+
+    err = robot_sequence_controller_start(
+        &robot_sequence_controller, millis());
+    if (err != ESP_OK) {
+        Serial.printf("# FAULT: robot sequence start failed (%s)\n",
+                      esp_err_to_name(err));
+        drivetrain_stop(&drivetrain);
+    }
 }
 
 void loop() {

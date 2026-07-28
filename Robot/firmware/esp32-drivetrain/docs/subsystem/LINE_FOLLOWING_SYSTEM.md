@@ -40,10 +40,12 @@ Stop conditions:
 - `DISTANCE`: `stop_value` is cumulative path length in meters.
 - `TIME_ONLY`: `stop_value` is seconds; `timeout_s` must be greater.
 - `LATERAL_ONE`: center the array on one crossing strip.
-- `LATERAL_TWO`: center it in the gap between two crossing strips.
+- `LATERAL_TWO`: after tape has been seen, stop only when the selected sensor
+  sees tape on its two outer channels and no tape on its two centre channels.
 
-The current hardware geometry supports marker stops only during `PX` travel.
-Callers must not combine marker stops with another direction.
+Marker detection uses the sensor 90 degrees counter-clockwise from travel:
+`PX` uses the side/+Y module and `PY` uses the back/-X module. The current
+hardware has no -Y module, so callers must not combine marker stops with `MX`.
 
 `timeout_s` is always a safety deadline. The call returns `true` only when the
 requested stop is reached. Lost tape for two seconds, timeout, pose failure,
@@ -59,3 +61,11 @@ turns toward the last observed side while searching.
 For distance and armed marker stops, speed ramps down over the last 30 mm.
 Stopping is immediate once the estimated target is reached; there is no
 post-stop overshoot correction.
+
+The reusable `TapeStopCondition` module can be used by both `follow_tape()` and
+the precision translator. A `TapeStopSpec` selects a sensor bitmask, the
+number of selected sensors that must detect tape, and a channel bitmask. The
+current implementation is deliberately uncalibrated: `LATERAL_ONE` and
+`LATERAL_TWO` stop at the first qualifying detection. They remain separate API
+modes so calibrated strip/gap alignment can be added later without changing
+callers.

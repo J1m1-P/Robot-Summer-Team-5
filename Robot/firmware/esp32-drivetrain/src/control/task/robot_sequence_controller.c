@@ -340,6 +340,21 @@ esp_err_t robot_sequence_controller_init(
     return ESP_OK;
 }
 
+esp_err_t robot_sequence_controller_start(
+    RobotSequenceController *controller,
+    uint32_t now_ms) {
+    if (controller == NULL || !controller->running) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!controller->waiting_for_arm_ready) return ESP_ERR_INVALID_STATE;
+
+    controller->waiting_for_arm_ready = false;
+    const esp_err_t error = start_robot_step(
+        controller, controller->current_step, now_ms);
+    if (error != ESP_OK) controller->waiting_for_arm_ready = true;
+    return error;
+}
+
 void robot_sequence_controller_update(
     RobotSequenceController *controller,
     uint32_t now_ms) {

@@ -2,11 +2,13 @@
 
 #include "esp_err.h"
 #include "control/drivetrain/drivetrain.h"
+#include "control/line_following/tape_stop_condition.hpp"
 #include "control/odometry/pose_service.h"
 
 struct PrecisionMoveContext {
     Drivetrain *drivetrain;
     PoseService *pose_service;
+    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];
 };
 
 struct PrecisionMoveTarget {
@@ -14,6 +16,10 @@ struct PrecisionMoveTarget {
     float dy_body_m;
     float delta_heading_rad;
     DrivetrainBodyVelocity body_velocity;  // cruise/feed-forward velocity
+    bool tape_stop_enabled = false;
+    TapeStopSpec tape_stop_spec = {};
+    bool world_goal_enabled = false;
+    Pose world_goal = {};
 };
 
 // Runs a body-relative translation and heading change at 200 Hz. The current
