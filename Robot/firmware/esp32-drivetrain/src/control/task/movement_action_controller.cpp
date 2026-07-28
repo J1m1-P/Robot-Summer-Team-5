@@ -131,6 +131,14 @@ extern "C" bool movement_action_controller_update(
             }
             break;
 
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape(
+                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    StopCondition::LATERAL_TWO, 0.0f, kTapeFollowTimeoutS);
+            }
+            break;
+            
         // use action_value to determine whether to use lateral one or lateral two stop condition
         case MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN:
             if (g_line_follower_ctx != nullptr) {
