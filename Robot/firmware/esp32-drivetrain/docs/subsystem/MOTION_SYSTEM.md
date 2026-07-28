@@ -7,9 +7,8 @@ using the shared drivetrain and fused pose service. It captures the current
 pose when an action starts, converts the relative target into world
 coordinates, and closes the loop at 200 Hz.
 
-The controller produces body-frame velocity requests. The drivetrain's wheel
-controller remains responsible for wheel feasibility, acceleration response,
-and motor output.
+The controller produces body-frame velocity requests. The drivetrain remains
+responsible for wheel feasibility, acceleration response, and motor output.
 
 ## 2. Usage
 
@@ -21,7 +20,7 @@ PrecisionMoveTarget target = {
     .dx_body_m = 0.25f,
     .dy_body_m = 0.0f,
     .delta_heading_rad = 0.0f,
-    .body_velocity = {.vx = 0.15f, .vy = 0.0f, .omega = 0.0f},
+    .body_velocity = {.vx = 0.15f, .vy = 0.0f, .omega = 0.75f},
 };
 
 const esp_err_t result = precision_move(&ctx, &target, /*timeout_s=*/15.0f);
@@ -37,26 +36,28 @@ const esp_err_t result = precision_move(&ctx, &target, /*timeout_s=*/15.0f);
   control cycle, matching `follow_tape()`'s ownership model.
 - It returns `ESP_OK` after the position, heading, and measured-speed checks
   pass; timeout, invalid pose, and drivetrain errors are returned directly.
-- The drivetrain is always stopped before the function returns.
+- Once execution starts, the drivetrain is stopped before the function
+  returns. Invalid context arguments are rejected before execution begins.
 
 ## 3. Control Behaviour
 
-The controller rotates toward the translation path, blends toward the final
-heading while translating, then approaches the target over the final 30 mm.
-It stops directly once the target is within the configured position and
-heading tolerances and measured motion is below the practical wheel deadband.
+The controller converts world-frame position error back into the robot's
+current body frame and commands X, Y, and heading simultaneously. A lateral
+target therefore strafes instead of turning toward the path first. Proportional
+speed naturally falls near the goal, with small minimum commands used outside
+the final tolerance to avoid stalling below the wheel deadband.
 
-There is no endpoint-hold or rotational-settle subsystem. Small residual PID
-commands below the wheel controller's effective motion threshold are not used
-to keep a maneuver alive.
+There is no separate endpoint-hold or rotational-settle subsystem. Once pose
+and measured-speed tolerances pass, the controller stops the drivetrain.
 
 ## 4. Sequence Integration
 
-The application owns one global `Drivetrain`, `PoseTracker`, and `PoseService`.
-`main.cpp` creates one borrowed `PrecisionMoveContext` and injects it into the
-movement-action controller:
+Production `main.cpp` owns one `Drivetrain`, `PoseTracker`, and `PoseService`.
+During setup it creates a borrowed `PrecisionMoveContext` and injects it into
+the movement-action controller:
 
 ```cpp
+movement_action_controller_set_line_follower_context(&line_follower_ctx);
 movement_action_controller_set_precision_move_context(&precision_move_ctx);
 ```
 
@@ -76,7 +77,7 @@ blocking actions. The sequence advances only after the action returns success.
 
 - The public motion call is blocking; it is not a scheduler or asynchronous
   command handle.
-- The movement-action controller currently supplies its own default cruise
-  velocity. Direct callers can set `PrecisionMoveTarget::body_velocity`.
+- The movement-action controller supplies a default cruise velocity. Direct
+  callers can choose a lower velocity in `PrecisionMoveTarget`.
 - The motion controller depends on an initialized shared `PoseService`; it
   does not own or create a second pose tracker.

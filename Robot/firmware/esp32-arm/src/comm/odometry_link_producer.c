@@ -11,22 +11,16 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-// Skips /calibration.json and static_calibration_load() (a LittleFS read --
-// requires a separate `pio run -t uploadfs` deployment step this board
-// doesn't reliably get) and uses this last known-good calibration directly
-// instead, so the optical link comes up even without a filesystem image.
-// Values are the checked-in data/calibration.json's rotation-only matrices;
-// baseline_mm is the physical sensor separation from optical_readme.md's
-// documented example (that JSON is missing baseline_mm entirely, which was
-// a second, independent reason static_calibration_load() always failed).
+// Compiled calibration avoids making odometry depend on a separate filesystem
+// upload. The measured sensor rotations are close enough to zero that the
+// production link intentionally uses identity matrices.
 static const float kDefaultBaselineMm = 190.5f;
 static const SensorCalibration kDefaultCalLeft = {
-    .m00 = 1.0f, .m01 = 0.0, .m10 = 0.0, .m11 = 1.0f};
+    .m00 = 1.0f, .m01 = 0.0f, .m10 = 0.0f, .m11 = 1.0f};
 static const SensorCalibration kDefaultCalRight = {
-    .m00 = 1.0f, .m01 = 0.0, .m10 = 0.0, .m11 = 1.0f};
+    .m00 = 1.0f, .m01 = 0.0f, .m10 = 0.0f, .m11 = 1.0f};
 
-// Applies the fixed CPI-derived count/mm scale to a unit rotation matrix --
-// mirrors static_calibration_load()'s own scaling step.
+// Converts raw sensor counts to millimetres after applying sensor rotation.
 static void apply_counts_per_mm(SensorCalibration *matrix, float counts_per_mm) {
     matrix->m00 *= counts_per_mm;
     matrix->m01 *= counts_per_mm;

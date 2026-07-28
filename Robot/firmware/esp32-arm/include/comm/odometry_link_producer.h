@@ -35,10 +35,8 @@ typedef struct {
     bool last_r_valid;
 } OdometryLinkProducer;
 
-// Loads the static PMW3610 calibration, configures fusion, and initializes
-// both sensors. Returns false (leaving the producer inert for this boot)
-// when calibration is missing or invalid -- the drivetrain board simply
-// never receives odometry packets and falls back to its other sources.
+// Applies the compiled PMW3610 calibration and initializes both sensors.
+// Returns false and leaves the producer inert if fusion setup fails.
 bool odometry_link_producer_init(OdometryLinkProducer *producer,
                                  const PmwPinConfig *pins);
 

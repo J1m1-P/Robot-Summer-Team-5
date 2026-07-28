@@ -15,6 +15,7 @@ struct FixedRateGate {
     // `elapsed_us_out` so the caller's control math uses real dt, not the
     // nominal period. Returns false otherwise, leaving state untouched.
     bool Ready(int64_t now_us, int64_t *elapsed_us_out) {
+        if (period_us <= 0 || elapsed_us_out == nullptr) return false;
         const int64_t elapsed_us = now_us - last_us;
         if (elapsed_us < period_us) {
             return false;

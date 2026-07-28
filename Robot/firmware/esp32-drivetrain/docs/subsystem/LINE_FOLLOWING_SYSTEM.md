@@ -1,33 +1,61 @@
-# Line Following System
+# Line Following
 
-## 1. Feature Overview
+`follow_tape()` is one blocking maneuver. It reads the tape sensors, updates
+the shared pose/UART service, and commands the drivetrain at 200 Hz.
 
-The line-following subsystem reads three four-channel tape modules, interprets a lateral line position, and computes a drivetrain body-velocity request.
+## Setup
 
-The module in (+x) guides "forward" travel, the (-x) module "reverse", and (-y) module for "strafe" to the left.
-
-The module located 90 degrees CCW relative to the direction of travel is intended to detect broad task markers (one or two lateral lines of tape).
-
-## 2. Usage
+The application owns all hardware and passes borrowed pointers:
 
 ```cpp
-#include "control/line_following/line_follower.hpp"
-
-LineFollowerContext ctx{&drivetrain, {&front_sensor, &back_sensor, &side_sensor}, &pose_service};
-
-bool ok = follow_tape(&ctx, Direction::PX, /*speed_mps=*/0.2f,
-                       StopCondition::DISTANCE, /*stop_value=*/1.5f,
-                       /*timeout_s=*/12.0f);
+LineFollowerContext context = {
+    .drivetrain = &drivetrain,
+    .sensors = {&front_sensor, &back_sensor, &left_sensor},
+    .pose_service = &pose_service,
+};
 ```
 
-- Caller owns and initializes `drivetrain`, `sensors[3]` (front/back/side), and `pose_service` once; reuse the same `ctx` across calls.
-- `follow_tape()` **blocks** the calling task for the whole maneuver and drives `pose_service` itself, so pose/UART keep updating even outside `loop()`.
-- `Direction`: `PX` = forward, `MX` = reverse, `PY` = strafe left.
-- `StopCondition`:
-  - `DISTANCE` — stop after `stop_value` meters.
-  - `LATERAL_ONE` — center on a single tape strip (side sensor only, `dir == PX`).
-  - `LATERAL_TWO` — center in the gap between two strips (side sensor only, `dir == PX`).
-  - `TIME_ONLY` — run until `timeout_s`.
-- Returns `true` if the stop condition was reached, `false` on timeout, lost tape, or error.
-- Overshoot past the true stop point is corrected internally with a low-speed reverse crawl — no caller-side compensation needed.
+Keep the context and every referenced object alive for the entire call.
 
+## Calling `follow_tape()`
+
+```cpp
+const bool reached = follow_tape(
+    &context,
+    Direction::PX,
+    0.20f,
+    StopCondition::DISTANCE,
+    1.5f,
+    12.0f);
+```
+
+Directions:
+
+- `PX`: positive body X, guided by the front module.
+- `MX`: negative body X, guided by the back module.
+- `PY`: positive body Y, guided by the left-side module.
+
+Stop conditions:
+
+- `DISTANCE`: `stop_value` is cumulative path length in meters.
+- `TIME_ONLY`: `stop_value` is seconds; `timeout_s` must be greater.
+- `LATERAL_ONE`: center the array on one crossing strip.
+- `LATERAL_TWO`: center it in the gap between two crossing strips.
+
+The current hardware geometry supports marker stops only during `PX` travel.
+Callers must not combine marker stops with another direction.
+
+`timeout_s` is always a safety deadline. The call returns `true` only when the
+requested stop is reached. Lost tape for two seconds, timeout, pose failure,
+or sensor failure returns `false`.
+
+## Control behavior
+
+The active guide module produces a weighted four-channel line error. The
+controller filters that error, applies a deadband and bounded PD steering, and
+filters the final angular command. If the line disappears briefly, the robot
+turns toward the last observed side while searching.
+
+For distance and armed marker stops, speed ramps down over the last 30 mm.
+Stopping is immediate once the estimated target is reached; there is no
+post-stop overshoot correction.

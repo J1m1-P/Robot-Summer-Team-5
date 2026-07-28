@@ -84,12 +84,15 @@ void tearDown() {}
 void test_drains_all_queued_frames_and_routes_by_type() {
     UartLink arm_uart = {};
     Pmw3610OdometryLink odometry_link = {};
+    PoseTracker pose_tracker = {};
+    Drivetrain drivetrain = {};
+    RobotSequenceController sequence = {};
     PoseService service = {
-        .pose_tracker = nullptr,
-        .drivetrain = nullptr,
+        .pose_tracker = &pose_tracker,
+        .drivetrain = &drivetrain,
         .arm_uart = &arm_uart,
         .odometry_link = &odometry_link,
-        .sequence_controller = nullptr,
+        .sequence_controller = &sequence,
     };
 
     queue_frame(PACKET_TYPE_ODOMETRY);
@@ -109,12 +112,15 @@ void test_advances_pose_with_cached_optical_sample() {
     Pmw3610OdometryLink odometry_link = {};
     odometry_link.has_packet = true;
     odometry_link.latest.sequence = 7;
+    PoseTracker pose_tracker = {};
+    Drivetrain drivetrain = {};
+    RobotSequenceController sequence = {};
     PoseService service = {
-        .pose_tracker = nullptr,
-        .drivetrain = nullptr,
+        .pose_tracker = &pose_tracker,
+        .drivetrain = &drivetrain,
         .arm_uart = &arm_uart,
         .odometry_link = &odometry_link,
-        .sequence_controller = nullptr,
+        .sequence_controller = &sequence,
     };
 
     TEST_ASSERT_EQUAL(ESP_OK, pose_service_update(&service, 200));
@@ -128,12 +134,15 @@ void test_advances_pose_with_cached_optical_sample() {
 void test_advances_pose_with_no_optical_sample_yet() {
     UartLink arm_uart = {};
     Pmw3610OdometryLink odometry_link = {};
+    PoseTracker pose_tracker = {};
+    Drivetrain drivetrain = {};
+    RobotSequenceController sequence = {};
     PoseService service = {
-        .pose_tracker = nullptr,
-        .drivetrain = nullptr,
+        .pose_tracker = &pose_tracker,
+        .drivetrain = &drivetrain,
         .arm_uart = &arm_uart,
         .odometry_link = &odometry_link,
-        .sequence_controller = nullptr,
+        .sequence_controller = &sequence,
     };
 
     TEST_ASSERT_EQUAL(ESP_OK, pose_service_update(&service, 300));

@@ -7,12 +7,20 @@
 #include <robot_common/odometry_packet.h>
 
 esp_err_t pose_service_update(PoseService *service, uint32_t now_ms) {
-    if (service == NULL) return ESP_ERR_INVALID_ARG;
+    if (service == NULL || service->pose_tracker == NULL ||
+        service->drivetrain == NULL || service->arm_uart == NULL ||
+        service->odometry_link == NULL ||
+        service->sequence_controller == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    (void)uart_link_update(service->arm_uart);
+    esp_err_t error = uart_link_update(service->arm_uart);
+    if (error != ESP_OK) return error;
+
     while (uart_link_has_packet(service->arm_uart)) {
         PacketFrame frame = {0};
-        if (uart_link_take_packet(service->arm_uart, &frame) != ESP_OK) break;
+        error = uart_link_take_packet(service->arm_uart, &frame);
+        if (error != ESP_OK) return error;
 
         if (odometry_packet_is(&frame)) {
             odometry_link_ingest(service->odometry_link, &frame);

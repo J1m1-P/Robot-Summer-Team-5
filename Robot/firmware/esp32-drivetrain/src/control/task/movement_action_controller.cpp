@@ -1,12 +1,12 @@
 /* Implements tape-guided and ordinary drivetrain actions. */
 #include "control/task/movement_action_controller.h"
 
+#include <cmath>
 #include <stddef.h>
 #include <stdio.h>
 
 #include "control/line_following/line_follower.hpp"
 #ifdef ARDUINO
-#include <cmath>
 #include "control/motion/translator.hpp"
 #endif
 
@@ -19,6 +19,20 @@ LineFollowerContext *g_line_follower_ctx = nullptr;
 #ifdef ARDUINO
 PrecisionMoveContext *g_precision_move_ctx = nullptr;
 #endif
+
+bool action_requires_nonnegative_distance(MovementAction action) {
+    switch (action) {
+        case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
+        case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
+        case MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE:
+        case MOVEMENT_ACTION_GO_LEFT_DISTANCE:
+        case MOVEMENT_ACTION_GO_RIGHT_DISTANCE:
+        case MOVEMENT_ACTION_GO_FORWARD:
+            return true;
+        default:
+            return false;
+    }
+}
 
 }  // namespace
 
@@ -57,7 +71,9 @@ extern "C" esp_err_t movement_action_controller_init(
     MovementAction action,
     float action_value) {
     if (controller == NULL ||
-        (unsigned int)action >= (unsigned int)MOVEMENT_ACTION_MAX) {
+        (unsigned int)action >= (unsigned int)MOVEMENT_ACTION_MAX ||
+        !std::isfinite(action_value) ||
+        (action_requires_nonnegative_distance(action) && action_value < 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -77,17 +93,45 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape(
+                    g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
+                    StopCondition::DISTANCE, controller->action_value,
+                    kTapeFollowTimeoutS);
+            }
+            printf(
+                "# PLACEHOLDER: Front tape following for %.1f m\n",
+                controller->action_value);
+            break;
+
+        case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape(
+                    g_line_follower_ctx, Direction::MX, kTapeFollowSpeedMps,
+                    StopCondition::DISTANCE, controller->action_value,
+                    kTapeFollowTimeoutS);
+            }
+            printf(
+                "# PLACEHOLDER: Back tape following for %.1f m\n",
+                controller->action_value);
+            break;
+
+        case MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape(
                     g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }
             printf(
-                "# PLACEHOLDER: Tape following for %.1f m\n",
+                "# PLACEHOLDER: Left tape following for %.1f m\n",
                 controller->action_value);
             break;
 
         case MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED:
             printf("# PLACEHOLDER: Rotate CW until aligned with tape again\n");
+            break;
+
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
+            printf("# PLACEHOLDER: Tape follow until one task tape strip is detected\n");
             break;
 
         case MOVEMENT_ACTION_GO_FORWARD:

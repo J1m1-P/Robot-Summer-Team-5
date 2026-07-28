@@ -11,11 +11,26 @@ extern "C" {
 
 #include "control/line_following/line_follower.hpp"
 
-// No test here sets a line-follower context, so movement_action_controller
-// keeps the tape-follow placeholder path and never actually calls this --
-// it only needs to exist to satisfy the linker.
-bool follow_tape(LineFollowerContext *, Direction, float, StopCondition,
-                  float, float) {
+namespace {
+
+size_t follow_tape_calls = 0;
+Direction last_follow_direction = Direction::PX;
+float last_follow_speed_mps = 0.0f;
+StopCondition last_stop_condition = StopCondition::TIME_ONLY;
+float last_stop_value = 0.0f;
+float last_follow_timeout_s = 0.0f;
+
+}  // namespace
+
+bool follow_tape(LineFollowerContext *, Direction direction, float speed_mps,
+                 StopCondition stop_condition, float stop_value,
+                 float timeout_s) {
+    ++follow_tape_calls;
+    last_follow_direction = direction;
+    last_follow_speed_mps = speed_mps;
+    last_stop_condition = stop_condition;
+    last_stop_value = stop_value;
+    last_follow_timeout_s = timeout_s;
     return true;
 }
 
@@ -25,19 +40,6 @@ uint32_t fake_millis = 0;
 PacketFrame queued_packet = {};
 CommandOpcode sent_commands[16] = {};
 size_t sent_command_count = 0;
-
-const CommandOpcode kExpectedTowerCommands[] = {
-    CMD_TOWER_HOME,
-    CMD_TOWER_ROTATE_VERTICAL,
-    CMD_TOWER_OPEN_CLAW,
-    CMD_TOWER_Z_UP,
-    CMD_TOWER_ROTATE_HORIZONTAL,
-    CMD_TOWER_Z_DOWN,
-    CMD_TOWER_CLOSE_CLAW,
-    CMD_TOWER_Z_UP,
-    CMD_TOWER_ROTATE_VERTICAL,
-    CMD_TOWER_Z_UP,
-};
 
 void queue_status(StatusCode code, uint8_t detail) {
     queued_packet = {};
@@ -186,11 +188,18 @@ void setUp() {
     queued_packet = {};
     memset(sent_commands, 0, sizeof(sent_commands));
     sent_command_count = 0;
+    follow_tape_calls = 0;
+    last_follow_direction = Direction::PX;
+    last_follow_speed_mps = 0.0f;
+    last_stop_condition = StopCondition::TIME_ONLY;
+    last_stop_value = 0.0f;
+    last_follow_timeout_s = 0.0f;
+    movement_action_controller_set_line_follower_context(nullptr);
 }
 
 void tearDown() {}
 
-void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
+void test_sequence_waits_for_arm_then_runs_square() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
 
@@ -210,58 +219,29 @@ void test_sequence_waits_for_arm_then_runs_enabled_tower_steps() {
     TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
-    // Each placeholder tape-follow step completes, then a NOT_FOUND scan
-    // sets the following rotation to zero before the next checkpoint.
-    for (uint8_t scan = 0; scan < 3; ++scan) {
-        const uint32_t tick = 102 + scan * 3;
-        robot_sequence_controller_update(
-            &controller, tick);
-        TEST_ASSERT_EQUAL_UINT32(scan + 1, sent_command_count);
-        TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[scan]);
-
-        queue_pi_report(scan + 1, PI_RESULT_NOT_FOUND);
-        deliver_frame(&controller, tick + 1);
-        TEST_ASSERT_FLOAT_WITHIN(
-            0.01f, 0.0f,
-            controller.movement_action_controller.action_value);
-        robot_sequence_controller_update(&controller, tick + 2);
-    }
-
-    TEST_ASSERT_EQUAL_UINT32(9, controller.current_step);
-    TEST_ASSERT_EQUAL_UINT32(4, sent_command_count);
-    TEST_ASSERT_EQUAL(kExpectedTowerCommands[0], sent_commands[3]);
-
-    for (size_t index = 0;
-         index < sizeof(kExpectedTowerCommands) /
-             sizeof(kExpectedTowerCommands[0]);
-         ++index) {
-        const uint8_t mismatched_detail =
-            static_cast<uint8_t>(STATUS_DETAIL_NONE);
-        queue_status(STATUS_ACTION_COMPLETE, mismatched_detail);
-        deliver_frame(&controller, static_cast<uint32_t>(111 + index * 2));
-        TEST_ASSERT_EQUAL_UINT32(9 + index, controller.current_step);
-
-        queue_status(
-            STATUS_ACTION_COMPLETE,
-            static_cast<uint8_t>(
-                arm_action_status_detail(kExpectedTowerCommands[index])));
-        deliver_frame(&controller, static_cast<uint32_t>(112 + index * 2));
-
-        if (index + 1 < sizeof(kExpectedTowerCommands) /
-                sizeof(kExpectedTowerCommands[0])) {
-            TEST_ASSERT_EQUAL_UINT32(10 + index, controller.current_step);
-            TEST_ASSERT_EQUAL_UINT32(index + 5, sent_command_count);
+    for (size_t step = 0; step < 8; ++step) {
+        const MovementActionController *movement =
+            &controller.movement_action_controller;
+        if (step % 2 == 0) {
             TEST_ASSERT_EQUAL(
-                kExpectedTowerCommands[index + 1],
-                sent_commands[index + 4]);
+                MOVEMENT_ACTION_GO_FORWARD, movement->action);
+            TEST_ASSERT_FLOAT_WITHIN(
+                0.001f, 0.25f, movement->action_value);
+        } else {
+            TEST_ASSERT_EQUAL(MOVEMENT_ACTION_ROTATE, movement->action);
+            TEST_ASSERT_FLOAT_WITHIN(
+                0.001f, 90.0f, movement->action_value);
         }
+        robot_sequence_controller_update(
+            &controller, static_cast<uint32_t>(102 + step));
     }
 
-    TEST_ASSERT_EQUAL_UINT32(19, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(8, controller.current_step);
     TEST_ASSERT_FALSE(controller.running);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 }
 
-void test_detected_target_sets_rotation_angle() {
+void test_non_odometry_frames_do_not_advance_movement_steps() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
     TEST_ASSERT_EQUAL(
@@ -270,20 +250,15 @@ void test_detected_target_sets_rotation_angle() {
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
     deliver_frame(&controller, 100);
-    robot_sequence_controller_update(&controller, 101);
-    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_TOWER_HOME);
+    deliver_frame(&controller, 101);
+    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
 
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
     deliver_frame(&controller, 102);
-    TEST_ASSERT_EQUAL(MOVEMENT_ACTION_ROTATE,
-                      controller.movement_action_controller.action);
-    TEST_ASSERT_FLOAT_WITHIN(
-        0.01f, -22.5f,
-        controller.movement_action_controller.action_value);
-
-    robot_sequence_controller_update(&controller, 103);
-    TEST_ASSERT_EQUAL_UINT32(3, controller.current_step);
-    TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
+    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
 }
 
 void test_arm_fault_stops_sequence() {
@@ -302,19 +277,56 @@ void test_arm_fault_stops_sequence() {
     TEST_ASSERT_FALSE(controller.running);
 }
 
-void test_missing_arm_completion_times_out() {
-    UartLink arm_uart = {};
-    RobotSequenceController controller = {};
+void test_movement_action_rejects_invalid_values() {
+    MovementActionController controller = {};
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_GO_FORWARD, -0.1f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_MAX, 1.0f));
     TEST_ASSERT_EQUAL(
         ESP_OK,
-        robot_sequence_controller_init(&controller, &arm_uart));
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_ROTATE, -90.0f));
+}
 
-    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 100);
-    robot_sequence_controller_update(&controller, 101);
-    robot_sequence_controller_update(&controller, 15102);
+void test_tape_distance_actions_route_to_matching_sensor_direction() {
+    LineFollowerContext context = {};
+    movement_action_controller_set_line_follower_context(&context);
 
-    TEST_ASSERT_FALSE(controller.running);
+    const MovementAction actions[] = {
+        MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
+        MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE,
+        MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE,
+    };
+    const Direction directions[] = {
+        Direction::PX,
+        Direction::MX,
+        Direction::PY,
+    };
+
+    for (size_t index = 0; index < 3; ++index) {
+        MovementActionController controller = {};
+        TEST_ASSERT_EQUAL(
+            ESP_OK,
+            movement_action_controller_init(
+                &controller, actions[index], 0.75f));
+        TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+        TEST_ASSERT_EQUAL_UINT32(index + 1, follow_tape_calls);
+        TEST_ASSERT_EQUAL(
+            static_cast<int>(directions[index]),
+            static_cast<int>(last_follow_direction));
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.25f, last_follow_speed_mps);
+        TEST_ASSERT_EQUAL(
+            static_cast<int>(StopCondition::DISTANCE),
+            static_cast<int>(last_stop_condition));
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.75f, last_stop_value);
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.0f, last_follow_timeout_s);
+    }
 }
 
 void test_habitat_actions_have_unique_completion_details() {
@@ -347,10 +359,11 @@ void test_habitat_actions_have_unique_completion_details() {
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_sequence_waits_for_arm_then_runs_enabled_tower_steps);
-    RUN_TEST(test_detected_target_sets_rotation_angle);
+    RUN_TEST(test_sequence_waits_for_arm_then_runs_square);
+    RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
-    RUN_TEST(test_missing_arm_completion_times_out);
+    RUN_TEST(test_movement_action_rejects_invalid_values);
+    RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();
 }

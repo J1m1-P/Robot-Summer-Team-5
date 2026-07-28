@@ -26,6 +26,8 @@ void pose_tracker_reset(PoseTracker *tracker)
     drivetrain_odometry_source_reset(&tracker->encoder_source);
     pmw3610_odometry_source_reset(&tracker->optical_source);
     tracker->optical_anchor_pose = (DrivetrainPose){0};
+    tracker->optical_update_count = 0;
+    tracker->encoder_update_count = 0;
 }
 
 esp_err_t pose_tracker_update(PoseTracker *tracker,
