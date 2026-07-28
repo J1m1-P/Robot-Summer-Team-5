@@ -2,33 +2,53 @@
 #include "control/line_following/line_follower.hpp"
 
 #include <Arduino.h>
-
-#include <algorithm>
 #include <cmath>
 
 #include "esp_timer.h"
-
+#include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
+#include <robot_common/math_utils.h>
 
 namespace {
 
 constexpr int64_t kControlPeriodUs = 5000;  // 200 Hz
 constexpr int kSideSensorIndex = 2;
 
-constexpr float kFrontWeights[4] = {3.0f, 1.0f, -1.0f, -3.0f};
+constexpr float kFrontWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
 constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // back is mounted mirrored
 
-constexpr float kP = 20.0f;
-constexpr float kD = 12.0f;
+constexpr float kP = 0.5f;
+constexpr float kD = 0.05f;
 constexpr float kEmaAlpha = 0.4f;
-constexpr float kMaxOmegaRadS = 1.2f;
+constexpr float kMaxOmegaRadS = 1.4;
+
+// Deadband due to tape width and sensor pitch
+constexpr float kErrorDeadband = 1.5f;
+
+// EMA for omega adjustment
+constexpr float kOmegaEmaAlpha = 0.2f;
+
+// No integral term
+constexpr BoundedPidConfig kSteeringPidConfig = {
+    .proportional_gain = kP,
+    .integral_gain = 0.0f,
+    .derivative_gain = kD,
+    .integral_limit = 0.0f,
+    .correction_min = -kMaxOmegaRadS,
+    .correction_max = kMaxOmegaRadS,
+};
 
 constexpr float kSearchOmegaRadS = 0.4f;  // spin rate while hunting for lost tape
 constexpr float kSearchTimeoutS = 2.0f;
 
-constexpr float kOvershootDeadbandM = 0.005f;  // below 5mm not worth correcting
-constexpr float kOvershootCorrectionSpeedMps = 0.06f;
-constexpr float kOvershootCorrectionTimeoutS = 3.0f;
+// Telemetry rate (throttled)
+constexpr int64_t kTelemetryPeriodUs = 200000;  // 5 Hz
+
+// Ramps vx down over the last stretch before a known DISTANCE/LATERAL stop
+// point instead of driving at full speed right up to the abrupt stop.
+constexpr float kApproachRampDistanceM = 0.03f;
+
+constexpr float kMinRampSpeedMps = 0.1f;
 
 constexpr float kTapeWidthM = 0.019f;
 constexpr float kSensorPitchM = 0.019f;
@@ -71,16 +91,6 @@ DirectionInfo GetDirectionInfo(Direction dir) {
     return {0, kFrontWeights};
 }
 
-// PX/MX are a reversible pair (front/back sensor on the same line); PY has
-// no reverse counterpart in this enum, so overshoot on it can't be corrected.
-bool HasOppositeDirection(Direction dir) {
-    return dir == Direction::PX || dir == Direction::MX;
-}
-
-Direction OppositeDirection(Direction dir) {
-    return dir == Direction::PX ? Direction::MX : Direction::PX;
-}
-
 // weighted centroid of active channels, in [-3, 3]; false if line is lost
 bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
     float sum = 0.0f;
@@ -111,9 +121,11 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     LateralAligner lateral_aligner;
     float cumulative_distance_m = 0.0f;
     float filtered_error = 0.0f;
-    float prev_error = 0.0f;
+    BoundedPidState steering_pid_state = {};
     float last_error_sign = 1.0f;
     float lost_elapsed_s = 0.0f;
+    float smoothed_omega = 0.0f;
+    int64_t next_telemetry_us = start_us;
     Pose previous_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
 
     while (true) {
@@ -129,9 +141,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         const float dt_s = static_cast<float>(dt_us) / 1e6f;
 
         if (tape_sensor_driver_read_all(ctx->sensors) != ESP_OK) return Abort(false);
-
-        if (pose_service_update(ctx->pose_service, static_cast<uint32_t>(now_us / 1000)) !=
-            ESP_OK) {
+        if (pose_service_update(ctx->pose_service, static_cast<uint32_t>(now_us / 1000)) != ESP_OK) {
             return Abort(false);
         }
         const Pose current_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
@@ -144,33 +154,76 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             leading_active, cumulative_distance_m,
             stop_type == StopCondition::LATERAL_TWO ? kAlignGapCenterM : kAlignTapeCenterM);
 
+        // Ramp speed down over the last kApproachRampDistanceM before stop point
+        float ramp_target_speed_mps = speed_mps;
+        const float ramp_floor_mps = fminf(kMinRampSpeedMps, speed_mps);
+        const bool has_distance_target = stop_type == StopCondition::DISTANCE ||
+            ((stop_type == StopCondition::LATERAL_ONE || stop_type == StopCondition::LATERAL_TWO) &&
+             lateral_aligner.triggered);
+        if (has_distance_target) {
+            const float target_m =
+                stop_type == StopCondition::DISTANCE ? stop_value : lateral_aligner.target_m;
+            const float remaining_m = target_m - cumulative_distance_m;
+            if (remaining_m < kApproachRampDistanceM) {
+                const float t = clamp(remaining_m / kApproachRampDistanceM, 0.0f, 1.0f);
+                ramp_target_speed_mps = ramp_floor_mps + t * (speed_mps - ramp_floor_mps);
+            }
+        }
+
         float raw_error = 0.0f;
-        const bool on_tape =
-            ComputeLineError(ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
+        const bool on_tape = ComputeLineError(ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
 
         float omega;
+        float vx = 0.0f, vy = 0.0f;
         if (on_tape) {
             last_error_sign = raw_error >= 0.0f ? 1.0f : -1.0f;
             lost_elapsed_s = 0.0f;
             filtered_error = kEmaAlpha * raw_error + (1.0f - kEmaAlpha) * filtered_error;
-            const float d_term = (filtered_error - prev_error) / dt_s;
-            prev_error = filtered_error;
-            omega = kP * filtered_error + kD * d_term;
+            // Soft threshold with deadband
+            const float error_magnitude = std::fabs(filtered_error);
+            const float deadbanded_error = error_magnitude < kErrorDeadband
+                ? 0.0f
+                : std::copysign(error_magnitude - kErrorDeadband, filtered_error);
+            omega = bounded_pid_update(&steering_pid_state, &kSteeringPidConfig, deadbanded_error, dt_s);
+            switch (dir) {
+                case Direction::PX: vx = ramp_target_speed_mps; break;
+                case Direction::MX: vx = -ramp_target_speed_mps; break;
+                case Direction::PY: vy = ramp_target_speed_mps; break;
+            }
         } else {
             lost_elapsed_s += dt_s;
             if (lost_elapsed_s >= kSearchTimeoutS) return Abort(false);
             omega = last_error_sign * kSearchOmegaRadS;  // spin toward last known side
         }
-        omega = std::clamp(omega, -kMaxOmegaRadS, kMaxOmegaRadS);
+        smoothed_omega = kOmegaEmaAlpha * omega + (1.0f - kOmegaEmaAlpha) * smoothed_omega;
+        omega = smoothed_omega;
 
-        float vx = 0.0f, vy = 0.0f;
-        switch (dir) {
-            case Direction::PX: vx = speed_mps; break;
-            case Direction::MX: vx = -speed_mps; break;
-            case Direction::PY: vy = speed_mps; break;
+        if (now_us >= next_telemetry_us) {
+            next_telemetry_us = now_us + kTelemetryPeriodUs;
+            Serial.printf(
+                "# tape t=%.2fs dist=%.3fm raw=%.2f filt=%.2f on_tape=%d omega=%.2f vx=%.2f\n",
+                elapsed_s, cumulative_distance_m, raw_error, filtered_error,
+                on_tape ? 1 : 0, omega, vx);
+            const PoseTracker *pose_tracker = ctx->pose_service->pose_tracker;
+            Serial.printf(
+                "# pose x=%.3fm y=%.3fm heading=%.2frad optical_updates=%u encoder_updates=%u\n",
+                current_pose.x_m, current_pose.y_m, current_pose.heading_rad,
+                static_cast<unsigned>(pose_tracker->optical_update_count),
+                static_cast<unsigned>(pose_tracker->encoder_update_count));
+            const Pmw3610OdometryLink *odometry_link = ctx->pose_service->odometry_link;
+            if (odometry_link != nullptr && odometry_link->has_packet) {
+                const OdometryPacket &optical = odometry_link->latest;
+                Serial.printf(
+                    "# optical seq=%u valid=%d x=%.1fmm y=%.1fmm theta=%.2frad\n",
+                    static_cast<unsigned>(optical.sequence), optical.valid ? 1 : 0,
+                    optical.x_mm, optical.y_mm, optical.theta_rad);
+            }
         }
-        drivetrain_set_body_velocity(ctx->drivetrain, vx, vy, omega);
-        drivetrain_update(ctx->drivetrain, now_us);
+
+        // use corrected velocity with calibration
+        drivetrain_set_advanced_body_velocity(ctx->drivetrain, vx, vy, omega);
+        // Fresh timestamp
+        drivetrain_update(ctx->drivetrain, esp_timer_get_time());
 
         bool stop_reached = false;
         switch (stop_type) {
@@ -179,28 +232,19 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             case StopCondition::LATERAL_ONE:
             case StopCondition::LATERAL_TWO: stop_reached = lateral_done; break;
         }
-        if (stop_reached) {
-            const bool result = Abort(true);
+        if (!stop_reached) continue;
 
-            float overshoot_m = 0.0f;
-            switch (stop_type) {
-                case StopCondition::DISTANCE:
-                    overshoot_m = cumulative_distance_m - stop_value;
-                    break;
-                case StopCondition::LATERAL_ONE:
-                case StopCondition::LATERAL_TWO:
-                    overshoot_m = cumulative_distance_m - lateral_aligner.target_m;
-                    break;
-                case StopCondition::TIME_ONLY:
-                    break;
-            }
-            if (overshoot_m > kOvershootDeadbandM && HasOppositeDirection(dir)) {
-                // Best-effort crawl back to the true stop point; a
-                // missed/timed-out correction still leaves `result` standing.
-                follow_tape(ctx, OppositeDirection(dir), kOvershootCorrectionSpeedMps,
-                            StopCondition::DISTANCE, overshoot_m, kOvershootCorrectionTimeoutS);
-            }
-            return result;
+        const bool result = Abort(true);
+        float overshoot_m = 0.0f;
+        switch (stop_type) {
+            case StopCondition::DISTANCE: overshoot_m = cumulative_distance_m - stop_value; break;
+            case StopCondition::LATERAL_ONE:
+            case StopCondition::LATERAL_TWO: overshoot_m = cumulative_distance_m - lateral_aligner.target_m; break;
+            case StopCondition::TIME_ONLY: break;
         }
+        Serial.printf(
+            "# tape stop dir=%d dist=%.3fm target=%.3fm overshoot=%.3fm\n",
+            static_cast<int>(dir), cumulative_distance_m, stop_value, overshoot_m);
+        return result;
     }
 }

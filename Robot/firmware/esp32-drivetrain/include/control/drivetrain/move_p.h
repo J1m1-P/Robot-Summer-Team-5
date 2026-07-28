@@ -13,7 +13,7 @@ extern "C" {
 typedef struct {
     OffTapeMotionConfig off_tape_motion;
     SpeedProfileConfig speed_profile;
-    TapeFollowingControllerConfig heading_controller;
+    BoundedPidConfig heading_controller;
     float distance_tolerance_m;
     float heading_tolerance_rad;
     float max_accel_mps2;
@@ -35,7 +35,7 @@ typedef struct {
     const MovePConfig *config;
     PathPlannerLine line;
     OffTapeMotion off_tape_motion;
-    TapeFollowingControllerState heading_controller;
+    BoundedPidState heading_controller;
     SpeedProfile translation_profile;
     SpeedProfile omega_profile;
     float start_heading_rad;

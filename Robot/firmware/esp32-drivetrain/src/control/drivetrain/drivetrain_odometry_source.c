@@ -9,6 +9,18 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/* Corrects lateral (body +y) encoder-derived distance for measured wheel
+ * slip during sideways X-drive motion: bench testing (PY move, compared
+ * against PMW3610 optical ground truth) showed the raw encoder/kinematics
+ * estimate over-reports true lateral travel by a factor of 1.308x, so the
+ * correction is the reciprocal, not 1.308 itself. Forward (body +x) motion
+ * showed no comparable slip and is left unscaled. Global because this is
+ * the single encoder-tick-to-body-delta bridge every consumer (PoseTracker's
+ * encoder fallback, and any future direct caller such as MoveL/MoveP/MoveC)
+ * goes through -- there is no separate copy of this conversion anywhere. */
+#define LATERAL_ENCODER_SLIP_RATIO 1.308f
+#define LATERAL_ENCODER_SCALE (1.0f / LATERAL_ENCODER_SLIP_RATIO)
+
 /* x_drive_kinematics.h exposes no public config validity check of its own,
  * so geometry problems (e.g. zero wheel radius) surface instead as a failed
  * x_drive_kinematics_wheel_to_body_velocities() call each cycle, which this
@@ -71,7 +83,7 @@ esp_err_t drivetrain_odometry_source_compute_delta(
 
     *delta_out = (DrivetrainOdometryDelta){
         .forward_mm = body_delta_m_rad.vx * 1000.0f,
-        .lateral_mm = body_delta_m_rad.vy * 1000.0f,
+        .lateral_mm = body_delta_m_rad.vy * 1000.0f * LATERAL_ENCODER_SCALE,
         .heading_delta_rad = body_delta_m_rad.omega,
     };
     *has_delta_out = true;

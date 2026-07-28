@@ -138,8 +138,8 @@ constexpr float kDefaultAngleToleranceDeg = 2.0f;
 // use the same practical profile default.
 constexpr float kDefaultMaxJerkMps3 = 10.0f;
 constexpr float kDefaultMaxAccelMps2 = 2.5f;
-// Not yet calibrated -- matches TAPE_FOLLOWER_CONFIG's heading config,
-// same placeholder RotSConfig's own header comment documents.
+// Not yet calibrated -- same placeholder RotSConfig's own header comment
+// documents.
 constexpr float kDefaultMaxAlphaDegS2 = 1.5f * kRadToDeg;
 
 constexpr unsigned long kTelemetryPeriodMs = 50; // 20 Hz

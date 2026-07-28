@@ -13,7 +13,7 @@ static const float kStoppedSpeed = 0.005f;
 bool move_c_config_is_valid(const MoveCConfig *c) {
     return c != NULL && off_tape_motion_config_is_valid(&c->off_tape_motion) &&
            speed_profile_config_is_valid(&c->speed_profile) &&
-           tape_following_controller_config_is_valid(&c->heading_controller) &&
+           bounded_pid_config_is_valid(&c->heading_controller) &&
            isfinite(c->arc_length_tolerance_m) && c->arc_length_tolerance_m >= 0.0f &&
            isfinite(c->radial_tolerance_m) && c->radial_tolerance_m >= 0.0f &&
            isfinite(c->heading_tolerance_rad) && c->heading_tolerance_rad >= 0.0f &&
@@ -59,7 +59,7 @@ esp_err_t move_c_start(MoveC *m, const MoveCConfig *c, const MotionEstimate *sta
     }
     speed_profile_reset(&m->translation_profile, 0.0f);
     speed_profile_reset(&m->omega_profile, 0.0f);
-    tape_following_controller_reset(&m->heading_controller);
+    bounded_pid_reset(&m->heading_controller);
     m->status = MOVE_C_RUNNING;
     return ESP_OK;
 }
@@ -150,7 +150,7 @@ esp_err_t move_c_update(MoveC *m, const MotionEstimate *estimate, float dt,
         m->signed_arc_angle_rad * progress_fraction;
     out->heading_error_rad = path_planner_wrap_angle_rad(
         desired_heading - estimate->heading_rad);
-    const float heading_feedback = tape_following_controller_update(
+    const float heading_feedback = bounded_pid_update(
         &m->heading_controller, &m->config->heading_controller,
         out->heading_error_rad, dt);
     float omega_target = turn_sign * speed / m->radius_m + heading_feedback;

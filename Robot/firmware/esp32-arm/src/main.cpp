@@ -1,6 +1,7 @@
 /* Runs arm sensing and the drivetrain-coordinated arm action sequence. */
 #include <Arduino.h>
 
+#include <robot_common/app_log.h>
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/uart_link.h>
 
@@ -40,6 +41,7 @@ FixedRateGate odometry_gate = {kOdometrySendPeriodUs, 0};
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    app_log_init();
     Serial.println("# Starting arm firmware");
 
     // Bring up the command path before optional sensing. A missing ToF sensor

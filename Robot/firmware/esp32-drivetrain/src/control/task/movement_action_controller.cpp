@@ -10,11 +10,7 @@
 
 namespace {
 
-// Placeholder speed/timeout for tape-follow steps until §3 calibration
-// picks real values. Kept under robot_sequence_controller's 15s per-step
-// deadline so follow_tape's own timeout reports a normal (non-fault) miss
-// first.
-constexpr float kTapeFollowSpeedMps = 0.2f;
+constexpr float kTapeFollowSpeedMps = 0.25f;
 constexpr float kTapeFollowTimeoutS = 12.0f;
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
@@ -51,7 +47,7 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape(
-                    g_line_follower_ctx, Direction::PX, kTapeFollowSpeedMps,
+                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
                     StopCondition::DISTANCE, controller->action_value,
                     kTapeFollowTimeoutS);
             }

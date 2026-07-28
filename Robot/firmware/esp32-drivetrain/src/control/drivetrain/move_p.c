@@ -13,7 +13,7 @@ static const float kHeadingBrakeMargin = 1.25f;
 bool move_p_config_is_valid(const MovePConfig *c) {
     return c != NULL && off_tape_motion_config_is_valid(&c->off_tape_motion) &&
            speed_profile_config_is_valid(&c->speed_profile) &&
-           tape_following_controller_config_is_valid(&c->heading_controller) &&
+           bounded_pid_config_is_valid(&c->heading_controller) &&
            isfinite(c->distance_tolerance_m) && c->distance_tolerance_m >= 0.0f &&
            isfinite(c->heading_tolerance_rad) && c->heading_tolerance_rad >= 0.0f &&
            isfinite(c->max_accel_mps2) && c->max_accel_mps2 > 0.0f &&
@@ -93,7 +93,7 @@ esp_err_t move_p_update(MoveP *m, const MotionEstimate *estimate, float dt, Move
         const float fraction = clamp(f.along_track_progress_m / m->line.length_m, 0.0f, 1.0f);
         const float desired_heading = m->start_heading_rad + m->heading_delta_rad * fraction;
         out->heading_error_rad = path_planner_wrap_angle_rad(desired_heading - estimate->heading_rad);
-        const float heading_feedback = tape_following_controller_update(&m->heading_controller,
+        const float heading_feedback = bounded_pid_update(&m->heading_controller,
             &m->config->heading_controller, out->heading_error_rad, dt);
         omega_target = speed * m->heading_delta_rad / m->line.length_m + heading_feedback;
         float heading_stop_distance = 0.0f;
@@ -117,7 +117,7 @@ esp_err_t move_p_update(MoveP *m, const MotionEstimate *estimate, float dt, Move
              * Enter the bounded endpoint-adjustment/heading-settle phase even
              * when the along-track residual is larger than tolerance; the
              * position-hold correction below closes that final gap. */
-            tape_following_controller_reset(&m->heading_controller);
+            bounded_pid_reset(&m->heading_controller);
             endpoint_settle_reset(&m->settle);
             m->status = MOVE_P_SETTLE_HEADING;
         }
@@ -132,7 +132,7 @@ esp_err_t move_p_update(MoveP *m, const MotionEstimate *estimate, float dt, Move
         if (stop_error != ESP_OK) return stop_error;
         if (fabsf(out->heading_error_rad) > kHeadingBrakeMargin * heading_stop_distance +
             m->config->heading_tolerance_rad) {
-            omega_target = tape_following_controller_update(
+            omega_target = bounded_pid_update(
                 &m->heading_controller, &m->config->heading_controller,
                 out->heading_error_rad, dt);
         } else {

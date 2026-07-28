@@ -1,12 +1,11 @@
-/* Implements bounded PID correction for tape following. */
-#include "control/tape_following/tape_following_controller.h"
+/* Implements a generic bounded PID correction. */
+#include "control/pid/bounded_pid.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <robot_common/math_utils.h>
 
-bool tape_following_controller_config_is_valid(
-    const TapeFollowingControllerConfig *config)
+bool bounded_pid_config_is_valid(const BoundedPidConfig *config)
 {
     return config != NULL &&
            isfinite(config->proportional_gain) &&
@@ -18,7 +17,7 @@ bool tape_following_controller_config_is_valid(
            config->correction_min <= config->correction_max;
 }
 
-esp_err_t tape_following_controller_reset(TapeFollowingControllerState *state) {
+esp_err_t bounded_pid_reset(BoundedPidState *state) {
     if (state == NULL) return ESP_ERR_INVALID_ARG;
     state->integral = 0.0f;
     state->previous_error = 0.0f;
@@ -26,12 +25,12 @@ esp_err_t tape_following_controller_reset(TapeFollowingControllerState *state) {
     return ESP_OK;
 }
 
-float tape_following_controller_update(TapeFollowingControllerState *state,
-                                       const TapeFollowingControllerConfig *config,
-                                       float error,
-                                       float dt_s)
+float bounded_pid_update(BoundedPidState *state,
+                         const BoundedPidConfig *config,
+                         float error,
+                         float dt_s)
 {
-    if (state == NULL || !tape_following_controller_config_is_valid(config) ||
+    if (state == NULL || !bounded_pid_config_is_valid(config) ||
         !isfinite(error) || !isfinite(dt_s) || dt_s <= 0.0f) {
         return 0.0f;
     }

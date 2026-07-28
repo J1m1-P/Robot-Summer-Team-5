@@ -11,7 +11,7 @@ bool off_tape_motion_config_is_valid(const OffTapeMotionConfig *config)
         return false;
     }
 
-    return tape_following_controller_config_is_valid(&config->controller) &&
+    return bounded_pid_config_is_valid(&config->controller) &&
            isfinite(config->controller_dt_max_s) &&
            config->controller_dt_max_s > 0.0f;
 }
@@ -40,7 +40,7 @@ esp_err_t off_tape_motion_reset(OffTapeMotion *motion)
         return ESP_ERR_INVALID_STATE;
     }
 
-    tape_following_controller_reset(&motion->controller_state);
+    bounded_pid_reset(&motion->controller_state);
     return ESP_OK;
 }
 
@@ -65,11 +65,11 @@ esp_err_t off_tape_motion_update(OffTapeMotion *motion,
     float controller_dt_s = dt_s;
     if (controller_dt_s > motion->config->controller_dt_max_s) {
         controller_dt_s = motion->config->controller_dt_max_s;
-        tape_following_controller_reset(&motion->controller_state);
+        bounded_pid_reset(&motion->controller_state);
     }
 
     output->requested_velocity.vx = input->travel_velocity_mps;
-    output->requested_velocity.vy = tape_following_controller_update(
+    output->requested_velocity.vy = bounded_pid_update(
         &motion->controller_state, &motion->config->controller,
         input->error, controller_dt_s);
     output->requested_velocity.omega = 0.0f;
