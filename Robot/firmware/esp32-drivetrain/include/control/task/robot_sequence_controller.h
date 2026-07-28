@@ -23,8 +23,8 @@ typedef struct {
     uint32_t step_deadline_ms;
     bool running;
     bool waiting_for_arm_ready;
-    float scan_rotation_degrees;
     uint8_t last_pi_request_id;
+    uint8_t align_attempts;   // scan+rotate rounds used on the current PI_ALIGN step
 } RobotSequenceController;
 
 // Connects the action paths and waits for the arm before starting the sequence.

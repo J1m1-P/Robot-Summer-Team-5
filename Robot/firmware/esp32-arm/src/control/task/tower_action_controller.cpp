@@ -261,7 +261,7 @@ void tower_action_controller_init(
 
 bool tower_action_controller_accepts(CommandOpcode command) {
     return command >= CMD_TOWER_HOME &&
-        command <= CMD_TOWER_CLOSE_CLAW;
+        command <= CMD_TOWER_RETRACT_LOCATOR;
 }
 
 bool tower_action_controller_is_busy(

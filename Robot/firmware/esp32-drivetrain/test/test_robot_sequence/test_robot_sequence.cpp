@@ -38,7 +38,7 @@ namespace {
 
 uint32_t fake_millis = 0;
 PacketFrame queued_packet = {};
-CommandOpcode sent_commands[16] = {};
+CommandOpcode sent_commands[64] = {};
 size_t sent_command_count = 0;
 
 void queue_status(StatusCode code, uint8_t detail) {
@@ -74,6 +74,33 @@ void deliver_frame(RobotSequenceController *controller, uint32_t now_ms) {
     robot_sequence_controller_handle_frame(controller, &queued_packet, now_ms);
 }
 
+// Bootstraps the controller, then fast-forwards through the four Tower
+// "safe idle position" ARM steps (0-3) and the first checkpoint's tape-follow
+// movement (step 4, immediate-complete under the test's unset
+// LineFollowerContext), landing at step 5 -- checkpoint 1's ROBOT_STEP_PI_ALIGN,
+// with its first CMD_PI_SCAN_TELETUBBIES already sent.
+void start_sequence_at_first_checkpoint(
+    RobotSequenceController *controller, uint32_t *now_ms) {
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
+    deliver_frame(controller, (*now_ms)++);  // arm ready -> starts step 0
+
+    const uint8_t preamble_details[] = {
+        STATUS_DETAIL_TOWER_LOCATOR_RETRACTED,  // step 0: CMD_TOWER_RETRACT_LOCATOR
+        STATUS_DETAIL_TOWER_ALL_CLAWS_OPEN,     // step 1: CMD_TOWER_OPEN_ALL_CLAWS
+        STATUS_DETAIL_TOWER_HORIZONTAL,         // step 2: CMD_TOWER_ROTATE_HORIZONTAL
+        STATUS_DETAIL_TOWER_Z_MOVED,            // step 3: CMD_TOWER_Z
+    };
+    for (uint8_t detail : preamble_details) {
+        queue_status(STATUS_ACTION_COMPLETE, detail);
+        deliver_frame(controller, (*now_ms)++);
+    }
+
+    // Step 4: MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE, immediate-complete
+    // (no LineFollowerContext set) -> advances straight to step 5 and sends
+    // the first PI_SCAN.
+    robot_sequence_controller_update(controller, (*now_ms)++);
+}
+
 }  // namespace
 
 extern "C" uint32_t millis(void) {
@@ -87,7 +114,7 @@ extern "C" const char *esp_err_to_name(esp_err_t) {
 extern "C" esp_err_t command_packet_send(
     UartLink *,
     const CommandPacket *packet) {
-    if (packet == nullptr || sent_command_count >= 16) {
+    if (packet == nullptr || sent_command_count >= 64) {
         return ESP_ERR_INVALID_ARG;
     }
     sent_commands[sent_command_count++] = packet->opcode;
@@ -135,27 +162,42 @@ extern "C" esp_err_t pi_report_packet_decode(
     return ESP_OK;
 }
 
+// Test-local mock -- kept self-consistent with the CommandOpcode/
+// ActionStatusDetail enums, not necessarily identical to the real arm-side
+// mapping in status_packet.c.
 extern "C" ActionStatusDetail arm_action_status_detail(
     CommandOpcode command) {
     switch (command) {
         case CMD_TOWER_HOME:
             return STATUS_DETAIL_TOWER_HOME;
-        case CMD_TOWER_Z_UP:
-            return STATUS_DETAIL_TOWER_Z_RAISED;
-        case CMD_TOWER_Z_DOWN:
-            return STATUS_DETAIL_TOWER_Z_LOWERED;
-        case CMD_TOWER_X_LEFT:
-            return STATUS_DETAIL_TOWER_X_LEFT;
-        case CMD_TOWER_X_RIGHT:
-            return STATUS_DETAIL_TOWER_X_RIGHT;
+        case CMD_TOWER_Z:
+            return STATUS_DETAIL_TOWER_Z_MOVED;
+        case CMD_TOWER_X:
+            return STATUS_DETAIL_TOWER_X_MOVED;
         case CMD_TOWER_ROTATE_VERTICAL:
             return STATUS_DETAIL_TOWER_VERTICAL;
         case CMD_TOWER_ROTATE_HORIZONTAL:
             return STATUS_DETAIL_TOWER_HORIZONTAL;
-        case CMD_TOWER_OPEN_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_OPEN;
-        case CMD_TOWER_CLOSE_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_OPEN;
+        case CMD_TOWER_CLOSE_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_CLOSED;
+        case CMD_TOWER_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_CLOSED;
+        case CMD_TOWER_EXTEND_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_EXTENDED;
+        case CMD_TOWER_RETRACT_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_RETRACTED;
         case CMD_HABITAT_HOME:
             return STATUS_DETAIL_HABITAT_HOME;
         case CMD_HABITAT_Z_UP:
@@ -199,7 +241,7 @@ void setUp() {
 
 void tearDown() {}
 
-void test_sequence_waits_for_arm_then_runs_square() {
+void test_sequence_waits_for_arm_then_runs_tower_home_preamble() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
 
@@ -210,38 +252,110 @@ void test_sequence_waits_for_arm_then_runs_square() {
     TEST_ASSERT_TRUE(controller.waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
-    robot_sequence_controller_update(&controller, 100);
-    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
 
-    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 101);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
-    TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
-    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
-
-    for (size_t step = 0; step < 8; ++step) {
-        const MovementActionController *movement =
-            &controller.movement_action_controller;
-        if (step % 2 == 0) {
-            TEST_ASSERT_EQUAL(
-                MOVEMENT_ACTION_GO_FORWARD, movement->action);
-            TEST_ASSERT_FLOAT_WITHIN(
-                0.001f, 0.25f, movement->action_value);
-        } else {
-            TEST_ASSERT_EQUAL(MOVEMENT_ACTION_ROTATE, movement->action);
-            TEST_ASSERT_FLOAT_WITHIN(
-                0.001f, 90.0f, movement->action_value);
-        }
-        robot_sequence_controller_update(
-            &controller, static_cast<uint32_t>(102 + step));
-    }
-
-    TEST_ASSERT_EQUAL_UINT32(8, controller.current_step);
-    TEST_ASSERT_FALSE(controller.running);
-    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
+    // Steps 0-3 (retract locator, open all claws, rotate horizontal, Z) each
+    // sent one ARM command; step 4's tape-follow doesn't send a command; step
+    // 5 (first PI_ALIGN) sent the first PI_SCAN.
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(5, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_TOWER_RETRACT_LOCATOR, sent_commands[0]);
+    TEST_ASSERT_EQUAL(CMD_TOWER_OPEN_ALL_CLAWS, sent_commands[1]);
+    TEST_ASSERT_EQUAL(CMD_TOWER_ROTATE_HORIZONTAL, sent_commands[2]);
+    TEST_ASSERT_EQUAL(CMD_TOWER_Z, sent_commands[3]);
+    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[4]);
 }
 
-void test_non_odometry_frames_do_not_advance_movement_steps() {
+void test_checkpoint_not_found_advances_to_next_checkpoint() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);
+
+    // A miss completes the PI_ALIGN step immediately (nothing to recover
+    // from -- no rotation has happened yet this attempt).
+    queue_pi_report(1, PI_RESULT_NOT_FOUND);
+    deliver_frame(&controller, now_ms++);
+    TEST_ASSERT_EQUAL_UINT32(6, controller.current_step);  // checkpoint 2's tape-follow
+
+    robot_sequence_controller_update(&controller, now_ms++);  // immediate-complete
+    TEST_ASSERT_EQUAL_UINT32(7, controller.current_step);  // checkpoint 2's PI_ALIGN
+    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[sent_command_count - 1]);
+}
+
+void test_uncentered_scan_rotates_and_rescans_in_one_call() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+    const size_t sent_before = sent_command_count;
+
+    // Rotation is now a single blocking call inside service_pi_align, so one
+    // deliver_frame() does the whole rotate-then-rescan -- no separate tick
+    // needed to let the rotation "complete".
+    queue_pi_report(1, PI_RESULT_OK, 0.5f);
+    deliver_frame(&controller, now_ms++);
+
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);  // still the same checkpoint
+    TEST_ASSERT_EQUAL_UINT32(1, controller.align_attempts);
+    TEST_ASSERT_EQUAL_UINT32(sent_before + 1, sent_command_count);  // the re-scan
+    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[sent_command_count - 1]);
+}
+
+void test_centered_scan_advances_without_rotating() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+    const size_t sent_before = sent_command_count;
+
+    // A small error (already centered, so the Pi would have flashed) should
+    // complete the step immediately instead of rotating.
+    queue_pi_report(1, PI_RESULT_OK, 0.01f);
+    deliver_frame(&controller, now_ms++);
+
+    TEST_ASSERT_EQUAL_UINT32(6, controller.current_step);  // checkpoint 2's tape-follow
+    TEST_ASSERT_EQUAL_UINT32(sent_before, sent_command_count);  // no re-scan sent
+}
+
+void test_align_gives_up_after_max_attempts() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+
+    // Report a large, never-improving error every round. After
+    // ALIGN_MAX_ATTEMPTS rotations the step should give up and advance
+    // rather than retry forever.
+    uint8_t request_id = 1;
+    for (uint8_t attempt = 0; attempt < 4; ++attempt) {
+        queue_pi_report(request_id++, PI_RESULT_OK, 0.5f);
+        deliver_frame(&controller, now_ms++);
+        if (controller.current_step != 5) break;
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(6, controller.current_step);  // checkpoint 2's tape-follow
+}
+
+void test_non_matching_frames_do_not_advance_current_step() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
     TEST_ASSERT_EQUAL(
@@ -256,6 +370,7 @@ void test_non_odometry_frames_do_not_advance_movement_steps() {
     deliver_frame(&controller, 101);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
 
+    // Step 0 isn't a PI_ALIGN step, so a stray Pi report is ignored too.
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
     deliver_frame(&controller, 102);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
@@ -280,14 +395,20 @@ void test_arm_fault_stops_sequence() {
 void test_movement_action_rejects_invalid_values() {
     MovementActionController controller = {};
 
+    // Only the tape-follow-distance actions require a non-negative value.
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
-            &controller, MOVEMENT_ACTION_GO_FORWARD, -0.1f));
+            &controller, MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE, -0.1f));
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
             &controller, MOVEMENT_ACTION_MAX, 1.0f));
+    // GO_X_DISTANCE and ROTATE allow negative values (direction/sign-bearing).
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_GO_X_DISTANCE, -0.05f));
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
@@ -357,13 +478,50 @@ void test_habitat_actions_have_unique_completion_details() {
     }
 }
 
+void test_tower_actions_have_unique_completion_details() {
+    const CommandOpcode actions[] = {
+        CMD_TOWER_HOME,
+        CMD_TOWER_Z,
+        CMD_TOWER_X,
+        CMD_TOWER_ROTATE_VERTICAL,
+        CMD_TOWER_ROTATE_HORIZONTAL,
+        CMD_TOWER_OPEN_ALL_CLAWS,
+        CMD_TOWER_CLOSE_ALL_CLAWS,
+        CMD_TOWER_OPEN_LEFT_CLAW,
+        CMD_TOWER_CLOSE_LEFT_CLAW,
+        CMD_TOWER_OPEN_MIDDLE_CLAW,
+        CMD_TOWER_CLOSE_MIDDLE_CLAW,
+        CMD_TOWER_OPEN_RIGHT_CLAW,
+        CMD_TOWER_CLOSE_RIGHT_CLAW,
+        CMD_TOWER_EXTEND_LOCATOR,
+        CMD_TOWER_RETRACT_LOCATOR,
+    };
+
+    for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);
+         ++index) {
+        const ActionStatusDetail detail =
+            arm_action_status_detail(actions[index]);
+        TEST_ASSERT_NOT_EQUAL(STATUS_DETAIL_NONE, detail);
+        for (size_t prior = 0; prior < index; ++prior) {
+            TEST_ASSERT_NOT_EQUAL(
+                arm_action_status_detail(actions[prior]),
+                detail);
+        }
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_sequence_waits_for_arm_then_runs_square);
-    RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
+    RUN_TEST(test_sequence_waits_for_arm_then_runs_tower_home_preamble);
+    RUN_TEST(test_checkpoint_not_found_advances_to_next_checkpoint);
+    RUN_TEST(test_uncentered_scan_rotates_and_rescans_in_one_call);
+    RUN_TEST(test_centered_scan_advances_without_rotating);
+    RUN_TEST(test_align_gives_up_after_max_attempts);
+    RUN_TEST(test_non_matching_frames_do_not_advance_current_step);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
+    RUN_TEST(test_tower_actions_have_unique_completion_details);
     return UNITY_END();
 }
