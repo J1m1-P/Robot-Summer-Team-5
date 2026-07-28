@@ -11,24 +11,42 @@ FLOW
 --------------------------------------------------------------------------------
   IDLE      Camera streams to the browser viewer; no YOLO inference runs.
   SCANNING  A request arrived. Sample SCAN_BURST_FRAMES frames, run YOLO on
-            each, and vote on the most consistent detection (needs
-            SCAN_MIN_VOTES agreeing frames to count). The robot is stationary
-            during a scan, so if the winning target is centered
-            (|mean error| < ALIGN_THRESHOLD) that means the robot is pointed
-            at it right now — flash it before replying. Send back one report,
-            then return to IDLE.
+            each (ignoring identities already in `visited`), and vote per
+            identity across the whole burst (needs SCAN_MIN_VOTES agreeing
+            frames to count as solid — this is deliberately NOT per-frame-
+            closest, so two near-equidistant targets can't split each
+            other's votes). The robot is stationary during a scan, so if the
+            winning target is centered (|mean error| < ALIGN_THRESHOLD) that
+            means the robot is pointed at it right now — flash it and add it
+            to `visited`. Then:
+              - if that's TARGETS_TO_FIND targets flashed, report
+                PI_RESULT_ALL_FOUND and shut this process down — nothing left
+                to search for;
+              - else if a second, not-yet-flashed teletubby was ALSO solidly
+                seen on this chase's first scan (before any turning started),
+                report PI_RESULT_REPOSITION instead of reporting done, so the
+                ESP turns back to that heading and the next scan finds it;
+              - otherwise report done (error 0).
+            Send back one report, then return to IDLE.
 
 WIRE CONTRACT (robot_common/pi_action_packet.h)
 --------------------------------------------------------------------------------
   ESP -> Pi (PACKET_TYPE_PI_REQUEST): request_id, action, parameter (unused).
-  Pi -> ESP (PACKET_TYPE_PI_REPORT): request_id echoed back, result
-     (OK / NOT_FOUND / CAMERA_FAULT), target_id, horizontal_error
-     (-1 left .. +1 right), confidence_percent.
+  Pi -> ESP (PACKET_TYPE_PI_REPORT): request_id echoed back, result, target_id,
+     horizontal_error (-1 left .. +1 right), confidence_percent.
+     result is PI_RESULT_OK/NOT_FOUND/CAMERA_FAULT for a real detection.
+     PI_RESULT_REPOSITION and PI_RESULT_ALL_FOUND are pure flags -- the ESP
+     tracks and undoes its own net commanded rotation (see
+     chase_net_rotation_degrees in robot_sequence_controller.c) rather than
+     trusting a Pi-reported magnitude, so horizontal_error is ignored for
+     both. ALL_FOUND additionally means the drivetrain should skip any
+     remaining checkpoints once repositioned.
 """
 
+import os
 import time
 import threading
-from collections import Counter
+from collections import Counter, defaultdict
 
 import cv2
 from flask import Flask, Response, render_template_string
@@ -41,6 +59,8 @@ from uart_link import (
     PI_RESULT_OK,
     PI_RESULT_NOT_FOUND,
     PI_RESULT_CAMERA_FAULT,
+    PI_RESULT_REPOSITION,
+    PI_RESULT_ALL_FOUND,
 )   # the ESP32 serial link
 
 try:
@@ -67,6 +87,15 @@ SCAN_MIN_VOTES     = 3    # ADJUST: how many of the burst frames must agree on t
                           #         same identity before we report PI_RESULT_OK
 ALIGN_THRESHOLD    = 0.08 # ADJUST: |mean error| below this counts as "centered"
                           #         and triggers a flash (see module docstring)
+FLASH_COUNT        = 3    # ADJUST: how many flashes once centered
+CHASE_STALE_SECONDS = 10.0 # ADJUST: if this long passes between scans for the
+                          #         same identity, treat it as a new chase
+                          #         instead of continuing the old one (guards
+                          #         against a stale rotation sum bleeding into
+                          #         a later, unrelated checkpoint)
+TARGETS_TO_FIND    = 2    # only two teletubbies exist — leave at 2. Once this
+                          #         many are in `visited`, report
+                          #         PI_RESULT_ALL_FOUND and shut down.
 
 # ── flash hardware ──────────────────────────────────────────────────────────────
 FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
@@ -97,12 +126,29 @@ YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"
 # small int. Nothing downstream currently interprets the value beyond logging it.
 IDENTITY_TO_TARGET_ID = {"dipsy": 0, "laa_laa": 1, "po": 2, "tinky_winky": 3}
 
+# Identities already flashed. Persists across scan requests (i.e. across
+# checkpoints) so a teletubby visible from more than one checkpoint only gets
+# flashed once, and so a scan that sees both teletubbies picks the one that
+# still needs flashing instead of always the closest-to-center one.
+visited = set()
 
-def yolo_detect_all(frame, frame_w):
+# Tracks the current "chase": whether a second, not-yet-flashed teletubby was
+# seen in the same view as `_chase_identity` before any turning started. If
+# so, once it's flashed we report PI_RESULT_REPOSITION (a pure flag -- the ESP
+# tracks and undoes its own net rotation; the Pi doesn't guess a magnitude).
+# See handle_scan_request().
+_chase_identity = None
+_chase_saw_second = False
+_chase_last_call_time = 0.0
+
+
+def yolo_detect_all(frame, frame_w, exclude=None):
     """
-    Run YOLO on one frame and return ALL detections, highest-confidence first.
-    Each is (identity, (x, y, w, h), error), error in -1 (left) .. +1 (right).
+    Run YOLO on one frame and return ALL selectable detections, highest-
+    confidence first. Each is (identity, (x, y, w, h), error), error in
+    -1 (left) .. +1 (right). `exclude` drops identities already in `visited`.
     """
+    exclude = exclude or set()
     results = model(frame, conf=DETECT_CONF, imgsz=IMGSZ, verbose=False)
     boxes = results[0].boxes
     if len(boxes) == 0:
@@ -115,6 +161,8 @@ def yolo_detect_all(frame, frame_w):
     dets = []
     for i in conf.argsort()[::-1]:           # highest confidence first
         identity = YOLO_NAME_MAP[model.names[cls[i]]]
+        if identity in exclude:
+            continue
         x1, y1, x2, y2 = xyxy[i]
         x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
         error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)
@@ -133,6 +181,14 @@ def pick_target(detections):
 # ANSWERING ONE SCAN REQUEST
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _reset_chase():
+    """Clear the running chase state — the current identity is done (flashed,
+    lost, or abandoned) so nothing should carry over to whatever's next."""
+    global _chase_identity, _chase_saw_second
+    _chase_identity = None
+    _chase_saw_second = False
+
+
 def flash_once():
     """Fire the onboard flash once via GPIO18."""
     if GPIO is None:
@@ -144,60 +200,141 @@ def flash_once():
     print("[FLASH] (Pi-side)")
 
 
+def _shutdown(code):
+    """
+    Hard-exit the process (needed to also end the Flask server running in
+    main() from this background thread -- stop_event alone wouldn't do it).
+    os._exit() skips the normal `finally: GPIO.cleanup()` in __main__, so
+    clean up explicitly here first.
+    """
+    if GPIO is not None:
+        GPIO.output(FLASH_PIN, GPIO.LOW)
+        GPIO.cleanup()
+    os._exit(code)
+
+
+def send_report(request_id, result, target_id=0, horizontal_error=0.0,
+                 confidence_percent=0):
+    """
+    Send one PiReportPacket, or just print it in dev mode (link is None) --
+    lets handle_scan_request's detection/voting/chase logic be exercised
+    (e.g. by a standalone test harness) without a real serial link.
+    """
+    if link is None:
+        print(f"[TX] report result={result} target={target_id} "
+              f"err={horizontal_error:+.3f} conf={confidence_percent}%")
+        return
+    link.send_pi_report(
+        request_id, PI_ACTION_SCAN_TELETUBBIES, result,
+        target_id=target_id, horizontal_error=horizontal_error,
+        confidence_percent=confidence_percent)
+
+
 def handle_scan_request(request_id, parameter):
     """
-    Sample a short burst of frames, vote on the best target, flash if it's
-    already centered, and send back exactly one report. `parameter` is decoded
-    but unused (reserved by the wire format for future per-scan tuning).
+    Sample a short burst of frames, vote on the best not-yet-flashed target,
+    flash it if it's already centered, and send back exactly one report.
+    `parameter` is decoded but unused (reserved by the wire format for future
+    per-scan tuning).
     """
-    votes = []
+    global _chase_identity, _chase_saw_second, _chase_last_call_time
+
+    # Vote per identity across the whole burst, not per-frame-closest: if two
+    # not-yet-flashed teletubbies are near-equidistant, "closest this frame"
+    # can flip between them, splitting what would otherwise be solid votes
+    # for both and causing a false NOT_FOUND in exactly the case (both
+    # visible) the two-target handling below exists for.
+    seen_counts = Counter()
+    err_by_id = defaultdict(list)
     frames_read = 0
     for _ in range(SCAN_BURST_FRAMES):
         ok, frame = cap.read()
         if not ok:
             continue
         frames_read += 1
-        target = pick_target(yolo_detect_all(frame, frame.shape[1]))
-        if target is not None:
-            votes.append(target)
-        publish_frame(frame, target, "SCANNING")
+        dets = yolo_detect_all(frame, frame.shape[1], exclude=visited)
+        for identity in {d[0] for d in dets}:      # count each identity once per frame
+            seen_counts[identity] += 1
+        for identity, _box, error in dets:
+            err_by_id[identity].append(error)
+        publish_frame(frame, pick_target(dets), "SCANNING")
 
     if frames_read == 0:
         print(f"[SCAN #{request_id}] camera unavailable")
-        link.send_pi_report(request_id, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_CAMERA_FAULT)
+        send_report(request_id, PI_RESULT_CAMERA_FAULT)
+        _reset_chase()   # this checkpoint is over either way -- see robot_sequence_controller.c
         return
 
-    if not votes:
-        print(f"[SCAN #{request_id}] no detection")
-        link.send_pi_report(request_id, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_NOT_FOUND)
+    solid = [identity for identity, n in seen_counts.items() if n >= SCAN_MIN_VOTES]
+    if not solid:
+        print(f"[SCAN #{request_id}] no unflashed detection (visited={visited})")
+        send_report(request_id, PI_RESULT_NOT_FOUND)
+        _reset_chase()
         return
 
-    tally = Counter(v[0] for v in votes)
-    winner, count = tally.most_common(1)[0]
-    if count < SCAN_MIN_VOTES:
-        print(f"[SCAN #{request_id}] inconsistent ({winner} only {count}/{SCAN_BURST_FRAMES})")
-        link.send_pi_report(request_id, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_NOT_FOUND)
-        return
-
-    matching_errors = [v[2] for v in votes if v[0] == winner]
+    winner = min(solid, key=lambda i: abs(sum(err_by_id[i]) / len(err_by_id[i])))
+    matching_errors = err_by_id[winner]
     mean_error = sum(matching_errors) / len(matching_errors)
-    confidence_percent = round(100 * count / SCAN_BURST_FRAMES)
+    confidence_percent = round(100 * seen_counts[winner] / SCAN_BURST_FRAMES)
 
     print(f"[SCAN #{request_id}] {winner} err={mean_error:+.3f} conf={confidence_percent}%")
+
+    # Continue the running chase for `winner` if we were already centering on
+    # it recently; otherwise this is a fresh chase (new identity, or the old
+    # one went stale — see CHASE_STALE_SECONDS). `saw_second` only latches on
+    # a chase's FIRST scan: net rotation is still zero then, so "undo the
+    # whole chase" is guaranteed to return to a heading where it was actually
+    # seen. Latching it on a later scan (after we'd already turned partway
+    # toward `winner`) would undo too far, past where the second one showed up.
+    now = time.time()
+    if winner != _chase_identity or (now - _chase_last_call_time) > CHASE_STALE_SECONDS:
+        _chase_identity = winner
+        _chase_saw_second = len(solid) >= 2
+    _chase_last_call_time = now
+
+    report_error, report_result = mean_error, PI_RESULT_OK
 
     # The robot is stationary during a scan, so a centered reading means it's
     # pointed at the target right now — flash before replying, not after.
     if abs(mean_error) < ALIGN_THRESHOLD:
-        flash_once()
-        flash_once()
-        flash_once()
-        mean_error = 0
+        for _ in range(FLASH_COUNT):
+            flash_once()
+        visited.add(winner)
+        print(f"[SCAN #{request_id}] flashed {winner}")
 
-    link.send_pi_report(
-        request_id, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_OK,
+        if len(visited) >= TARGETS_TO_FIND:
+            # Nothing left to search for. horizontal_error is ignored by the
+            # ESP for this result (see robot_sequence_controller.c) -- it
+            # tracks and undoes its own net rotation instead of trusting a
+            # Pi-reported magnitude, so the robot returns to roughly its
+            # starting heading before moving on to Tower pickup.
+            report_error = 0
+            report_result = PI_RESULT_ALL_FOUND
+            print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
+        elif _chase_saw_second:
+            # A second, not-yet-flashed teletubby was in view before any of
+            # the rotating we just did to center on `winner`. Ask the ESP to
+            # undo it (horizontal_error ignored here too -- same reason as
+            # above) instead of reporting done, so the next scan finds the
+            # second one from roughly where it was first seen.
+            report_error = 0
+            report_result = PI_RESULT_REPOSITION
+            print(f"[SCAN #{request_id}] requesting reposition to re-expose the other one")
+        else:
+            report_error = 0
+        _reset_chase()
+
+    send_report(
+        request_id, report_result,
         target_id=IDENTITY_TO_TARGET_ID[winner],
-        horizontal_error=mean_error,
+        horizontal_error=report_error,
         confidence_percent=confidence_percent)
+
+    if report_result == PI_RESULT_ALL_FOUND:
+        # Give the report a moment to actually go out over the wire first.
+        time.sleep(0.1)
+        print("[control_loop] all targets found — shutting down")
+        _shutdown(0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -235,10 +372,28 @@ stop_event = threading.Event()
 cap = cv2.VideoCapture(CAMERA_INDEX)
 
 
+def _reopen_camera():
+    """
+    Try to recover from a dead camera by reopening it once. Returns True only
+    if the fresh handle can actually read a frame.
+    """
+    global cap
+    print("[control_loop] camera unresponsive — attempting to reopen")
+    cap.release()
+    cap = cv2.VideoCapture(CAMERA_INDEX)
+    for _ in range(5):
+        ok, _ = cap.read()
+        if ok:
+            print("[control_loop] camera reopened successfully")
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def control_loop():
     """Owns the camera. Idles (streaming only) until a PI_REQUEST arrives."""
     consecutive_failures = 0
-    MAX_FAILURES = 30        # ADJUST: bad reads in a row before we give up (~1s @30fps)
+    MAX_FAILURES = 30        # ADJUST: bad reads in a row before trying to reopen
 
     while not stop_event.is_set():
         if link is not None:
@@ -256,9 +411,17 @@ def control_loop():
         if not ok:
             consecutive_failures += 1
             if consecutive_failures >= MAX_FAILURES:
-                print("[control_loop] camera unavailable — stopping.")
-                stop_event.set()
-                break
+                if _reopen_camera():
+                    consecutive_failures = 0
+                else:
+                    # Reopening didn't help either -- sitting here silently
+                    # would just leave the ESP re-requesting scans that time
+                    # out for the rest of the match with no visibility into
+                    # why. Fail loudly and immediately instead of leaving a
+                    # zombie process behind (this is a background thread, so
+                    # stop_event alone wouldn't end the Flask process).
+                    print("[control_loop] camera unavailable after reopen attempt — giving up.")
+                    _shutdown(1)
             time.sleep(0.03)
             continue
         consecutive_failures = 0
@@ -309,7 +472,7 @@ def index():
     return render_template_string('''
     <html>
     <head>
-        <title>Detector — reactive</title>
+        <title>Teletubby Detector</title>
         <style>
             body { font-family: monospace; background: #1a1a1a; color: #eee; padding: 20px; }
             img  { display: block; width: 640px; border: 1px solid #444; }

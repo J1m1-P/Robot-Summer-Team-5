@@ -332,6 +332,38 @@ void test_centered_scan_advances_without_rotating() {
     TEST_ASSERT_EQUAL_UINT32(sent_before, sent_command_count);  // no re-scan sent
 }
 
+void test_reposition_does_not_count_as_attempt() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);
+
+    // More repositioning rounds than ALIGN_MAX_ATTEMPTS should all rotate and
+    // re-scan -- one deliver_frame() each, since the rotation is now a single
+    // blocking call -- without ever touching align_attempts. The 0.3f error
+    // value is ignored by the ESP (REPOSITION undoes its own tracked net
+    // rotation, which is 0 here since no real detection ever rotated) -- this
+    // test only cares about the attempt-budget bookkeeping, not the
+    // magnitude.
+    for (uint8_t round = 0; round < 6; ++round) {
+        queue_pi_report(round + 1, PI_RESULT_REPOSITION, 0.3f);
+        deliver_frame(&controller, now_ms++);
+        TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);  // still the same checkpoint
+        TEST_ASSERT_EQUAL_UINT32(0, controller.align_attempts);
+    }
+
+    // A real (large-error) OK report afterward should still get the full
+    // attempt budget -- confirms the reposition rounds didn't consume it.
+    queue_pi_report(100, PI_RESULT_OK, 0.5f);
+    deliver_frame(&controller, now_ms++);
+    TEST_ASSERT_EQUAL_UINT32(1, controller.align_attempts);
+}
+
 void test_align_gives_up_after_max_attempts() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
@@ -374,6 +406,112 @@ void test_non_matching_frames_do_not_advance_current_step() {
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
     deliver_frame(&controller, 102);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+}
+
+void test_not_found_after_rotation_retries_then_gives_up_checkpoint_only() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+
+    // A real detection that isn't centered establishes last_rotation_degrees
+    // != 0, so a later NOT_FOUND has something to recover from instead of
+    // being treated as "nothing here" (see
+    // test_checkpoint_not_found_advances_to_next_checkpoint for that case).
+    queue_pi_report(1, PI_RESULT_OK, 0.5f);
+    deliver_frame(&controller, now_ms++);
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(1, controller.align_attempts);
+
+    // The target is now lost (e.g. that rotation overshot). NOT_FOUND should
+    // retry with a recovery rotation instead of giving up immediately, until
+    // attempts run out.
+    uint8_t request_id = 2;
+    for (uint8_t attempt = 0; attempt < 4; ++attempt) {
+        queue_pi_report(request_id++, PI_RESULT_NOT_FOUND);
+        deliver_frame(&controller, now_ms++);
+        if (controller.current_step != 5) break;
+        TEST_ASSERT_TRUE(controller.running);
+    }
+
+    // Gave up on just this checkpoint once attempts ran out -- the sequence
+    // itself keeps running (advances to the next checkpoint).
+    TEST_ASSERT_TRUE(controller.running);
+    TEST_ASSERT_EQUAL_UINT32(6, controller.current_step);
+}
+
+void test_camera_fault_retries_instead_of_aborting_sequence() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+
+    // Unlike NOT_FOUND, a camera fault isn't about whether we've rotated yet
+    // -- it should always retry, even on the very first scan of a checkpoint.
+    queue_pi_report(1, PI_RESULT_CAMERA_FAULT);
+    deliver_frame(&controller, now_ms++);
+    TEST_ASSERT_TRUE(controller.running);
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);  // still the same checkpoint
+    TEST_ASSERT_EQUAL_UINT32(1, controller.align_attempts);
+}
+
+void test_all_found_skips_remaining_checkpoints() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+    const size_t sent_before = sent_command_count;
+
+    // The Pi reports both teletubbies flashed while still on the very first
+    // checkpoint -- should jump straight past checkpoints 2 and 3 (and their
+    // scans) to the navigation toward Tower pickup, not just advance to the
+    // next checkpoint. No prior rotation happened this chase, so
+    // chase_net_rotation_degrees is 0 -- nothing to undo, so this takes the
+    // immediate-skip path (see the next test for the rotate-then-skip path).
+    queue_pi_report(1, PI_RESULT_ALL_FOUND);
+    deliver_frame(&controller, now_ms++);
+
+    TEST_ASSERT_EQUAL_UINT32(10, controller.current_step);  // rotate-to-tower step
+    TEST_ASSERT_EQUAL_UINT32(sent_before, sent_command_count);  // no more PI_SCANs sent
+    TEST_ASSERT_TRUE(controller.running);
+}
+
+void test_all_found_repositions_before_skipping_when_rotation_needed() {
+    UartLink arm_uart = {};
+    RobotSequenceController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_init(&controller, &arm_uart));
+
+    uint32_t now_ms = 100;
+    start_sequence_at_first_checkpoint(&controller, &now_ms);
+
+    // A real detection that rotates first establishes chase_net_rotation_degrees
+    // != 0. ALL_FOUND ignores whatever horizontal_error the Pi sends -- the
+    // ESP undoes ITS OWN tracked net rotation, not a Pi-reported magnitude
+    // (see chase_net_rotation_degrees in robot_sequence_controller.c).
+    queue_pi_report(1, PI_RESULT_OK, 0.4f);
+    deliver_frame(&controller, now_ms++);
+    TEST_ASSERT_EQUAL_UINT32(5, controller.current_step);  // still checkpoint 1
+
+    // The undo rotation and the skip both happen within this single call.
+    queue_pi_report(2, PI_RESULT_ALL_FOUND, 0.0f);
+    deliver_frame(&controller, now_ms++);
+
+    TEST_ASSERT_EQUAL_UINT32(10, controller.current_step);  // rotate-to-tower step
+    TEST_ASSERT_TRUE(controller.running);
 }
 
 void test_arm_fault_stops_sequence() {
@@ -516,8 +654,13 @@ int main(int, char **) {
     RUN_TEST(test_checkpoint_not_found_advances_to_next_checkpoint);
     RUN_TEST(test_uncentered_scan_rotates_and_rescans_in_one_call);
     RUN_TEST(test_centered_scan_advances_without_rotating);
+    RUN_TEST(test_reposition_does_not_count_as_attempt);
     RUN_TEST(test_align_gives_up_after_max_attempts);
     RUN_TEST(test_non_matching_frames_do_not_advance_current_step);
+    RUN_TEST(test_not_found_after_rotation_retries_then_gives_up_checkpoint_only);
+    RUN_TEST(test_camera_fault_retries_instead_of_aborting_sequence);
+    RUN_TEST(test_all_found_skips_remaining_checkpoints);
+    RUN_TEST(test_all_found_repositions_before_skipping_when_rotation_needed);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);

@@ -26,6 +26,12 @@ static const uint32_t kActionTimeoutMs = 15000;
 // real tape sections.
 #define PLACEHOLDER_SCAN_DISTANCE_M 1.2f
 
+// When a scan comes back without a usable detection (nothing seen, camera
+// hiccup, Pi didn't answer in time, link error) after we've already rotated
+// this attempt, assume the last rotation overshot and turn back this
+// fraction of it before trying again, rather than giving up outright.
+#define NOT_FOUND_RECOVERY_FACTOR 0.5f
+
 typedef enum {
     ROBOT_STEP_MOVEMENT = 0,
     ROBOT_STEP_ARM,
@@ -179,12 +185,68 @@ static esp_err_t send_pi_scan(
     return error;
 }
 
-// Services one PiReportPacket for the current ROBOT_STEP_PI_ALIGN step: if
-// the reported error is too large and attempts remain, rotate (blocking --
-// movement_action_controller_update() runs the whole rotation to completion
-// before returning) and re-request a scan; otherwise the step is done.
-// Returns true once the step should advance (centered, not found, out of
-// attempts, or the rotation itself failed).
+// Starts a rotation as part of aligning and blocks until it's done (matching
+// movement_action_controller_update's run-to-completion contract). Remembers
+// the commanded angle for NOT_FOUND recovery. Used for real detections,
+// REPOSITION/ALL_FOUND corrections, and recovery rotations alike. Returns
+// false (and faults the sequence) only if the rotation itself fails to start
+// or complete.
+static bool run_align_rotation(
+    RobotSequenceController *controller,
+    float rotation_degrees,
+    const char *fault_reason) {
+    const esp_err_t init_error = movement_action_controller_init(
+        &controller->movement_action_controller,
+        MOVEMENT_ACTION_ROTATE,
+        rotation_degrees);
+    if (init_error != ESP_OK) {
+        enter_fault(controller, fault_reason, init_error);
+        return false;
+    }
+    controller->last_rotation_degrees = rotation_degrees;
+    if (!movement_action_controller_update(
+            &controller->movement_action_controller)) {
+        enter_fault(controller, fault_reason, ESP_FAIL);
+        return false;
+    }
+    return true;
+}
+
+// A search checkpoint is exactly the {FRONT_TAPE_FOLLOW_DISTANCE, PI_ALIGN}
+// pair kRobotSequence repeats for each of the three search spots. Only these
+// steps are skippable once every target is found -- the movement after the
+// last checkpoint (rotate to the tower, side-tape-follow, strafe align, ...)
+// is real navigation, not searching, and must still run.
+static bool step_is_checkpoint(const RobotSequenceStep *step) {
+    return step->type == ROBOT_STEP_PI_ALIGN ||
+        (step->type == ROBOT_STEP_MOVEMENT &&
+         step->action.movement == MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE);
+}
+
+// Skips past any remaining checkpoint steps straight to whatever comes after
+// (the navigation toward Tower pickup). Lands one step early and lets
+// advance_sequence's normal ++ do the rest, reusing the same start_robot_step
+// path as an ordinary advance.
+static bool skip_remaining_checkpoints(RobotSequenceController *controller) {
+    size_t skip_to = controller->current_step + 1;
+    while (skip_to < kRobotSequenceLength &&
+           step_is_checkpoint(&kRobotSequence[skip_to])) {
+        ++skip_to;
+    }
+    printf(
+        "# Pi align: all targets found, skipping ahead to step %u\n",
+        (unsigned)skip_to);
+    controller->current_step = skip_to - 1;
+    return true;
+}
+
+// Services one PiReportPacket for the current ROBOT_STEP_PI_ALIGN step. Each
+// rotation this drives is a single blocking call
+// (movement_action_controller_update() runs it to completion before
+// returning), so there is no cross-tick "waiting on a rotation" state to
+// track -- rescan-or-skip is decided immediately after the rotation, in the
+// same call. Returns true once the step should advance (centered, not found,
+// out of attempts, or the rotation itself failed).
 static bool service_pi_align(
     RobotSequenceController *controller,
     const PacketFrame *frame,
@@ -196,12 +258,105 @@ static bool service_pi_align(
     if (controller->last_pi_request_id == report.request_id) return false;
     controller->last_pi_request_id = report.request_id;
 
-    if (report.result == PI_RESULT_NOT_FOUND) {
-        printf("# Pi scan: no Teletubby detected\n");
-        return true;
+    if (report.result == PI_RESULT_ALL_FOUND) {
+        // Nothing left to search for. Not a detection -- horizontal_error is
+        // ignored here. Instead, undo chase_net_rotation_degrees: the sum of
+        // every rotation THIS controller has actually commanded since the
+        // chase started, not a magnitude reported by the Pi. The Pi only
+        // ever measures; it never learns how far a rotation actually turned
+        // out, and its wire report clamps horizontal_error to [-1, 1] before
+        // scaling, which could silently truncate a multi-attempt chase's
+        // true net rotation. Tracking it here removes both problems --
+        // whatever we commanded is exactly what we know to reverse.
+        const float rotation_degrees = -controller->chase_net_rotation_degrees;
+        controller->chase_net_rotation_degrees = 0.0f;
+        if (fabsf(rotation_degrees) < ALIGN_CENTERED_DEGREES) {
+            return skip_remaining_checkpoints(controller);  // nothing meaningful to undo
+        }
+        printf(
+            "# Pi align: all targets found; repositioning %.1f degrees "
+            "before moving on\n",
+            rotation_degrees);
+        if (!run_align_rotation(
+                controller, rotation_degrees,
+                "failed final repositioning rotation")) {
+            return false;
+        }
+        return skip_remaining_checkpoints(controller);
     }
+
+    if (report.result == PI_RESULT_REPOSITION) {
+        // Not a detection -- the Pi is asking for a correction rotation
+        // (e.g. to expose a second target it saw before this chase started
+        // turning). horizontal_error is ignored for the same reason as
+        // PI_RESULT_ALL_FOUND above -- undo chase_net_rotation_degrees, the
+        // ESP's own record of what it actually commanded, not a Pi-reported
+        // magnitude. Don't charge it against the attempt budget, and give
+        // whatever's found next a fresh budget of its own rather than
+        // sharing what's left of this one.
+        const float rotation_degrees = -controller->chase_net_rotation_degrees;
+        controller->align_attempts = 0;
+        controller->chase_net_rotation_degrees = 0.0f;
+        printf(
+            "# Pi align: repositioning %.1f degrees (fresh attempt budget)\n",
+            rotation_degrees);
+        if (fabsf(rotation_degrees) >= ALIGN_CENTERED_DEGREES &&
+            !run_align_rotation(
+                controller, rotation_degrees,
+                "failed repositioning rotation")) {
+            return false;
+        }
+        const esp_err_t scan_error = send_pi_scan(controller, now_ms);
+        if (scan_error != ESP_OK) {
+            enter_fault(controller, "failed to re-request Pi scan", scan_error);
+        }
+        return false;
+    }
+
     if (report.result != PI_RESULT_OK) {
-        enter_fault(controller, "Pi scan failed", ESP_FAIL);
+        // No usable detection this round: nothing seen, a camera hiccup, the
+        // Pi didn't answer in time, or a link error. None of these mean the
+        // arm/drivetrain link itself is broken -- Tower/Habitat steps never
+        // touch the Pi at all -- so retry within the attempt budget instead
+        // of aborting the whole sequence over a vision-side miss.
+        //
+        // Exception: a NOT_FOUND before we've ever rotated this attempt has
+        // nothing to recover FROM -- that's a genuinely empty checkpoint, not
+        // a lost target, so give up immediately rather than burn attempts
+        // spinning in place.
+        const bool nothing_to_recover =
+            report.result == PI_RESULT_NOT_FOUND &&
+            controller->last_rotation_degrees == 0.0f;
+        if (nothing_to_recover) {
+            printf("# Pi scan: no Teletubby detected\n");
+            return true;
+        }
+
+        ++controller->align_attempts;
+        if (controller->align_attempts >= ALIGN_MAX_ATTEMPTS) {
+            printf(
+                "# Pi align: giving up this checkpoint (result %u, out of "
+                "attempts)\n",
+                (unsigned)report.result);
+            return true;
+        }
+        const float recovery_degrees =
+            -controller->last_rotation_degrees * NOT_FOUND_RECOVERY_FACTOR;
+        printf(
+            "# Pi align: result %u; recovering %.1f degrees (attempt %u/%u)\n",
+            (unsigned)report.result,
+            recovery_degrees,
+            (unsigned)controller->align_attempts,
+            ALIGN_MAX_ATTEMPTS);
+        controller->chase_net_rotation_degrees += recovery_degrees;
+        if (!run_align_rotation(
+                controller, recovery_degrees, "failed recovery rotation")) {
+            return false;
+        }
+        const esp_err_t scan_error = send_pi_scan(controller, now_ms);
+        if (scan_error != ESP_OK) {
+            enter_fault(controller, "failed to re-request Pi scan", scan_error);
+        }
         return false;
     }
 
@@ -228,16 +383,9 @@ static bool service_pi_align(
         return true;
     }
 
-    const esp_err_t init_error = movement_action_controller_init(
-        &controller->movement_action_controller,
-        MOVEMENT_ACTION_ROTATE,
-        rotation_degrees);
-    if (init_error != ESP_OK) {
-        enter_fault(controller, "failed to start alignment rotation", init_error);
-        return false;
-    }
-    if (!movement_action_controller_update(&controller->movement_action_controller)) {
-        enter_fault(controller, "alignment rotation failed", ESP_FAIL);
+    controller->chase_net_rotation_degrees += rotation_degrees;
+    if (!run_align_rotation(
+            controller, rotation_degrees, "alignment rotation failed")) {
         return false;
     }
     const esp_err_t scan_error = send_pi_scan(controller, now_ms);
@@ -320,6 +468,8 @@ static esp_err_t start_robot_step(
             step->action_value);
     } else if (step->type == ROBOT_STEP_PI_ALIGN) {
         controller->align_attempts = 0;
+        controller->last_rotation_degrees = 0.0f;
+        controller->chase_net_rotation_degrees = 0.0f;
         error = send_pi_scan(controller, now_ms);
     } else {
         const CommandPacket command = {

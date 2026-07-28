@@ -92,6 +92,11 @@ PI_RESULT_TIMEOUT = 2
 PI_RESULT_CAMERA_FAULT = 3
 PI_RESULT_LINK_ERROR = 4
 PI_RESULT_INVALID_REQUEST = 5
+PI_RESULT_REPOSITION = 6   # not a detection: horizontal_error is a commanded
+                           # correction rotation (see pi_action_packet.h)
+PI_RESULT_ALL_FOUND = 7    # not a detection: every target has been flashed,
+                           # nothing left to search for (see pi_action_packet.h)
+PI_RESULT_MAX = 8
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -154,7 +159,7 @@ def encode_pi_report(request_id, action, result, target_id=0,
     """Encode the report the arm ESP32 will relay to the drivetrain."""
     if action != PI_ACTION_SCAN_TELETUBBIES:
         raise ValueError("invalid Pi action")
-    if result < PI_RESULT_OK or result > PI_RESULT_INVALID_REQUEST:
+    if result < PI_RESULT_OK or result >= PI_RESULT_MAX:
         raise ValueError("invalid Pi result")
     confidence_percent = max(0, min(100, int(confidence_percent)))
     error_x1000 = int(round(max(-1.0, min(1.0, horizontal_error)) * 1000))
