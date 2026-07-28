@@ -33,22 +33,36 @@ typedef struct {
 
 // Actual Robot Sequence (To be finished).
 static const RobotSequenceStep kRobotSequence[] = {
+    // Scan at start
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    
     // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},1.0f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
+    // Search checkpoint 2: tape follow, stop, and ask the Pi to scan.
     // Each scan sets the angle of the following rotation step.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
      PLACEHOLDER_SCAN_DISTANCE_M},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE},
+    // Search checkpoint 3: tape follow, stop, and ask the Pi to scan.
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
      PLACEHOLDER_SCAN_DISTANCE_M},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
+
+    // Continue to tape follow
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
+     PLACEHOLDER_SCAN_DISTANCE_M},
+
+    // Rotate to follow tape on the side to tower pickup, then align
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 90.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER},
+     PLACEHOLDER_SCAN_DISTANCE_M},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 90.0f},
 
     // Tower: Picking up the pieces
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
