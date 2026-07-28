@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr float kTapeFollowSpeedMps = 0.25f;
+constexpr float kTapeFollowSpeedMps = 0.35f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
 #ifdef ARDUINO
 constexpr float kLocatorApproachSpeedMps = -0.10f;
@@ -299,7 +299,7 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(
-                    g_line_follower_ctx, Direction::PY, kTapeFollowSpeedMps,
+                    g_line_follower_ctx, Direction::PY, 0.15,
                     StopCondition::LATERAL_ONE, 0.0f,
                     kTapeFollowTimeoutS);
             }
