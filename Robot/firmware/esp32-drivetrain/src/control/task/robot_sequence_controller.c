@@ -36,9 +36,9 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
 
     // Move tower arm from home position to safe idle position
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_CLAW}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
     
     // Scan at start
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
@@ -82,12 +82,31 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
 
     // Move to the tower base
-    // TODO: make locator extend during movement to save time
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
+    // TODO: make locator extend during movement to save time
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR}, 0.0f},
+
+    // Tower: Placing the pieces 
+    // TODO: tune Z distances
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_MIDDLE_CLAW}, 0.0f},    // drop middle piece
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_LEFT_CLAW}, 0.0f},  // drop left piece
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, -1.36f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_RIGHT_CLAW}, 0.0f},
+    
+    // Go back to main tape and put tower claws in safe idle position
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},      // rehome X
+    {ROBOT_STEP_ARM, {.arm = CMD}}
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -1.0f},      // idle position for Z
 
     // Habitat: Building actions (enable and tune when the sequence is ready)
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
