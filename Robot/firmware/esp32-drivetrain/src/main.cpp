@@ -1,6 +1,8 @@
 /* Starts and services the ordered robot task sequence. */
 #include <Arduino.h>
 
+#include "esp_timer.h"
+
 #include <robot_common/uart_link.h>
 
 #include "config/communication/uart_link_config.h"
@@ -122,8 +124,11 @@ void loop() {
 
     // Feed data to drivetrain watchdog to sample encoders when not stationary
     drivetrain_set_body_velocity(&drivetrain, 0.0f, 0.0f, 0.0f);
-    const int64_t now_us = static_cast<int64_t>(now_ms) * 1000;
-    drivetrain_update(&drivetrain, now_us);
+    // Fresh timestamp: set_body_velocity() just bumped last_command_us, and
+    // passing a now_us derived from the now_ms captured above would make
+    // now_us < last_command_us and fault drivetrain_update() with
+    // ESP_ERR_INVALID_ARG every cycle (see calibration_main.cpp).
+    drivetrain_update(&drivetrain, esp_timer_get_time());
 
     (void)tape_sensor_driver_read_all(tape_sensor_list);
 

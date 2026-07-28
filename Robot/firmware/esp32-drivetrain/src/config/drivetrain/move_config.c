@@ -39,7 +39,7 @@ static const OffTapeMotionConfig LATERAL_MOTION_CONFIG = {
 // Shared heading-correction PID, reused by MoveP/MoveC. Same
 // critically-damped-by-design, untuned-starting-point caveat as
 // LATERAL_MOTION_CONFIG above.
-static const TapeFollowingControllerConfig TRANSLATE_HEADING_CONTROLLER_CONFIG = {
+static const BoundedPidConfig TRANSLATE_HEADING_CONTROLLER_CONFIG = {
     .proportional_gain = 1.0f,
     .integral_gain = 0.1f,
     .derivative_gain = 0.3f,

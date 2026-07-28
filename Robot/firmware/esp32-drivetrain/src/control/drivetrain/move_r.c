@@ -12,7 +12,7 @@ static const float kPi = 3.14159265358979323846f;
 bool move_r_config_is_valid(const MoveRConfig *config)
 {
     return config != NULL &&
-           tape_following_controller_config_is_valid(&config->heading_controller) &&
+           bounded_pid_config_is_valid(&config->heading_controller) &&
            speed_profile_config_is_valid(&config->speed_profile) &&
            isfinite(config->heading_tolerance_rad) &&
            config->heading_tolerance_rad >= 0.0f &&
@@ -41,7 +41,7 @@ esp_err_t move_r_start(
     move->target_heading_rad = target_heading_rad;
     move->status = MOVE_R_RUNNING;
     speed_profile_reset(&move->profile, 0.0f);
-    return tape_following_controller_reset(&move->heading_state);
+    return bounded_pid_reset(&move->heading_state);
 }
 
 esp_err_t move_r_update(
@@ -70,7 +70,7 @@ esp_err_t move_r_update(
     const float error = wrap_heading_error(
         move->target_heading_rad - estimate->heading_rad);
     output->heading_error_rad = error;
-    const float feedback = tape_following_controller_update(
+    const float feedback = bounded_pid_update(
         &move->heading_state, &move->config->heading_controller, error, dt_s);
     const float target_omega = fabsf(error) <= move->config->heading_tolerance_rad
         ? 0.0f

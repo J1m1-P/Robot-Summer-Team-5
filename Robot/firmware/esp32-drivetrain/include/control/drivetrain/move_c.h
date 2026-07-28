@@ -13,7 +13,7 @@ extern "C" {
 typedef struct {
     OffTapeMotionConfig off_tape_motion;
     SpeedProfileConfig speed_profile;
-    TapeFollowingControllerConfig heading_controller;
+    BoundedPidConfig heading_controller;
     float arc_length_tolerance_m;
     float radial_tolerance_m;
     float heading_tolerance_rad;
@@ -53,7 +53,7 @@ typedef struct {
     OffTapeMotion off_tape_motion;
     SpeedProfile translation_profile;
     SpeedProfile omega_profile;
-    TapeFollowingControllerState heading_controller;
+    BoundedPidState heading_controller;
 } MoveC;
 
 typedef struct {

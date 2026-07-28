@@ -66,14 +66,14 @@ Configuration files bind reusable types to this board. Their source objects are 
 
 ### `include/config/tape_following/tape_following_config.h` and `src/config/tape_following/tape_following_config.c`
 
-- **Layer:** tape-sensor and behavior configuration.
-- **Why they exist:** compose the tape subsystem in one place, parallel to `config/drivetrain/`.
-- **Header owns:** declarations for the shared mux, three module configs, front/back estimator configs, complete follower config, and task-detector config.
-- **Source owns:** board pin bindings, channel weights, controller gains and limits, lost-line behavior, and task-marker debounce values.
-- **Should contain:** immutable wiring, calibration, controller tuning, and behavior thresholds.
-- **Should not contain:** sensor samples, controller history, GPIO operations, task state, or drivetrain commands.
-- **Dependencies:** tape driver, sensing, follower types, and `pin_map.h`.
-- **Consumers:** future production tape-following composition code; the definitions currently compile into the default firmware but are not invoked by `main.cpp`.
+- **Layer:** tape-sensor hardware configuration.
+- **Why they exist:** compose the tape module hardware wiring in one place, parallel to `config/drivetrain/`.
+- **Header owns:** declarations for the shared mux config and the three module configs.
+- **Source owns:** board pin bindings for the mux selector lines and each module's output pin.
+- **Should contain:** immutable wiring only.
+- **Should not contain:** sensor samples, controller state/gains, estimation weights, task state, or drivetrain commands.
+- **Dependencies:** the tape sensor driver's config types and `pin_map.h`.
+- **Consumers:** `main.cpp`, which initializes the physical tape modules for `line_follower.cpp`.
 
 ### `include/config/communication/i2c_bus_config.h` and `src/config/communication/i2c_bus_config.c`
 
@@ -134,7 +134,7 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Source owns:** finite/geometry/singularity validation plus forward and inverse wheel equations.
 - **Should not contain:** motor duty, encoder reads, PI state, timing, GPIO, or application commands.
 - **Dependencies:** only math, `esp_err`, and its own public types.
-- **Consumers:** `drivetrain.c`, `drivetrain_test_main.cpp`, and native kinematics tests.
+- **Consumers:** `drivetrain.c` and native kinematics tests.
 - **Interaction:** the drivetrain facade converts the result from radians per second to linear wheel speed using wheel radius before invoking each wheel PI controller.
 - **Position-test use:** the acceptance harness applies the inverse transform to relative encoder wheel angles to estimate translation and heading change.
 
@@ -175,7 +175,7 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Current public state:** `Drivetrain` has four grouped top-level members—`config`, `devices`, `control`, and `status`—instead of many flat fields. The device and control layouts remain visible so callers can statically allocate a C object. This creates more coupling than a truly opaque handle.
 - **Scope note:** at roughly 500 lines it has several responsibilities, but they are currently cohesive around subsystem coordination. If it grows, private lifecycle, safety, and telemetry helpers could move to internal files without expanding the public API.
 
-## Tape driver, sensing, and control layers
+## Tape driver and line-following layers
 
 ### `include/drivers/tape_sensor/tape_sensor_driver.h` and `src/drivers/tape_sensor/tape_sensor_driver.c`
 
@@ -185,53 +185,15 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Source owns:** active electrical level, mux settling, channel selection, GPIO setup, sampling, and bit packing.
 - **Should not contain:** estimation weights, controller gains, steering decisions, motor commands, or task-marker policy.
 - **Dependencies:** ESP-IDF GPIO, delay, and error APIs.
-- **Consumers:** the tape sensing and control modules use the sampled `TapeSensor` type; no application currently initializes the physical sensors.
+- **Consumers:** `main.cpp` initializes the physical modules; `line_follower.cpp` reads the sampled `TapeSensor` state directly.
 - **Isolation:** selector pins are supplied through `TapeSensorMuxConfig`, so the driver no longer reads board pin macros directly.
 
-### `include/sensing/tape_following/tape_line_estimator.h` and `src/sensing/tape_following/tape_line_estimator.c`
+### `include/control/line_following/line_follower.hpp` and `src/control/line_following/line_follower.cpp`
 
-- **Layer:** hardware-independent sensing.
-- **Why they exist:** calculate a weighted line centroid and retain a useful search direction when the line disappears.
-- **Header owns:** estimator configuration/state plus reset and compute APIs.
-- **Source owns:** active-channel aggregation, centroid calculation, and lost-line fallback.
-- **Should not contain:** GPIO reads, PID state, drivetrain commands, or board-specific weights.
-- **Consumers:** `tape_follower.c` and native tape-following tests.
-
-### `include/sensing/tape_following/tape_task_detection.h` and `src/sensing/tape_following/tape_task_detection.c`
-
-- **Layer:** hardware-independent sensing/event detection.
-- **Why they exist:** debounce broad left-module observations into stable task-marker state and edge events.
-- **Header owns:** detector configuration, runtime state, output events, and lifecycle/update APIs.
-- **Source owns:** active-channel counting, saturated counters, confirmation, and release transitions.
-- **Consumers:** future robot-manager integration and native tape-following tests.
-
-### `include/control/tape_following/tape_following_controller.h` and `src/control/tape_following/tape_following_controller.c`
-
-- **Layer:** pure control mathematics.
-- **Why they exist:** convert estimated lateral tape error into a bounded lateral velocity correction.
-- **Header owns:** PID configuration/history plus reset and update APIs.
-- **Source owns:** finite-input validation, integration, derivative calculation, and output clamping.
-- **Should not contain:** sensor sampling, travel-direction selection, task detection, or drivetrain calls.
-- **Consumers:** `tape_follower.c` and native tape-following tests.
-
-### `include/control/tape_following/tape_follower.h` and `src/control/tape_following/tape_follower.c`
-
-- **Layer:** stateful tape-following behavior.
-- **Why they exist:** select the leading sensor from travel direction, coordinate estimation and feedback, recover briefly after tape loss, and report a lost state.
-- **Header owns:** follower configuration, input/output, status, state, and lifecycle/update APIs.
-- **Source owns:** configuration validation, direction changes, controller resets, timeout handling, and search behavior.
-- **Drivetrain compatibility:** output uses `DrivetrainBodyVelocity` (`vx`, `vy`, `omega`) and can be passed to `drivetrain_set_body_velocity` when `motion_valid` is true.
-- **Should not contain:** GPIO operations, direct drivetrain calls, task detection, or board-specific tuning constants.
-- **Consumers:** future robot-manager integration and native tape-following tests.
-
-### `include/control/tape_following/tape_following_kinematics.h` and `src/control/tape_following/tape_following_kinematics.c`
-
-- **Layer:** pure motion-command mathematics.
-- **Why they exist:** convert longitudinal and lateral tape-following velocity into a smooth angular-velocity request.
-- **Header owns:** heading-mapping configuration and the stateless conversion API.
-- **Source owns:** travel-angle conversion, forward/reverse steering polarity, angular-velocity clamping, and angular-acceleration limiting.
-- **Should not contain:** sensor selection, line estimation, PID correction, tape-loss state, or drivetrain calls.
-- **Consumers:** `tape_follower.c` owns the previous-command history; native tape-following tests verify the mapping directly.
+- **Layer:** stateful line-following behavior and application integration.
+- **Why they exist:** drive `follow_tape()` — a single blocking call that reads the tape sensors directly, applies lateral/heading correction, and commands the drivetrain toward a distance or stop condition.
+- **Consumers:** `movement_action_controller.cpp` for `MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE`.
+- **Note:** this replaced the earlier `control/tape_following/` + `sensing/tape_following/` stack (tape_follower/tape_alignment/tape_following_session/tape_following_kinematics/tape_line_estimator/tape_locating_detection/tape_task_detection), which was deleted along with the `drivetrain-test` diagnostic harness that was its only consumer. `line_follower` does not yet have equivalents for locating-marker detection, alignment modes, or the harness's live PID-tuning surface.
 
 ## Application and harness files
 
@@ -266,14 +228,6 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Consumers:** the `tuning` PlatformIO environment and `tools/deprecated/tuning_dashboard.html` protocol.
 - **Intentional bypass:** it calls drivers directly instead of `Drivetrain` because single-wheel experimentation is its purpose. That would be inappropriate in production application code.
 
-### `src/harnesses/drivetrain_test_main.cpp`
-
-- **Layer:** interactive hardware acceptance application.
-- **Responsibility:** runs timed and encoder-relative translation/rotation tests, duty-limited individual motor/encoder checks, tape-sensor monitoring and timed `0110` lateral centering, runtime PI/ramp/tolerance tuning, and serial telemetry.
-- **Configuration behavior:** starts from test-local copies of `DRIVETRAIN_CONFIG`, allowing RAM-only motor or encoder direction inversion without changing production configuration.
-- **Safety behavior:** provides controlled stop, immediate coast, hardware brake/re-enable, motion timeout, acceleration/deceleration ramps, an 80% individual-test cap, timed tape centering, no-tape motion suppression, and pauses between automatic sequence steps.
-- **Consumers:** the `drivetrain-test` PlatformIO environment.
-
 ## Tests
 
 ### `test/native_stubs/esp_err.h`
@@ -303,14 +257,6 @@ Configuration files bind reusable types to this board. Their source objects are 
 - **Should not test:** the not-yet-existing encoder-to-body-delta path.
 
 ## Developer tools
-
-### `tools/drivetrain_test_dashboard.html`
-
-- **Responsibility:** provides a local point-and-click controller for every command exposed by `drivetrain_test_main.cpp`.
-- **Transport:** uses the browser Web Serial API at 115200 baud through the CH340K USB-to-UART port; it has no Wi-Fi or server dependency.
-- **Safety:** exposes prominent stop controls, preserves the harness's input limits, and displays all firmware responses in a serial log.
-- **Telemetry:** plots rolling target/measured wheel velocity and applied duty for all four wheels, displays all three four-channel tape patterns, and reports tape detection, centering error, lateral correction, and exact `0110` matches.
-- **Consumers:** operators running the `drivetrain-test` PlatformIO environment in desktop Chrome or Edge.
 
 ### `tools/deprecated/drive_dashboard.html` (deprecated)
 

@@ -25,11 +25,9 @@ struct LineFollowerContext {
 // Runs tape-following until `stop_type` is satisfied or `timeout_s` elapses.
 // Blocks the calling task for the duration of the maneuver. Returns true if
 // the stop condition was reached, false on timeout, lost tape, or error.
-//
-// For DISTANCE and LATERAL_ONE/TWO stops, any overshoot past the true stop
-// point (the requested distance, or the tape/gap center) is corrected
-// internally with a low-speed reverse crawl before returning -- callers
-// don't need to account for it.
+// The approach ramp (see kApproachRampDistanceM) brings speed down before a
+// known DISTANCE/LATERAL stop point, but there is no post-stop overshoot
+// correction -- callers should not assume the true stop point is hit exactly.
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                   StopCondition stop_type, float stop_value, float timeout_s);
 

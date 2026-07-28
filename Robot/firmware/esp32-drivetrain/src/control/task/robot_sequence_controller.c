@@ -12,7 +12,7 @@ static const uint32_t kActionTimeoutMs = 15000;
 
 // Placeholder scan-course values. Replace these after measuring the tape
 // sections and camera-to-drivetrain steering response on the real robot.
-#define PLACEHOLDER_SCAN_DISTANCE_M 1.0f
+#define PLACEHOLDER_SCAN_DISTANCE_M 2.0f
 #define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
 
 typedef enum {

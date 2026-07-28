@@ -130,15 +130,21 @@ bool arm_action_dispatcher_update(
     service_command(dispatcher, now_ms);
 
     if (dispatcher->readiness_pending) {
-        if (now_ms - dispatcher->last_ready_status_ms >=
-            kReadyRepeatPeriodMs) {
+        // Only reserve the shared UART on the specific tick a status packet
+        // is actually sent, not for the whole (potentially indefinite, until
+        // the drivetrain issues its first arm command) readiness-pending
+        // window -- otherwise odometry sending in main.cpp's loop() stays
+        // blocked the entire time, since it also checks this return value.
+        const bool sending_this_tick = now_ms - dispatcher->last_ready_status_ms >=
+                                        kReadyRepeatPeriodMs;
+        if (sending_this_tick) {
             dispatcher->last_ready_status_ms = now_ms;
             send_status(
                 dispatcher,
                 STATUS_ACTION_COMPLETE,
                 STATUS_DETAIL_NONE);
         }
-        return true;
+        return sending_this_tick;
     }
 
     // Update Tower

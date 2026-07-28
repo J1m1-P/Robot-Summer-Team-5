@@ -94,7 +94,12 @@ void test_integrates_known_displacement() {
     TEST_ASSERT_EQUAL(ESP_OK, drivetrain_odometry_source_update(
         source, config, end_counts, odometry));
 
-    assert_pose(displacement_m_rad.vx * 1000.0f, displacement_m_rad.vy * 1000.0f,
+    // Lateral (y) is scaled by the measured encoder-vs-optical slip
+    // correction (see LATERAL_ENCODER_SCALE in drivetrain_odometry_source.c);
+    // forward (x) is not, so only y needs the extra factor here.
+    constexpr float kLateralEncoderScale = 1.0f / 1.308f;
+    assert_pose(displacement_m_rad.vx * 1000.0f,
+                displacement_m_rad.vy * 1000.0f * kLateralEncoderScale,
                 displacement_m_rad.omega, odometry.pose);
 }
 

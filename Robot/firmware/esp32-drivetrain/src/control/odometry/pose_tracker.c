@@ -25,6 +25,7 @@ void pose_tracker_reset(PoseTracker *tracker)
     drivetrain_odometry_reset(&tracker->odometry);
     drivetrain_odometry_source_reset(&tracker->encoder_source);
     pmw3610_odometry_source_reset(&tracker->optical_source);
+    tracker->optical_anchor_pose = (DrivetrainPose){0};
 }
 
 esp_err_t pose_tracker_update(PoseTracker *tracker,
@@ -51,12 +52,23 @@ esp_err_t pose_tracker_update(PoseTracker *tracker,
     DrivetrainOdometryDelta optical_delta = {0};
     if (pmw3610_odometry_source_update(&tracker->optical_source, optical_packet,
                                        &optical_delta)) {
-        return drivetrain_odometry_update(&tracker->odometry, &optical_delta, true);
+        // Compose from the last-known-good optical anchor, not from
+        // tracker->odometry.pose -- that may have drifted via encoder
+        // fallback since the last optical fix, and this reading overrides
+        // that drift rather than adding on top of it.
+        DrivetrainOdometry anchored = {.pose = tracker->optical_anchor_pose};
+        const esp_err_t compose_error =
+            drivetrain_odometry_update(&anchored, &optical_delta, true);
+        if (compose_error != ESP_OK) return compose_error;
+        tracker->optical_anchor_pose = anchored.pose;
+        ++tracker->optical_update_count;
+        return drivetrain_odometry_set_pose(&tracker->odometry, &anchored.pose);
     }
 
     if (!has_encoder_delta) {
         return ESP_OK;
     }
+    ++tracker->encoder_update_count;
     return drivetrain_odometry_update(&tracker->odometry, &encoder_delta, encoder_valid);
 }
 

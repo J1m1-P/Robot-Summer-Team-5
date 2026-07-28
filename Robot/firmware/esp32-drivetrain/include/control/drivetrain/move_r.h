@@ -9,14 +9,14 @@
 #include "control/drivetrain/motion_estimate_adapter.h"
 #include "control/drivetrain/rotational_settle.h"
 #include "control/drivetrain/speed_profile.h"
-#include "control/tape_following/tape_following_controller.h"
+#include "control/pid/bounded_pid.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
-    TapeFollowingControllerConfig heading_controller;
+    BoundedPidConfig heading_controller;
     SpeedProfileConfig speed_profile;
     float heading_tolerance_rad;
     float max_alpha_rad_s2;
@@ -33,7 +33,7 @@ typedef enum {
 
 typedef struct {
     const MoveRConfig *config;
-    TapeFollowingControllerState heading_state;
+    BoundedPidState heading_state;
     SpeedProfile profile;
     float target_heading_rad;
     MoveRStatus status;

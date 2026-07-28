@@ -1,6 +1,8 @@
 /* Declares a fused wheel-encoder + optical world-frame pose tracker. */
 #pragma once
 
+#include <stdint.h>
+
 #include "esp_err.h"
 
 #include "control/drivetrain/drivetrain_odometry_source.h"
@@ -22,12 +24,26 @@ typedef struct {
  * pose: prefers a fresh optical sample each cycle, falling back to encoder
  * dead reckoning when none is available. Never touches hardware directly --
  * the caller reads wheel counts and the latest optical packet and passes
- * them in each cycle, matching every other pure control module here. */
+ * them in each cycle, matching every other pure control module here.
+ *
+ * Each optical sample is ground truth, not just an increment: optical_source
+ * only reports the body-frame delta since the *previous* optical sample, so
+ * composing it onto whatever the running pose currently is would leave any
+ * encoder-fallback drift accrued in between permanently baked in. Instead
+ * optical_anchor_pose tracks the pose as of the last optical fix; a fresh
+ * optical delta composes from that anchor and overwrites (not adds to) the
+ * running pose, discarding any intervening encoder drift outright. */
 typedef struct {
     DrivetrainOdometry odometry;
     DrivetrainOdometrySource encoder_source;
     Pmw3610OdometrySource optical_source;
     DrivetrainOdometrySourceConfig encoder_config;
+    DrivetrainPose optical_anchor_pose;
+    // Diagnostic only: counts which branch pose_tracker_update() actually
+    // took each cycle, so a caller can tell "optical is arriving but not
+    // being used" apart from "optical genuinely isn't arriving often".
+    uint32_t optical_update_count;
+    uint32_t encoder_update_count;
 } PoseTracker;
 
 // Zero-initialize `tracker` before calling (PoseTracker tracker = {0};).

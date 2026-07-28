@@ -6,7 +6,7 @@
 #include "esp_err.h"
 
 #include "control/drivetrain/x_drive_kinematics.h"
-#include "control/tape_following/tape_following_controller.h"
+#include "control/pid/bounded_pid.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,15 +14,15 @@ extern "C" {
 
 /* Combines the shared PID gains with a bounded control-loop period.
  *
- * This is deliberately the same generic bounded PID used by tape following
- * (control/tape_following/tape_following_controller.h) -- off-tape motion
- * has no line-following-specific behavior of its own, only a different error
- * source (see off_tape_motion_update's `error` input) and no heading
- * coupling (correction is applied laterally; MoveP's terminal heading phase
- * layers rotation on separately, outside this module).
+ * This is deliberately the same generic bounded PID used by line following
+ * (control/pid/bounded_pid.h) -- off-tape motion has no line-following-
+ * specific behavior of its own, only a different error source (see
+ * off_tape_motion_update's `error` input) and no heading coupling
+ * (correction is applied laterally; MoveP's terminal heading phase layers
+ * rotation on separately, outside this module).
  */
 typedef struct {
-    TapeFollowingControllerConfig controller;
+    BoundedPidConfig controller;
 
     /* Upper bound used for PID integration and differentiation after loop stalls. */
     float controller_dt_max_s;
@@ -48,7 +48,7 @@ typedef struct {
 /* Retains PID integral/derivative history for one behavior instance. */
 typedef struct {
     const OffTapeMotionConfig *config;
-    TapeFollowingControllerState controller_state;
+    BoundedPidState controller_state;
 } OffTapeMotion;
 
 // Rejects configurations that could produce undefined or unsafe behavior.

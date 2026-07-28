@@ -37,20 +37,17 @@ esp32-drivetrain/
 |   |   |   |-- x_drive_kinematics.h
 |   |   |   |-- wheel_velocity_controller.h
 |   |   |   `-- odometry.h
-|   |   `-- tape_following/
-|   |       |-- tape_follower.h
-|   |       `-- tape_following_controller.h
-|   |-- drivers/
-|   |   |-- motor/
-|   |   |   `-- motor_driver.h
-|   |   |-- encoder/
-|   |   |   `-- encoder_driver.h
-|   |   `-- tape_sensor/
-|   |       `-- tape_sensor_driver.h
-|   `-- sensing/
-|       `-- tape_following/
-|           |-- tape_line_estimator.h
-|           `-- tape_task_detection.h
+|   |   |-- pid/
+|   |   |   `-- bounded_pid.h
+|   |   `-- line_following/
+|   |       `-- line_follower.hpp
+|   `-- drivers/
+|       |-- motor/
+|       |   `-- motor_driver.h
+|       |-- encoder/
+|       |   `-- encoder_driver.h
+|       `-- tape_sensor/
+|           `-- tape_sensor_driver.h
 |
 |-- src/                             Implementations and applications
 |   |-- main.cpp
@@ -70,9 +67,10 @@ esp32-drivetrain/
 |   |   |   |-- x_drive_kinematics.c
 |   |   |   |-- wheel_velocity_controller.c
 |   |   |   `-- odometry.c
-|   |   `-- tape_following/
-|   |       |-- tape_follower.c
-|   |       `-- tape_following_controller.c
+|   |   |-- pid/
+|   |   |   `-- bounded_pid.c
+|   |   `-- line_following/
+|   |       `-- line_follower.cpp
 |   |-- drivers/
 |   |   |-- motor/
 |   |   |   `-- motor_driver.c
@@ -80,13 +78,8 @@ esp32-drivetrain/
 |   |   |   `-- encoder_driver.c
 |   |   `-- tape_sensor/
 |   |       `-- tape_sensor_driver.c
-|   |-- sensing/
-|   |   `-- tape_following/
-|   |       |-- tape_line_estimator.c
-|   |       `-- tape_task_detection.c
 |   `-- harnesses/
 |       |-- drive_main.cpp
-|       |-- drivetrain_test_main.cpp
 |       `-- tuning_main.cpp
 |
 |-- test/                            Native PlatformIO unit tests
@@ -98,13 +91,10 @@ esp32-drivetrain/
 |   |   `-- test_x_drive_kinematics.cpp
 |   |-- test_wheel_velocity_controller/
 |   |   `-- test_wheel_velocity_controller.cpp
-|   |-- test_drivetrain_odometry/
-|   |   `-- test_drivetrain_odometry.cpp
-|   `-- test_tape_following/
-|       `-- test_tape_following.cpp
+|   `-- test_drivetrain_odometry/
+|       `-- test_drivetrain_odometry.cpp
 |
 |-- tools/                           Developer-side browser tools
-|   |-- drivetrain_test_dashboard.html
 |   |-- calibration_dashboard.html
 |   |-- jog_program_composer.html
 |   `-- deprecated/                  Superseded tools, kept for reference
@@ -159,14 +149,14 @@ Contains interfaces that more than one translation unit may include. Its subfold
 
 These files separate reusable algorithms and drivers from one robot's physical wiring and tuning. Headers expose named immutable configuration objects; sources construct those objects from pin assignments, dimensions, peripheral IDs, and calibration values. Changing a connector or gain should normally affect configuration rather than driver logic.
 
-`config/drivetrain/` groups motor, encoder, and complete drivetrain settings. `config/tape_following/` groups tape hardware, estimation, controller, and task-detection settings. `config/communication/` groups the board settings consumed by shared I2C and UART abstractions. Board-wide `pin_map.h` remains at the config root because several subsystems use it.
+`config/drivetrain/` groups motor, encoder, and complete drivetrain settings. `config/tape_following/` groups tape module hardware wiring. `config/communication/` groups the board settings consumed by shared I2C and UART abstractions. Board-wide `pin_map.h` remains at the config root because several subsystems use it.
 
 Important files include:
 
 - `pin_map.h`: the single board-level GPIO map.
 - `motor_config.*` and `encoder_config.*`: physical wheel-device assignments.
 - `drivetrain_config.*`: composition root for drivetrain hardware, geometry, PI gains, and safety limits.
-- `tape_following/tape_following_config.*`: tape module pins, channel-position weights, controller limits, and task-detection debounce.
+- `tape_following/tape_following_config.*`: tape module mux and per-module pin assignments.
 - `i2c_bus_config.*` and `uart_link_config.*`: board-specific settings for shared `robot-common` communication abstractions.
 
 ### `include/drivers/` and `src/drivers/`
@@ -175,7 +165,7 @@ Drivers own direct hardware interaction. Each hardware family has a subfolder so
 
 ### `include/control/` and `src/control/`
 
-This is the motion-control layer. Motion modules are grouped by subsystem under `control/drivetrain/` and `control/tape_following/`:
+This is the motion-control layer. Motion modules are grouped by subsystem under `control/drivetrain/`, `control/pid/`, and `control/line_following/`:
 
 - `x_drive_kinematics.*` is pure geometry: it converts between body velocity and four wheel angular velocities in both directions.
 - `wheel_velocity_controller.*` is pure closed-loop math for one wheel.
@@ -184,19 +174,15 @@ This is the motion-control layer. Motion modules are grouped by subsystem under 
 
 The facade belongs above the individual drivers because it coordinates them as one subsystem. Kinematics, PI, and odometry remain separate because they are reusable, testable mathematical responsibilities.
 
-`control/tape_following/` contains the bounded tape correction controller and the stateful follower that chooses the leading sensor, handles line loss, and emits a `DrivetrainBodyVelocity` compatible with the drivetrain facade.
-
-### `include/sensing/` and `src/sensing/`
-
-`sensing/tape_following/` contains hardware-independent interpretation of sampled tape inputs. `tape_line_estimator.*` computes weighted line position and remembers a lost-line direction. `tape_task_detection.*` debounces broad left-module observations into task-marker events.
+`control/pid/bounded_pid.*` is a generic bounded PID shared by `off_tape_motion.*` (MoveL/MoveP/MoveC path-error correction) and the heading control in `move_c.*`/`move_p.*`/`move_r.*`. `control/line_following/line_follower.*` reads the tape sensors directly and drives `follow_tape()`, the stateful line-following behavior that emits a `DrivetrainBodyVelocity` compatible with the drivetrain facade. It replaced an earlier `control/tape_following/` + `sensing/tape_following/` stack, deleted once its only consumer (the `drivetrain-test` diagnostic harness) was retired.
 
 ### `src/main.cpp`
 
-PlatformIO's default application entry point. It is currently a two-motor bench test, not a complete robot application. Entry points belong at the top of `src/` because they compose modules rather than implement a reusable layer.
+PlatformIO's default application entry point. It starts the production robot task sequence and line-following-capable movement actions.
 
 ### `src/harnesses/`
 
-Contains alternative C++ application entry points selected by PlatformIO source filters. `drive_main.cpp` exercises the complete velocity drivetrain with serial/WebSocket commands. `drivetrain_test_main.cpp` provides timed and encoder-relative acceptance tests, runtime control tuning, and complete-robot movement. `tuning_main.cpp` accesses one motor/encoder control loop at a time for gain identification. Keeping these out of the normal source root prevents multiple `setup()`/`loop()` definitions and keeps debug-only networking or tuning logic out of production firmware.
+Contains alternative C++ application entry points selected by PlatformIO source filters. `drive_main.cpp` exercises the complete velocity drivetrain with serial/WebSocket commands. `tuning_main.cpp` accesses one motor/encoder control loop at a time for gain identification. Keeping these out of the normal source root prevents multiple `setup()`/`loop()` definitions and keeps debug-only networking or tuning logic out of production firmware.
 
 ### `test/`
 
@@ -204,7 +190,7 @@ Contains native unit tests arranged one suite per folder. `native_stubs/` replac
 
 ### `tools/`
 
-Contains host-side HTML dashboards rather than embedded code. `drivetrain_test_dashboard.html` is the USB-only button interface for the drivetrain acceptance harness; `calibration_dashboard.html` is the Web Serial trial runner for the calibration harness; and `calibration_helper.html` computes calibration factors from recorded measurements. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
+Contains host-side HTML dashboards rather than embedded code. `calibration_dashboard.html` is the Web Serial trial runner for the calibration harness; `calibration_helper.html` computes calibration factors from recorded measurements. They belong outside `src/` because PlatformIO must not compile them, and because their runtime is a browser communicating with a harness.
 
 ### `lib/`
 
