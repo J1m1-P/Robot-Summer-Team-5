@@ -15,22 +15,34 @@ ActionStatusDetail arm_action_status_detail(CommandOpcode command) {
     switch (command) {
         case CMD_TOWER_HOME:
             return STATUS_DETAIL_TOWER_HOME;
-        case CMD_TOWER_Z_UP:
-            return STATUS_DETAIL_TOWER_Z_RAISED;
-        case CMD_TOWER_Z_DOWN:
-            return STATUS_DETAIL_TOWER_Z_LOWERED;
-        case CMD_TOWER_X_LEFT:
-            return STATUS_DETAIL_TOWER_X_LEFT;
-        case CMD_TOWER_X_RIGHT:
-            return STATUS_DETAIL_TOWER_X_RIGHT;
+        case CMD_TOWER_Z:
+            return STATUS_DETAIL_TOWER_Z_MOVED;
+        case CMD_TOWER_X:
+            return STATUS_DETAIL_TOWER_X_MOVED;
         case CMD_TOWER_ROTATE_VERTICAL:
             return STATUS_DETAIL_TOWER_VERTICAL;
         case CMD_TOWER_ROTATE_HORIZONTAL:
             return STATUS_DETAIL_TOWER_HORIZONTAL;
-        case CMD_TOWER_OPEN_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_OPEN;
-        case CMD_TOWER_CLOSE_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_OPEN;
+        case CMD_TOWER_CLOSE_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_CLOSED;
+        case CMD_TOWER_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_CLOSED;
+        case CMD_TOWER_EXTEND_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_EXTENDED;
+        case CMD_TOWER_RETRACT_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_RETRACTED;
         case CMD_HABITAT_HOME:
             return STATUS_DETAIL_HABITAT_HOME;
         case CMD_HABITAT_Z_UP:

@@ -26,6 +26,7 @@ typedef enum {
     STATUS_ROUTINE_DONE,    // the ESP ran out of sweeps/routine with targets still unfound
     STATUS_FAULT,           // something went wrong; `detail` holds a fault code
     STATUS_ACTION_COMPLETE, // arm ready when detail is NONE; otherwise an action completed
+    STATUS_LOCATOR_CONTACT, // the extended Tower locator microswitch was pressed
     STATUS_MAX
 } StatusCode;
 
@@ -52,6 +53,18 @@ typedef enum {
     STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED,
+    STATUS_DETAIL_TOWER_Z_MOVED,
+    STATUS_DETAIL_TOWER_X_MOVED,
+    STATUS_DETAIL_TOWER_ALL_CLAWS_OPEN,
+    STATUS_DETAIL_TOWER_ALL_CLAWS_CLOSED,
+    STATUS_DETAIL_TOWER_LEFT_CLAW_OPEN,
+    STATUS_DETAIL_TOWER_LEFT_CLAW_CLOSED,
+    STATUS_DETAIL_TOWER_MIDDLE_CLAW_OPEN,
+    STATUS_DETAIL_TOWER_MIDDLE_CLAW_CLOSED,
+    STATUS_DETAIL_TOWER_RIGHT_CLAW_OPEN,
+    STATUS_DETAIL_TOWER_RIGHT_CLAW_CLOSED,
+    STATUS_DETAIL_TOWER_LOCATOR_EXTENDED,
+    STATUS_DETAIL_TOWER_LOCATOR_RETRACTED,
 } ActionStatusDetail;
 
 // Maps any arm command to its command-specific completion detail.

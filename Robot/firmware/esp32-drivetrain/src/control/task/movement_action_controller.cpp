@@ -7,13 +7,21 @@
 
 #include "control/line_following/line_follower.hpp"
 #ifdef ARDUINO
+#include <Arduino.h>
+#include "esp_timer.h"
 #include "control/motion/translator.hpp"
+#include <robot_common/fixed_rate_gate.h>
 #endif
 
 namespace {
 
 constexpr float kTapeFollowSpeedMps = 0.25f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
+#ifdef ARDUINO
+constexpr float kLocatorApproachSpeedMps = -0.10f;
+constexpr float kLocatorApproachTimeoutS = 15.0f;
+constexpr int64_t kLocatorControlPeriodUs = 5000;
+#endif
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 #ifdef ARDUINO
@@ -47,6 +55,14 @@ extern "C" void movement_action_controller_set_precision_move_context(
 #endif
 }
 
+extern "C" void movement_action_controller_notify_locator_contact(
+    MovementActionController *controller) {
+    if (controller != nullptr &&
+        controller->action == MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR) {
+        controller->locator_contact_detected = true;
+    }
+}
+
 #ifdef ARDUINO
 bool precision_action(float dx_body, float dy_body, float dhead_rad) {
     if (g_precision_move_ctx == nullptr ||
@@ -60,6 +76,56 @@ bool precision_action(float dx_body, float dy_body, float dhead_rad) {
         .body_velocity = {.vx = 0.15f, .vy = 0.0f, .omega = 0.0f},
     };
     return precision_move(g_precision_move_ctx, &target, 15.0f) == ESP_OK;
+}
+
+bool drive_backward_until_locator(MovementActionController *controller) {
+    if (g_precision_move_ctx == nullptr ||
+        g_precision_move_ctx->drivetrain == nullptr ||
+        g_precision_move_ctx->pose_service == nullptr) {
+        return false;
+    }
+
+    const int64_t start_us = esp_timer_get_time();
+    FixedRateGate gate = {kLocatorControlPeriodUs, start_us};
+    auto stop = [controller]() {
+        drivetrain_stop(g_precision_move_ctx->drivetrain);
+        return controller->locator_contact_detected;
+    };
+
+    while (true) {
+        const int64_t now_us = esp_timer_get_time();
+        if (controller->locator_contact_detected) return stop();
+        if (static_cast<float>(now_us - start_us) / 1.0e6f >=
+            kLocatorApproachTimeoutS) {
+            return stop();
+        }
+
+        int64_t unused_dt_us = 0;
+        if (!gate.Ready(now_us, &unused_dt_us)) {
+            delay(1);
+            continue;
+        }
+
+        // PoseService drains arm UART and delivers the microswitch event.
+        if (pose_service_update(
+                g_precision_move_ctx->pose_service,
+                static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
+            controller->locator_contact_detected) {
+            return stop();
+        }
+
+        esp_err_t error = drivetrain_set_advanced_body_velocity(
+            g_precision_move_ctx->drivetrain,
+            kLocatorApproachSpeedMps,
+            0.0f,
+            0.0f);
+        if (error == ESP_OK) {
+            error = drivetrain_update(
+                g_precision_move_ctx->drivetrain,
+                now_us);
+        }
+        if (error != ESP_OK) return stop();
+    }
 }
 #endif
 
@@ -189,8 +255,11 @@ extern "C" bool movement_action_controller_update(
             break;
 
         case MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR:
-            // Top ESP needs to tell bottom ESP when the locator is detected
+#ifdef ARDUINO
+            return drive_backward_until_locator(controller);
+#else
             printf("# PLACEHOLDER: Go backward until locator\n");
+#endif
             break;
 
         default:

@@ -34,6 +34,7 @@ typedef enum {
 typedef struct {
     MovementAction action;
     float action_value;
+    bool locator_contact_detected;
 } MovementActionController;
 
 // Prepares one action.
@@ -60,6 +61,10 @@ void movement_action_controller_set_line_follower_context(
 // Borrows the single global drivetrain/pose-service context.
 void movement_action_controller_set_precision_move_context(
     PrecisionMoveContext *ctx);
+
+// Called when the arm ESP reports that the locator microswitch was pressed.
+void movement_action_controller_notify_locator_contact(
+    MovementActionController *controller);
 
 #ifdef __cplusplus
 }

@@ -140,22 +140,34 @@ extern "C" ActionStatusDetail arm_action_status_detail(
     switch (command) {
         case CMD_TOWER_HOME:
             return STATUS_DETAIL_TOWER_HOME;
-        case CMD_TOWER_Z_UP:
-            return STATUS_DETAIL_TOWER_Z_RAISED;
-        case CMD_TOWER_Z_DOWN:
-            return STATUS_DETAIL_TOWER_Z_LOWERED;
-        case CMD_TOWER_X_LEFT:
-            return STATUS_DETAIL_TOWER_X_LEFT;
-        case CMD_TOWER_X_RIGHT:
-            return STATUS_DETAIL_TOWER_X_RIGHT;
+        case CMD_TOWER_Z:
+            return STATUS_DETAIL_TOWER_Z_MOVED;
+        case CMD_TOWER_X:
+            return STATUS_DETAIL_TOWER_X_MOVED;
         case CMD_TOWER_ROTATE_VERTICAL:
             return STATUS_DETAIL_TOWER_VERTICAL;
         case CMD_TOWER_ROTATE_HORIZONTAL:
             return STATUS_DETAIL_TOWER_HORIZONTAL;
-        case CMD_TOWER_OPEN_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_OPEN;
-        case CMD_TOWER_CLOSE_CLAW:
-            return STATUS_DETAIL_TOWER_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_OPEN;
+        case CMD_TOWER_CLOSE_ALL_CLAWS:
+            return STATUS_DETAIL_TOWER_ALL_CLAWS_CLOSED;
+        case CMD_TOWER_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_TOWER_LEFT_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_MIDDLE_CLAW:
+            return STATUS_DETAIL_TOWER_MIDDLE_CLAW_CLOSED;
+        case CMD_TOWER_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_OPEN;
+        case CMD_TOWER_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_TOWER_RIGHT_CLAW_CLOSED;
+        case CMD_TOWER_EXTEND_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_EXTENDED;
+        case CMD_TOWER_RETRACT_LOCATOR:
+            return STATUS_DETAIL_TOWER_LOCATOR_RETRACTED;
         case CMD_HABITAT_HOME:
             return STATUS_DETAIL_HABITAT_HOME;
         case CMD_HABITAT_Z_UP:
@@ -199,7 +211,7 @@ void setUp() {
 
 void tearDown() {}
 
-void test_sequence_waits_for_arm_then_runs_square() {
+void test_sequence_waits_for_arm_then_starts_first_action() {
     UartLink arm_uart = {};
     RobotSequenceController controller = {};
 
@@ -217,28 +229,16 @@ void test_sequence_waits_for_arm_then_runs_square() {
     deliver_frame(&controller, 101);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
     TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
-    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
+    TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_TOWER_RETRACT_LOCATOR, sent_commands[0]);
 
-    for (size_t step = 0; step < 8; ++step) {
-        const MovementActionController *movement =
-            &controller.movement_action_controller;
-        if (step % 2 == 0) {
-            TEST_ASSERT_EQUAL(
-                MOVEMENT_ACTION_GO_FORWARD, movement->action);
-            TEST_ASSERT_FLOAT_WITHIN(
-                0.001f, 0.25f, movement->action_value);
-        } else {
-            TEST_ASSERT_EQUAL(MOVEMENT_ACTION_ROTATE, movement->action);
-            TEST_ASSERT_FLOAT_WITHIN(
-                0.001f, 90.0f, movement->action_value);
-        }
-        robot_sequence_controller_update(
-            &controller, static_cast<uint32_t>(102 + step));
-    }
-
-    TEST_ASSERT_EQUAL_UINT32(8, controller.current_step);
-    TEST_ASSERT_FALSE(controller.running);
-    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
+    queue_status(
+        STATUS_ACTION_COMPLETE,
+        STATUS_DETAIL_TOWER_LOCATOR_RETRACTED);
+    deliver_frame(&controller, 102);
+    TEST_ASSERT_EQUAL_UINT32(1, controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(2, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_TOWER_OPEN_ALL_CLAWS, sent_commands[1]);
 }
 
 void test_non_odometry_frames_do_not_advance_movement_steps() {
@@ -259,6 +259,11 @@ void test_non_odometry_frames_do_not_advance_movement_steps() {
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
     deliver_frame(&controller, 102);
     TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+
+    queue_status(STATUS_LOCATOR_CONTACT, STATUS_DETAIL_NONE);
+    deliver_frame(&controller, 103);
+    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    TEST_ASSERT_TRUE(controller.locator_contact_pending);
 }
 
 void test_arm_fault_stops_sequence() {
@@ -283,7 +288,9 @@ void test_movement_action_rejects_invalid_values() {
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
-            &controller, MOVEMENT_ACTION_GO_FORWARD, -0.1f));
+            &controller,
+            MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
+            -0.1f));
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
@@ -292,6 +299,29 @@ void test_movement_action_rejects_invalid_values() {
         ESP_OK,
         movement_action_controller_init(
             &controller, MOVEMENT_ACTION_ROTATE, -90.0f));
+}
+
+void test_locator_contact_notifies_only_locator_approach() {
+    MovementActionController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR,
+            0.0f));
+    TEST_ASSERT_FALSE(controller.locator_contact_detected);
+
+    movement_action_controller_notify_locator_contact(&controller);
+    TEST_ASSERT_TRUE(controller.locator_contact_detected);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE,
+            90.0f));
+    movement_action_controller_notify_locator_contact(&controller);
+    TEST_ASSERT_FALSE(controller.locator_contact_detected);
 }
 
 void test_tape_distance_actions_route_to_matching_sensor_direction() {
@@ -325,7 +355,7 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
             static_cast<int>(StopCondition::DISTANCE),
             static_cast<int>(last_stop_condition));
         TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.75f, last_stop_value);
-        TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.0f, last_follow_timeout_s);
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.0f, last_follow_timeout_s);
     }
 }
 
@@ -359,10 +389,11 @@ void test_habitat_actions_have_unique_completion_details() {
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_sequence_waits_for_arm_then_runs_square);
+    RUN_TEST(test_sequence_waits_for_arm_then_starts_first_action);
     RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_movement_action_rejects_invalid_values);
+    RUN_TEST(test_locator_contact_notifies_only_locator_approach);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();

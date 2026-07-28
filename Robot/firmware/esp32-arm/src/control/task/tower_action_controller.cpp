@@ -22,6 +22,15 @@ ServoDriver tower_rotate_servo = {};
 ServoDriver tower_left_servo = {};
 ServoDriver tower_middle_servo = {};
 ServoDriver tower_right_servo = {};
+volatile bool locator_contact_pending = false;
+volatile bool locator_contact_armed = false;
+
+// One-shot interrupt: the first edge disarms the switch, so bounce is ignored.
+void IRAM_ATTR locator_switch_interrupt() {
+    if (!locator_contact_armed) return;
+    locator_contact_armed = false;
+    locator_contact_pending = true;
+}
 
 // Signed subtraction keeps this comparison valid across millis() wraparound.
 static bool deadline_reached(uint32_t now, uint32_t deadline) {
@@ -219,11 +228,25 @@ static void start_tower_action(
             break;
 
         case CMD_TOWER_EXTEND_LOCATOR:
+            controller->action_is_timed = true;
+            controller->action_complete_ms = millis();
+            controller->locator_extended = true;
+            controller->locator_contact_reported = false;
+            noInterrupts();
+            locator_contact_pending = digitalRead(PIN_LOC_SWITCH) == LOW;
+            locator_contact_armed = !locator_contact_pending;
+            interrupts();
             digitalWrite(PIN_LOC_EN, HIGH);
             start_message = "# Tower extending locator";
             break;
 
         case CMD_TOWER_RETRACT_LOCATOR:
+            controller->action_is_timed = true;
+            controller->action_complete_ms = millis();
+            controller->locator_extended = false;
+            controller->locator_contact_reported = false;
+            locator_contact_armed = false;
+            locator_contact_pending = false;
             digitalWrite(PIN_LOC_EN, LOW);
             start_message = "# Tower retracting locator";
             break;
@@ -254,6 +277,12 @@ void tower_action_controller_init(
     controller->tower_x_stepper = tower_x_stepper;
     controller->tower_z_stepper = tower_z_stepper;
 
+    pinMode(PIN_LOC_SWITCH, INPUT_PULLUP);
+    attachInterrupt(
+        digitalPinToInterrupt(PIN_LOC_SWITCH),
+        locator_switch_interrupt,
+        FALLING);
+
     ESP_ERROR_CHECK(initialize_tower_motors(
         controller->tower_x_stepper,
         controller->tower_z_stepper));
@@ -261,7 +290,7 @@ void tower_action_controller_init(
 
 bool tower_action_controller_accepts(CommandOpcode command) {
     return command >= CMD_TOWER_HOME &&
-        command <= CMD_TOWER_CLOSE_CLAW;
+        command <= CMD_TOWER_RETRACT_LOCATOR;
 }
 
 bool tower_action_controller_is_busy(
@@ -300,6 +329,19 @@ bool tower_action_controller_update(
             Serial.println("# Tower action complete");
             return true;
         }
+    }
+
+    // Report contact once per extension. The ISR only raises the flag.
+    if (locator_contact_pending && controller->locator_extended &&
+        !controller->locator_contact_reported) {
+        locator_contact_pending = false;
+        controller->locator_contact_reported = true;
+        send_status(
+            controller->drivetrain_uart,
+            STATUS_LOCATOR_CONTACT,
+            STATUS_DETAIL_NONE);
+        Serial.println("# Tower locator contacted base");
+        return true;
     }
     return false;
 }

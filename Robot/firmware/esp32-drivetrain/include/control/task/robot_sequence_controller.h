@@ -23,6 +23,7 @@ typedef struct {
     uint32_t step_deadline_ms;
     bool running;
     bool waiting_for_arm_ready;
+    bool locator_contact_pending;
     float scan_rotation_degrees;
     uint8_t last_pi_request_id;
 } RobotSequenceController;

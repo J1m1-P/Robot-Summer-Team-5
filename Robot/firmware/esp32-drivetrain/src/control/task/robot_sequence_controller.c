@@ -226,6 +226,13 @@ void robot_sequence_controller_handle_frame(
             return;
         }
 
+        if (status.code == STATUS_LOCATOR_CONTACT) {
+            controller->locator_contact_pending = true;
+            movement_action_controller_notify_locator_contact(
+                &controller->movement_action_controller);
+            return;
+        }
+
         if (controller->waiting_for_arm_ready) {
             if (status.code != STATUS_ACTION_COMPLETE ||
                 status.detail != STATUS_DETAIL_NONE) {
@@ -278,7 +285,18 @@ static esp_err_t start_robot_step(
             &controller->movement_action_controller,
             step->action.movement,
             action_value);
+        if (error == ESP_OK &&
+            step->action.movement ==
+                MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR &&
+            controller->locator_contact_pending) {
+            movement_action_controller_notify_locator_contact(
+                &controller->movement_action_controller);
+            controller->locator_contact_pending = false;
+        }
     } else {
+        if (step->action.arm == CMD_TOWER_EXTEND_LOCATOR) {
+            controller->locator_contact_pending = false;
+        }
         const CommandPacket command = {
             .opcode = step->action.arm,
             .value = step->action_value,
