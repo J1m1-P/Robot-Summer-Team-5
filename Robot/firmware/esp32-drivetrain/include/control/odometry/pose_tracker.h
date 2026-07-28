@@ -50,7 +50,7 @@ typedef struct {
 esp_err_t pose_tracker_init(PoseTracker *tracker,
                             const DrivetrainOdometrySourceConfig *encoder_config);
 
-// Clears cumulative pose and both sources' tracked baselines.
+// Clears cumulative pose, both sources' tracked baselines, and counters.
 void pose_tracker_reset(PoseTracker *tracker);
 
 /* Runs one fusion cycle. `wheel_counts` must be this cycle's accumulated

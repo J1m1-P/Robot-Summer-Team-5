@@ -9,6 +9,7 @@
 // its contents. Lets this header, and everything that includes it
 // (robot_sequence_controller, all plain C), stay C.
 typedef struct LineFollowerContext LineFollowerContext;
+typedef struct PrecisionMoveContext PrecisionMoveContext;
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,8 @@ extern "C" {
 
 typedef enum {
     MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE = 0,
+    MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE,
+    MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE,
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED,
     MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER,
     MOVEMENT_ACTION_GO_LEFT_DISTANCE,
@@ -30,7 +33,7 @@ typedef struct {
     float action_value;
 } MovementActionController;
 
-// Prepares one action. The motion implementations are intentionally placeholders.
+// Prepares one action.
 esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
@@ -43,13 +46,17 @@ esp_err_t movement_action_controller_init(
 bool movement_action_controller_update(
     MovementActionController *controller);
 
-// Injects the hardware/pose access MOVEMENT_ACTION_TAPE_FOLLOW_DISTANCE
-// needs. Call once during setup, after pose_service is ready. Leaving this
-// unset (or passing NULL) keeps that action on its placeholder
+// Injects the hardware/pose access the tape-follow-distance actions need.
+// Call once during setup, after pose_service is ready. Leaving this unset
+// (or passing NULL) keeps those actions on their placeholder
 // immediate-complete behavior -- what the native robot-sequence tests rely
 // on, since they have no drivetrain/sensors/pose_service to give it.
 void movement_action_controller_set_line_follower_context(
     LineFollowerContext *ctx);
+
+// Borrows the single global drivetrain/pose-service context.
+void movement_action_controller_set_precision_move_context(
+    PrecisionMoveContext *ctx);
 
 #ifdef __cplusplus
 }
