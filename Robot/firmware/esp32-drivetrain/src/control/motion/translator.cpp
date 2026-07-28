@@ -15,12 +15,12 @@ constexpr float kMinDisp = 1.0e-4f;       // m: ignore tiny translations
 constexpr int64_t kCtrlPeriodUs = 5000;   // 200 Hz
 constexpr float kPosTol = 0.01f;          // m: final position tolerance
 constexpr float kHeadTol = 0.035f;        // rad: final heading tolerance (~2°)
-constexpr float kVelTol = 0.05f;           // m/s: practical stopped threshold
+constexpr float kVelTol = 0.05f;          // m/s: practical stopped threshold
 constexpr float kStartHeadTol = 0.05f;    // rad: begin translation threshold
-constexpr float kApproach = 0.03f;         // m: start slowing near target
-constexpr float kMaxVy = 0.25f;            // m/s: correction limit
-constexpr float kMaxOmega = 1.0f;          // rad/s: correction limit
-constexpr float kMaxDt = 0.02f;            // s: reject delayed cycles
+constexpr float kApproach = 0.03f;        // m: start slowing near target
+constexpr float kMaxVy = 0.25f;           // m/s: correction limit
+constexpr float kMaxOmega = 1.0f;         // rad/s: correction limit
+constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
 
 float wrap(float a) {
     while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);
