@@ -33,61 +33,15 @@ typedef struct {
 
 // Actual Robot Sequence (To be finished).
 static const RobotSequenceStep kRobotSequence[] = {
-    // Scan at start
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    
-    // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},1.0f},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
-
-    // Search checkpoint 2: tape follow, stop, and ask the Pi to scan.
-    // Each scan sets the angle of the following rotation step.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
-
-    // Search checkpoint 3: tape follow, stop, and ask the Pi to scan.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
-
-    // Continue to tape follow
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-
-    // Rotate to follow tape on the side to tower pickup, then align
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 90.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_TAPE_ALIGNED}, 90.0f},
-
-    // Tower: Picking up the pieces
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_HOME}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_CLAW}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_DOWN}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_CLAW}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z_UP}, 0.30f},
-
-    // Habitat: Building actions (enable and tune when the sequence is ready)
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z_UP}, 0.30f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X_RIGHT}, 0.90f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},
-
-    // Movement: From tower pieces to tower base
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    // 0.25 m square test at 0.15 m/s: +x, turn 90 degrees CCW, repeat.
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 0.25f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 0.25f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 0.25f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 0.25f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
 };
 
 static const size_t kRobotSequenceLength =

@@ -9,6 +9,7 @@
 // its contents. Lets this header, and everything that includes it
 // (robot_sequence_controller, all plain C), stay C.
 typedef struct LineFollowerContext LineFollowerContext;
+typedef struct PrecisionMoveContext PrecisionMoveContext;
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +31,7 @@ typedef struct {
     float action_value;
 } MovementActionController;
 
-// Prepares one action. The motion implementations are intentionally placeholders.
+// Prepares one action.
 esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
@@ -50,6 +51,10 @@ bool movement_action_controller_update(
 // on, since they have no drivetrain/sensors/pose_service to give it.
 void movement_action_controller_set_line_follower_context(
     LineFollowerContext *ctx);
+
+// Borrows the single global drivetrain/pose-service context.
+void movement_action_controller_set_precision_move_context(
+    PrecisionMoveContext *ctx);
 
 #ifdef __cplusplus
 }
