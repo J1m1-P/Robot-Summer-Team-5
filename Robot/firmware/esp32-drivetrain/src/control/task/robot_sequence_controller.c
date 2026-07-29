@@ -88,9 +88,10 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.006f, 0.35f},
 
 
+
     // Tower: Placing the pieces 
     // TODO: tune Z distances
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.5f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.8f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_MIDDLE_CLAW}, 0.0f},    // drop middle piece
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},
