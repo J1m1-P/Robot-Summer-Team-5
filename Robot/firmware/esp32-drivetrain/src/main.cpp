@@ -11,7 +11,6 @@
 #include "control/drivetrain/drivetrain.h"
 #include "control/line_following/line_follower.hpp"
 #include "control/motion/translator.hpp"
-#include "control/odometry/pose_service.h"
 #include "control/odometry/pose_tracker.h"
 #include "control/task/robot_sequence_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
@@ -32,7 +31,6 @@ TapeSensor *tape_sensor_list[TAPE_SENSOR_MODULE_COUNT] = {
 DrivetrainOdometrySourceConfig pose_encoder_config = {};
 PoseTracker pose_tracker = {};
 Pmw3610OdometryLink arm_odometry_link = {};
-PoseService pose_service = {};
 LineFollowerContext line_follower_ctx = {};
 PrecisionMoveContext precision_move_ctx = {};
 
@@ -80,12 +78,17 @@ void setup() {
         return;
     }
 
-    // Robot task sequence init
-    err = robot_sequence_controller_init(&robot_sequence_controller, &arm_uart);
+    err = robot_sequence_controller_init(
+        &robot_sequence_controller,
+        &pose_tracker,
+        &drivetrain,
+        &arm_uart,
+        &arm_odometry_link);
     if (err != ESP_OK) {
         Serial.printf(
             "# FAULT: Robot sequence initialization failed (%s)\n",
             esp_err_to_name(err));
+        drivetrain_stop(&drivetrain);
         return;
     }
 
@@ -96,15 +99,6 @@ void setup() {
         return;
     }
 
-    // PoseService is the sole arm-UART reader and shared pose updater.
-    pose_service = {
-        .pose_tracker = &pose_tracker,
-        .drivetrain = &drivetrain,
-        .arm_uart = &arm_uart,
-        .odometry_link = &arm_odometry_link,
-        .sequence_controller = &robot_sequence_controller,
-    };
-
     line_follower_ctx = {
         .drivetrain = &drivetrain,
         .sensors = {
@@ -112,11 +106,11 @@ void setup() {
             tape_sensor_list[1],
             tape_sensor_list[2],
         },
-        .pose_service = &pose_service,
+        .sequence_controller = &robot_sequence_controller,
     };
     precision_move_ctx = {
         .drivetrain = &drivetrain,
-        .pose_service = &pose_service,
+        .sequence_controller = &robot_sequence_controller,
         .sensors = {
             tape_sensor_list[0],
             tape_sensor_list[1],
@@ -139,17 +133,13 @@ void setup() {
 void loop() {
     const uint32_t now_ms = millis();
 
-    // Blocking maneuvers update PoseService themselves. Between maneuvers,
-    // the application loop keeps UART traffic and fused pose current.
-    const esp_err_t pose_error =
-        pose_service_update(&pose_service, now_ms);
-    if (pose_error != ESP_OK) {
+    // Owns UART routing, pose tracking, and the ordered action sequence.
+    if (robot_sequence_controller_update(
+            &robot_sequence_controller, now_ms) != ESP_OK) {
         drivetrain_stop(&drivetrain);
         delay(1);
         return;
     }
-
-    robot_sequence_controller_update(&robot_sequence_controller, now_ms);
 
     // Keep encoder sampling and the drivetrain watchdog alive while idle.
     esp_err_t drivetrain_error = drivetrain_set_body_velocity(&drivetrain, 0.0f, 0.0f, 0.0f);

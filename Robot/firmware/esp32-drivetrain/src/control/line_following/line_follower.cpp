@@ -106,12 +106,13 @@ bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                   StopCondition stop_type, float stop_value, float timeout_s) {
     if (ctx == nullptr || ctx->drivetrain == nullptr ||
-        ctx->pose_service == nullptr ||
-        ctx->pose_service->pose_tracker == nullptr ||
+        ctx->sequence_controller == nullptr ||
+        ctx->sequence_controller->pose_tracker == nullptr ||
         ctx->sensors[0] == nullptr || ctx->sensors[1] == nullptr ||
         ctx->sensors[2] == nullptr) {
         return false;
     }
+    RobotSequenceController *controller = ctx->sequence_controller;
 
     auto Abort = [ctx](bool result) {
         const esp_err_t stop_error = drivetrain_stop(ctx->drivetrain);
@@ -135,7 +136,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     bool search_reversed = false;
     float search_start_heading_rad = 0.0f;
     float smoothed_omega = 0.0f;
-    Pose previous_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
+    Pose previous_pose = pose_tracker_get_pose(controller->pose_tracker);
 
     while (true) {
         const int64_t now_us = esp_timer_get_time();
@@ -150,10 +151,13 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         const float dt_s = static_cast<float>(dt_us) / 1e6f;
 
         if (tape_sensor_driver_read_all(ctx->sensors) != ESP_OK) return Abort(false);
-        if (pose_service_update(ctx->pose_service, static_cast<uint32_t>(now_us / 1000)) != ESP_OK) {
+        if (robot_sequence_controller_update(
+                ctx->sequence_controller,
+                static_cast<uint32_t>(now_us / 1000)) != ESP_OK) {
             return Abort(false);
         }
-        const Pose current_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
+        const Pose current_pose =
+            pose_tracker_get_pose(controller->pose_tracker);
         cumulative_distance_m += std::hypot(current_pose.x_m - previous_pose.x_m,
                                             current_pose.y_m - previous_pose.y_m);
         previous_pose = current_pose;

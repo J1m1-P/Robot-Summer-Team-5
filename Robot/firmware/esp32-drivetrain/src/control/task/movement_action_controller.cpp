@@ -52,12 +52,12 @@ float wrap_angle(float angle) {
 #ifdef ARDUINO
 void sync_planned_pose() {
     if (g_precision_move_ctx == nullptr ||
-        g_precision_move_ctx->pose_service == nullptr ||
-        g_precision_move_ctx->pose_service->pose_tracker == nullptr) {
+        g_precision_move_ctx->sequence_controller == nullptr ||
+        g_precision_move_ctx->sequence_controller->pose_tracker == nullptr) {
         return;
     }
     const Pose pose = pose_tracker_get_pose(
-        g_precision_move_ctx->pose_service->pose_tracker);
+        g_precision_move_ctx->sequence_controller->pose_tracker);
     if (!std::isfinite(pose.x_m) || !std::isfinite(pose.y_m) ||
         !std::isfinite(pose.heading_rad)) {
         g_planned_pose_valid = false;
@@ -124,8 +124,8 @@ extern "C" void movement_action_controller_begin_sequence(void) {
 #ifdef ARDUINO
     g_planned_pose_valid = false;
     if (g_precision_move_ctx != nullptr &&
-        g_precision_move_ctx->pose_service != nullptr &&
-        g_precision_move_ctx->pose_service->pose_tracker != nullptr) {
+        g_precision_move_ctx->sequence_controller != nullptr &&
+        g_precision_move_ctx->sequence_controller->pose_tracker != nullptr) {
         sync_planned_pose();
     }
 #endif
@@ -139,7 +139,7 @@ bool precision_action(
     const TapeStopSpec *tape_stop_spec = nullptr,
     float speed_mps = 0.0f) {
     if (g_precision_move_ctx == nullptr ||
-        g_precision_move_ctx->pose_service == nullptr) {
+        g_precision_move_ctx->sequence_controller == nullptr) {
         return false;
     }
     const float vx_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVxMps;
@@ -186,7 +186,7 @@ bool precision_action(
 bool drive_backward_until_locator(MovementActionController *controller) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->drivetrain == nullptr ||
-        g_precision_move_ctx->pose_service == nullptr) {
+        g_precision_move_ctx->sequence_controller == nullptr) {
         return false;
     }
 
@@ -211,9 +211,9 @@ bool drive_backward_until_locator(MovementActionController *controller) {
             continue;
         }
 
-        // PoseService drains arm UART and delivers the microswitch event.
-        if (pose_service_update(
-                g_precision_move_ctx->pose_service,
+        // Keep communication and pose live during this blocking action.
+        if (robot_sequence_controller_update(
+                g_precision_move_ctx->sequence_controller,
                 static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
             controller->locator_contact_detected) {
             return stop();

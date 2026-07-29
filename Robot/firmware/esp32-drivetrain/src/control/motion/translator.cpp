@@ -88,7 +88,8 @@ esp_err_t precision_move(
     const PrecisionMoveTarget *target,
     float timeout_s) {
     if (context == nullptr || context->drivetrain == nullptr ||
-        context->pose_service == nullptr || context->pose_service->pose_tracker == nullptr ||
+        context->sequence_controller == nullptr ||
+        context->sequence_controller->pose_tracker == nullptr ||
         target == nullptr || !std::isfinite(target->dx_body_m) ||
         !std::isfinite(target->dy_body_m) || !std::isfinite(target->delta_heading_rad) ||
         !std::isfinite(target->body_velocity.vx) ||
@@ -103,8 +104,10 @@ esp_err_t precision_move(
          !tape_stop_spec_is_valid(&target->tape_stop_spec))) {
         return ESP_ERR_INVALID_ARG;
     }
+    PoseTracker *pose_tracker =
+        context->sequence_controller->pose_tracker;
 
-    const Pose start = pose_tracker_get_pose(context->pose_service->pose_tracker);
+    const Pose start = pose_tracker_get_pose(pose_tracker);
     if (!std::isfinite(start.x_m) || !std::isfinite(start.y_m) ||
         !std::isfinite(start.heading_rad)) {
         return ESP_ERR_INVALID_STATE;
@@ -161,14 +164,14 @@ esp_err_t precision_move(
             stop();
             return ESP_ERR_INVALID_STATE;
         }
-        const esp_err_t pose_err = pose_service_update(
-            context->pose_service, static_cast<uint32_t>(now / 1000));
+        const esp_err_t pose_err = robot_sequence_controller_update(
+            context->sequence_controller, static_cast<uint32_t>(now / 1000));
         if (pose_err != ESP_OK) {
             stop();
             return pose_err;
         }
 
-        const Pose cur = pose_tracker_get_pose(context->pose_service->pose_tracker);
+        const Pose cur = pose_tracker_get_pose(pose_tracker);
         if (!std::isfinite(cur.x_m) || !std::isfinite(cur.y_m) ||
             !std::isfinite(cur.heading_rad)) {
             stop();
@@ -271,7 +274,7 @@ esp_err_t precision_move(
             const Pose corrected_goal = {
                 goal.x_m, goal.y_m, goal.heading_rad};
             const esp_err_t snap_error = pose_tracker_set_pose(
-                context->pose_service->pose_tracker, &corrected_goal);
+                pose_tracker, &corrected_goal);
             if (snap_error != ESP_OK) {
                 stop();
                 return snap_error;
@@ -298,8 +301,8 @@ esp_err_t precision_move(
 esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
                         Direction feedback_dir, bool on_gap, float timeout_s) {
     if (context == nullptr || context->drivetrain == nullptr ||
-        context->pose_service == nullptr ||
-        context->pose_service->pose_tracker == nullptr ||
+        context->sequence_controller == nullptr ||
+        context->sequence_controller->pose_tracker == nullptr ||
         context->sensors[0] == nullptr || context->sensors[1] == nullptr ||
         context->sensors[2] == nullptr ||
         !std::isfinite(timeout_s) || timeout_s <= 0.0f) {
@@ -338,8 +341,8 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
             return ESP_ERR_INVALID_STATE;
         }
 
-        const esp_err_t pose_err = pose_service_update(
-            context->pose_service, static_cast<uint32_t>(now / 1000));
+        const esp_err_t pose_err = robot_sequence_controller_update(
+            context->sequence_controller, static_cast<uint32_t>(now / 1000));
         if (pose_err != ESP_OK) {
             stop();
             return pose_err;

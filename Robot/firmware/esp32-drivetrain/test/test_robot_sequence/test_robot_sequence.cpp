@@ -5,6 +5,7 @@
 extern "C" {
 #include "control/task/robot_sequence_controller.h"
 #include <robot_common/command_packet.h>
+#include <robot_common/odometry_packet.h>
 #include <robot_common/pi_action_packet.h>
 #include <robot_common/status_packet.h>
 }
@@ -19,10 +20,12 @@ float last_follow_speed_mps = 0.0f;
 StopCondition last_stop_condition = StopCondition::TIME_ONLY;
 float last_stop_value = 0.0f;
 float last_follow_timeout_s = 0.0f;
+bool service_during_follow = false;
+uint32_t fake_millis = 0;
 
 }  // namespace
 
-bool follow_tape(LineFollowerContext *, Direction direction, float speed_mps,
+bool follow_tape(LineFollowerContext *context, Direction direction, float speed_mps,
                  StopCondition stop_condition, float stop_value,
                  float timeout_s) {
     ++follow_tape_calls;
@@ -31,22 +34,50 @@ bool follow_tape(LineFollowerContext *, Direction direction, float speed_mps,
     last_stop_condition = stop_condition;
     last_stop_value = stop_value;
     last_follow_timeout_s = timeout_s;
+    if (service_during_follow) {
+        TEST_ASSERT_EQUAL(
+            ESP_OK,
+            robot_sequence_controller_update(
+                context->sequence_controller, fake_millis));
+    }
     return true;
 }
 
 namespace {
 
-uint32_t fake_millis = 0;
-PacketFrame queued_packet = {};
+PacketFrame queued_packets[16] = {};
+size_t queued_packet_count = 0;
+size_t queued_packet_head = 0;
 CommandOpcode sent_commands[16] = {};
 size_t sent_command_count = 0;
+size_t odometry_ingest_count = 0;
+size_t pose_update_count = 0;
+
+struct ControllerFixture {
+    UartLink arm_uart = {};
+    Pmw3610OdometryLink odometry_link = {};
+    PoseTracker pose_tracker = {};
+    Drivetrain drivetrain = {};
+    RobotSequenceController controller = {};
+};
+
+esp_err_t initialize(ControllerFixture *fixture) {
+    return robot_sequence_controller_init(
+        &fixture->controller,
+        &fixture->pose_tracker,
+        &fixture->drivetrain,
+        &fixture->arm_uart,
+        &fixture->odometry_link);
+}
 
 void queue_status(StatusCode code, uint8_t detail) {
-    queued_packet = {};
-    queued_packet.message_type = PACKET_TYPE_STATUS;
-    queued_packet.payload_len = STATUS_PACKET_PAYLOAD_SIZE;
-    queued_packet.payload[0] = static_cast<uint8_t>(code);
-    queued_packet.payload[1] = detail;
+    TEST_ASSERT_TRUE(queued_packet_count < 16);
+    PacketFrame *frame = &queued_packets[queued_packet_count++];
+    *frame = {};
+    frame->message_type = PACKET_TYPE_STATUS;
+    frame->payload_len = STATUS_PACKET_PAYLOAD_SIZE;
+    frame->payload[0] = static_cast<uint8_t>(code);
+    frame->payload[1] = detail;
 }
 
 void queue_pi_report(
@@ -55,23 +86,24 @@ void queue_pi_report(
     float horizontal_error = 0.0f) {
     const int16_t raw_error =
         static_cast<int16_t>(horizontal_error * 1000.0f);
-    queued_packet = {};
-    queued_packet.message_type = PACKET_TYPE_PI_REPORT;
-    queued_packet.payload_len = PI_REPORT_PACKET_PAYLOAD_SIZE;
-    queued_packet.payload[0] = request_id;
-    queued_packet.payload[1] = PI_ACTION_SCAN_TELETUBBIES;
-    queued_packet.payload[2] = result;
-    queued_packet.payload[3] = 1;
-    queued_packet.payload[4] = static_cast<uint8_t>(raw_error & 0xFF);
-    queued_packet.payload[5] =
+    TEST_ASSERT_TRUE(queued_packet_count < 16);
+    PacketFrame *frame = &queued_packets[queued_packet_count++];
+    *frame = {};
+    frame->message_type = PACKET_TYPE_PI_REPORT;
+    frame->payload_len = PI_REPORT_PACKET_PAYLOAD_SIZE;
+    frame->payload[0] = request_id;
+    frame->payload[1] = PI_ACTION_SCAN_TELETUBBIES;
+    frame->payload[2] = result;
+    frame->payload[3] = 1;
+    frame->payload[4] = static_cast<uint8_t>(raw_error & 0xFF);
+    frame->payload[5] =
         static_cast<uint8_t>((static_cast<uint16_t>(raw_error) >> 8) & 0xFF);
-    queued_packet.payload[6] = 90;
+    frame->payload[6] = 90;
 }
 
-// Delivers the most recently queued frame directly, the way pose_service's
-// dispatcher would after dequeuing it from arm_uart.
 void deliver_frame(RobotSequenceController *controller, uint32_t now_ms) {
-    robot_sequence_controller_handle_frame(controller, &queued_packet, now_ms);
+    TEST_ASSERT_EQUAL(
+        ESP_OK, robot_sequence_controller_update(controller, now_ms));
 }
 
 }  // namespace
@@ -84,6 +116,22 @@ extern "C" const char *esp_err_to_name(esp_err_t) {
     return "test-error";
 }
 
+extern "C" esp_err_t uart_link_update(UartLink *) { return ESP_OK; }
+
+extern "C" bool uart_link_has_packet(const UartLink *) {
+    return queued_packet_head < queued_packet_count;
+}
+
+extern "C" esp_err_t uart_link_take_packet(
+    UartLink *,
+    PacketFrame *packet_out) {
+    if (packet_out == nullptr || queued_packet_head >= queued_packet_count) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    *packet_out = queued_packets[queued_packet_head++];
+    return ESP_OK;
+}
+
 extern "C" esp_err_t command_packet_send(
     UartLink *,
     const CommandPacket *packet) {
@@ -91,6 +139,30 @@ extern "C" esp_err_t command_packet_send(
         return ESP_ERR_INVALID_ARG;
     }
     sent_commands[sent_command_count++] = packet->opcode;
+    return ESP_OK;
+}
+
+extern "C" bool odometry_packet_is(const PacketFrame *frame) {
+    return frame != nullptr && frame->message_type == PACKET_TYPE_ODOMETRY;
+}
+
+extern "C" void odometry_link_ingest(
+    Pmw3610OdometryLink *link,
+    const PacketFrame *) {
+    ++odometry_ingest_count;
+    link->has_packet = true;
+}
+
+extern "C" DrivetrainWheelCounts drivetrain_get_wheel_counts(
+    const Drivetrain *) {
+    return {};
+}
+
+extern "C" esp_err_t pose_tracker_update(
+    PoseTracker *,
+    const DrivetrainWheelCounts *,
+    const OdometryPacket *) {
+    ++pose_update_count;
     return ESP_OK;
 }
 
@@ -197,89 +269,130 @@ extern "C" ActionStatusDetail arm_action_status_detail(
 
 void setUp() {
     fake_millis = 100;
-    queued_packet = {};
+    memset(queued_packets, 0, sizeof(queued_packets));
+    queued_packet_count = 0;
+    queued_packet_head = 0;
     memset(sent_commands, 0, sizeof(sent_commands));
     sent_command_count = 0;
+    odometry_ingest_count = 0;
+    pose_update_count = 0;
     follow_tape_calls = 0;
     last_follow_direction = Direction::PX;
     last_follow_speed_mps = 0.0f;
     last_stop_condition = StopCondition::TIME_ONLY;
     last_stop_value = 0.0f;
     last_follow_timeout_s = 0.0f;
+    service_during_follow = false;
     movement_action_controller_set_line_follower_context(nullptr);
 }
 
 void tearDown() {}
 
 void test_sequence_waits_for_arm_then_starts_first_action() {
-    UartLink arm_uart = {};
-    RobotSequenceController controller = {};
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
 
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        robot_sequence_controller_init(&controller, &arm_uart));
-    TEST_ASSERT_TRUE(controller.running);
-    TEST_ASSERT_TRUE(controller.waiting_for_arm_ready);
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+    TEST_ASSERT_TRUE(controller->running);
+    TEST_ASSERT_TRUE(controller->waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
-    robot_sequence_controller_update(&controller, 100);
+    robot_sequence_controller_update(controller, 100);
     TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 101);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
-    TEST_ASSERT_FALSE(controller.waiting_for_arm_ready);
+    deliver_frame(controller, 101);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
+    TEST_ASSERT_FALSE(controller->waiting_for_arm_ready);
     TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
     TEST_ASSERT_EQUAL(CMD_TOWER_RETRACT_LOCATOR, sent_commands[0]);
 
     queue_status(
         STATUS_ACTION_COMPLETE,
         STATUS_DETAIL_TOWER_LOCATOR_RETRACTED);
-    deliver_frame(&controller, 102);
-    TEST_ASSERT_EQUAL_UINT32(1, controller.current_step);
+    deliver_frame(controller, 102);
+    TEST_ASSERT_EQUAL_UINT32(1, controller->current_step);
     TEST_ASSERT_EQUAL_UINT32(2, sent_command_count);
     TEST_ASSERT_EQUAL(CMD_TOWER_OPEN_ALL_CLAWS, sent_commands[1]);
 }
 
 void test_non_odometry_frames_do_not_advance_movement_steps() {
-    UartLink arm_uart = {};
-    RobotSequenceController controller = {};
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        robot_sequence_controller_init(&controller, &arm_uart));
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 100);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    deliver_frame(controller, 100);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_TOWER_HOME);
-    deliver_frame(&controller, 101);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    deliver_frame(controller, 101);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
 
     queue_pi_report(1, PI_RESULT_OK, 0.5f);
-    deliver_frame(&controller, 102);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
+    deliver_frame(controller, 102);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
 
     queue_status(STATUS_LOCATOR_CONTACT, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 103);
-    TEST_ASSERT_EQUAL_UINT32(0, controller.current_step);
-    TEST_ASSERT_TRUE(controller.locator_contact_pending);
+    deliver_frame(controller, 103);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
+    TEST_ASSERT_TRUE(controller->locator_contact_pending);
 }
 
 void test_arm_fault_stops_sequence() {
-    UartLink arm_uart = {};
-    RobotSequenceController controller = {};
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        robot_sequence_controller_init(&controller, &arm_uart));
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
 
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
-    deliver_frame(&controller, 100);
-    robot_sequence_controller_update(&controller, 101);
+    deliver_frame(controller, 100);
+    robot_sequence_controller_update(controller, 101);
     queue_status(STATUS_FAULT, STATUS_DETAIL_TOWER_HOME);
-    deliver_frame(&controller, 102);
+    deliver_frame(controller, 102);
 
-    TEST_ASSERT_FALSE(controller.running);
+    TEST_ASSERT_FALSE(controller->running);
+}
+
+void test_update_drains_all_uart_packets_and_updates_pose_once() {
+    ControllerFixture fixture = {};
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+
+    queued_packets[queued_packet_count++].message_type = PACKET_TYPE_ODOMETRY;
+    queued_packets[queued_packet_count++].message_type = 0xFE;
+    queued_packets[queued_packet_count++].message_type = PACKET_TYPE_ODOMETRY;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_update(&fixture.controller, 100));
+    TEST_ASSERT_EQUAL_UINT32(3, queued_packet_head);
+    TEST_ASSERT_EQUAL_UINT32(2, odometry_ingest_count);
+    TEST_ASSERT_EQUAL_UINT32(1, pose_update_count);
+}
+
+void test_blocking_movement_services_inputs_without_recursive_step_update() {
+    ControllerFixture fixture = {};
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+
+    fixture.controller.waiting_for_arm_ready = false;
+    fixture.controller.current_step = 4;  // first tape-follow step
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &fixture.controller.movement_action_controller,
+            MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
+            4.8f));
+
+    LineFollowerContext context = {};
+    context.sequence_controller = &fixture.controller;
+    movement_action_controller_set_line_follower_context(&context);
+    service_during_follow = true;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        robot_sequence_controller_update(&fixture.controller, 100));
+    TEST_ASSERT_EQUAL_UINT32(1, follow_tape_calls);
+    TEST_ASSERT_EQUAL_UINT32(2, pose_update_count);
+    TEST_ASSERT_EQUAL_UINT32(5, fixture.controller.current_step);
 }
 
 void test_movement_action_rejects_invalid_values() {
@@ -350,7 +463,7 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
         TEST_ASSERT_EQUAL(
             static_cast<int>(directions[index]),
             static_cast<int>(last_follow_direction));
-        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.25f, last_follow_speed_mps);
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.35f, last_follow_speed_mps);
         TEST_ASSERT_EQUAL(
             static_cast<int>(StopCondition::DISTANCE),
             static_cast<int>(last_stop_condition));
@@ -392,6 +505,8 @@ int main(int, char **) {
     RUN_TEST(test_sequence_waits_for_arm_then_starts_first_action);
     RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
+    RUN_TEST(test_update_drains_all_uart_packets_and_updates_pose_once);
+    RUN_TEST(test_blocking_movement_services_inputs_without_recursive_step_update);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_locator_contact_notifies_only_locator_approach);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);

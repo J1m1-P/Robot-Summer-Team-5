@@ -5,6 +5,7 @@
 
 #include "esp32-hal.h"
 #include <robot_common/command_packet.h>
+#include <robot_common/odometry_packet.h>
 #include <robot_common/pi_action_packet.h>
 #include <robot_common/status_packet.h>
 
@@ -139,6 +140,14 @@ static bool step_is_movement(RobotStepType type) {
            type == ROBOT_STEP_SCAN_ROTATION;
 }
 
+static bool controller_is_valid(const RobotSequenceController *controller) {
+    return controller != NULL &&
+           controller->pose_tracker != NULL &&
+           controller->drivetrain != NULL &&
+           controller->arm_uart != NULL &&
+           controller->odometry_link != NULL;
+}
+
 static void enter_fault(
     RobotSequenceController *controller,
     const char *reason,
@@ -159,6 +168,8 @@ static esp_err_t start_robot_step(
 static void advance_sequence(
     RobotSequenceController *controller,
     uint32_t now_ms);
+
+// -------------------------- Incoming UART logic --------------------------
 
 static bool service_pi_report(
     RobotSequenceController *controller,
@@ -206,9 +217,8 @@ static bool service_pi_report(
     return true;
 }
 
-// Processes one already-dequeued frame from arm_uart. Callers own reading
-// arm_uart (see comm/pose_service.h) since it's shared with odometry frames.
-void robot_sequence_controller_handle_frame(
+// Selects the sequence logic for one non-odometry packet.
+static void handle_sequence_frame(
     RobotSequenceController *controller,
     const PacketFrame *frame,
     uint32_t now_ms) {
@@ -269,6 +279,61 @@ void robot_sequence_controller_handle_frame(
     if (step_complete) advance_sequence(controller, now_ms);
 }
 
+// Drains every currently queued packet. Odometry and sequence messages share
+// one UART, so routing happens immediately after each packet is dequeued.
+static esp_err_t receive_arm_uart(
+    RobotSequenceController *controller,
+    uint32_t now_ms) {
+    esp_err_t error = uart_link_update(controller->arm_uart);
+    if (error != ESP_OK) return error;
+
+    while (uart_link_has_packet(controller->arm_uart)) {
+        PacketFrame frame = {0};
+        error = uart_link_take_packet(controller->arm_uart, &frame);
+        if (error != ESP_OK) return error;
+
+        if (odometry_packet_is(&frame)) {
+            odometry_link_ingest(controller->odometry_link, &frame);
+        } else {
+            handle_sequence_frame(controller, &frame, now_ms);
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t update_pose(RobotSequenceController *controller) {
+    const DrivetrainWheelCounts wheel_counts =
+        drivetrain_get_wheel_counts(controller->drivetrain);
+    const OdometryPacket *optical_packet =
+        controller->odometry_link->has_packet
+            ? &controller->odometry_link->latest
+            : NULL;
+    return pose_tracker_update(
+        controller->pose_tracker, &wheel_counts, optical_packet);
+}
+
+static esp_err_t service_inputs(
+    RobotSequenceController *controller,
+    uint32_t now_ms) {
+    const esp_err_t uart_error = receive_arm_uart(controller, now_ms);
+    return uart_error == ESP_OK ? update_pose(controller) : uart_error;
+}
+
+// -------------------------- Outgoing UART logic --------------------------
+
+static esp_err_t send_arm_command(
+    RobotSequenceController *controller,
+    CommandOpcode opcode,
+    float value) {
+    const CommandPacket command = {
+        .opcode = opcode,
+        .value = value,
+    };
+    return command_packet_send(controller->arm_uart, &command);
+}
+
+// --------------------------- Sequence logic ------------------------------
+
 static esp_err_t start_robot_step(
     RobotSequenceController *controller,
     size_t step_index,
@@ -297,11 +362,8 @@ static esp_err_t start_robot_step(
         if (step->action.arm == CMD_TOWER_EXTEND_LOCATOR) {
             controller->locator_contact_pending = false;
         }
-        const CommandPacket command = {
-            .opcode = step->action.arm,
-            .value = step->action_value,
-        };
-        error = command_packet_send(controller->arm_uart, &command);
+        error = send_arm_command(
+            controller, step->action.arm, step->action_value);
     }
     if (error != ESP_OK) return error;
 
@@ -329,13 +391,23 @@ static void advance_sequence(
 
 esp_err_t robot_sequence_controller_init(
     RobotSequenceController *controller,
-    UartLink *arm_uart) {
-    if (controller == NULL || arm_uart == NULL) {
+    PoseTracker *pose_tracker,
+    Drivetrain *drivetrain,
+    UartLink *arm_uart,
+    Pmw3610OdometryLink *odometry_link) {
+    if (controller == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     *controller = (RobotSequenceController){0};
+    controller->pose_tracker = pose_tracker;
+    controller->drivetrain = drivetrain;
     controller->arm_uart = arm_uart;
+    controller->odometry_link = odometry_link;
+    if (!controller_is_valid(controller)) {
+        *controller = (RobotSequenceController){0};
+        return ESP_ERR_INVALID_ARG;
+    }
     controller->waiting_for_arm_ready = true;
     controller->running = true;
     printf("# Waiting for arm controller\n");
@@ -357,26 +429,43 @@ esp_err_t robot_sequence_controller_start(
     return error;
 }
 
-void robot_sequence_controller_update(
+esp_err_t robot_sequence_controller_update(
     RobotSequenceController *controller,
     uint32_t now_ms) {
-    if (controller == NULL || !controller->running) return;
-    if (controller->waiting_for_arm_ready) return;
+    if (!controller_is_valid(controller)) return ESP_ERR_INVALID_ARG;
 
+    // Always service communication and pose, even after the sequence stops.
+    const esp_err_t service_error = service_inputs(controller, now_ms);
+    if (service_error != ESP_OK) return service_error;
+
+    // A blocking movement calls this function from its own control loop.
+    // That nested call services inputs above, then stops here.
+    if (!controller->running ||
+        controller->waiting_for_arm_ready ||
+        controller->updating_movement) {
+        return ESP_OK;
+    }
+
+    // Choose the update logic for the active step.
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
     if (step_is_movement(step->type)) {
-        if (movement_action_controller_update(
-                &controller->movement_action_controller)) {
+        controller->updating_movement = true;
+        const bool succeeded = movement_action_controller_update(
+            &controller->movement_action_controller);
+        controller->updating_movement = false;
+
+        if (succeeded) {
             advance_sequence(controller, now_ms);
         } else {
             // false is always a terminal failure (no repeats)
             enter_fault(controller, "robot step failed", ESP_FAIL);
         }
-        return;
+        return ESP_OK;
     }
 
     if (deadline_reached(now_ms, controller->step_deadline_ms)) {
         enter_fault(controller, "robot step timed out", ESP_ERR_TIMEOUT);
     }
+    return ESP_OK;
 }

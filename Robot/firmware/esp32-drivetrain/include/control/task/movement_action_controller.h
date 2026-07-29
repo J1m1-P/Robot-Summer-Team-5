@@ -67,12 +67,12 @@ bool movement_action_controller_update(
     MovementActionController *controller);
 
 // Injects the hardware/pose access the tape-follow-distance actions need.
-// Call once during setup, after pose_service is ready. Leaving this unset
+// Call once during setup, after the sequence controller is ready. Leaving this
 // (or passing NULL) makes tape-follow actions fail cleanly.
 void movement_action_controller_set_line_follower_context(
     LineFollowerContext *ctx);
 
-// Borrows the single global drivetrain/pose-service context.
+// Borrows the single global drivetrain/sequence-controller context.
 void movement_action_controller_set_precision_move_context(
     PrecisionMoveContext *ctx);
 

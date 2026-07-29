@@ -4,11 +4,11 @@
 #include "control/drivetrain/drivetrain.h"
 #include "control/line_following/line_follower.hpp"
 #include "control/line_following/tape_stop_condition.hpp"
-#include "control/odometry/pose_service.h"
+#include "control/task/robot_sequence_controller.h"
 
 struct PrecisionMoveContext {
     Drivetrain *drivetrain;
-    PoseService *pose_service;
+    RobotSequenceController *sequence_controller;
     TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];
 };
 
@@ -32,7 +32,7 @@ esp_err_t precision_move(const PrecisionMoveContext *context,
 
 struct TapeAlignContext {
     Drivetrain *drivetrain;
-    PoseService *pose_service;
+    RobotSequenceController *sequence_controller;
     TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // front, back, side
 };
 

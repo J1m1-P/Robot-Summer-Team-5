@@ -3,7 +3,7 @@
 
 #include "control/drivetrain/drivetrain.h"
 #include "control/line_following/tape_stop_condition.hpp"
-#include "control/odometry/pose_service.h"
+#include "control/task/robot_sequence_controller.h"
 #include "drivers/tape_sensor/tape_sensor_driver.h"
 
 enum class Direction { PX, MX, PY };
@@ -12,15 +12,12 @@ enum class Direction { PX, MX, PY };
 // / centre-gap pattern. PX uses side, PY uses back, and MX has no -y sensor.
 enum class StopCondition { LATERAL_ONE, LATERAL_TWO, DISTANCE, TIME_ONLY };
 
-// Caller owns/initializes drivetrain, sensors, and pose_service once and
-// reuses this context across calls. pose_service is borrowed: it's shared,
-// continuously-updated state, not reset per maneuver. follow_tape() drives
-// it each control cycle so pose and arm_uart keep advancing for the whole
-// (blocking) duration of the maneuver, not just while main's loop() runs.
+// Caller owns/initializes these dependencies once and reuses the context.
+// The controller is borrowed and remains live during blocking maneuvers.
 struct LineFollowerContext {
     Drivetrain *drivetrain;
     TapeSensor *sensors[3];  // front, back, side
-    PoseService *pose_service;
+    RobotSequenceController *sequence_controller;
 };
 
 // Runs tape-following until `stop_type` is satisfied or `timeout_s` elapses.

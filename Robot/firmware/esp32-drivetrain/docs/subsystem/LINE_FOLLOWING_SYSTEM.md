@@ -7,7 +7,7 @@ shared pose/UART service, and commands the drivetrain at 200 Hz.
 LineFollowerContext context = {
     .drivetrain = &drivetrain,
     .sensors = {&front_sensor, &back_sensor, &left_sensor},
-    .pose_service = &pose_service,
+    .sequence_controller = &robot_sequence_controller,
 };
 const bool reached = follow_tape(
     &context, Direction::PX, 0.20f, StopCondition::DISTANCE, 1.5f, 12.0f);
