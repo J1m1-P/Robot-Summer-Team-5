@@ -143,8 +143,7 @@ static void start_tower_action(
         case CMD_TOWER_Z:
             controller->active_stepper = controller->tower_z_stepper;
             distance_mm = requested_distance_mm(command.value);
-            stepper_move_distanceMM(
-                controller->active_stepper, distance_mm);
+            stepper_move_distanceMM(controller->active_stepper, distance_mm);
             start_message = "# Tower Z moving";
             break;
 
