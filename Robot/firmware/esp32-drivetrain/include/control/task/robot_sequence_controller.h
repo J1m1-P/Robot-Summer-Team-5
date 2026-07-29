@@ -7,9 +7,11 @@
 
 #include "esp_err.h"
 
-#include <robot_common/packet_protocol.h>
 #include <robot_common/uart_link.h>
 
+#include "comm/odometry_link.h"
+#include "control/drivetrain/drivetrain.h"
+#include "control/odometry/pose_tracker.h"
 #include "control/task/movement_action_controller.h"
 
 #ifdef __cplusplus
@@ -17,12 +19,17 @@ extern "C" {
 #endif
 
 typedef struct {
+    PoseTracker *pose_tracker;
+    Drivetrain *drivetrain;
     UartLink *arm_uart;
+    Pmw3610OdometryLink *odometry_link;
     MovementActionController movement_action_controller;
     size_t current_step;
     uint32_t step_deadline_ms;
     bool running;
     bool waiting_for_arm_ready;
+    bool locator_contact_pending;
+    bool updating_movement;
     uint8_t last_pi_request_id;
     uint8_t align_attempts;   // scan+rotate rounds used on the current PI_ALIGN step
     float last_rotation_degrees;  // most recent rotation commanded, for NOT_FOUND recovery
@@ -32,22 +39,26 @@ typedef struct {
                                         // trusting the Pi's reported error
 } RobotSequenceController;
 
-// Connects the action paths and waits for the arm before starting the sequence.
+// Initializes the sequence; call robot_sequence_controller_start() after
+// movement contexts are connected.
 esp_err_t robot_sequence_controller_init(
     RobotSequenceController *controller,
-    UartLink *arm_uart);
+    PoseTracker *pose_tracker,
+    Drivetrain *drivetrain,
+    UartLink *arm_uart,
+    Pmw3610OdometryLink *odometry_link);
 
-// Updates only the current step and advances when it completes.
-void robot_sequence_controller_update(
+// Starts the current sequence step without waiting for an arm-ready frame.
+esp_err_t robot_sequence_controller_start(
     RobotSequenceController *controller,
     uint32_t now_ms);
 
-// Processes one arm_uart frame the caller has already dequeued. arm_uart is
-// shared with odometry traffic, so this controller no longer reads it
-// itself -- see comm/pose_service.h for the single reader/dispatcher.
-void robot_sequence_controller_handle_frame(
+// One control-cycle entry point. It drains arm UART, updates pose, then
+// advances the current sequence step. Blocking movements call this same
+// function; nested calls service UART/pose without recursively running the
+// movement step.
+esp_err_t robot_sequence_controller_update(
     RobotSequenceController *controller,
-    const PacketFrame *frame,
     uint32_t now_ms);
 
 #ifdef __cplusplus

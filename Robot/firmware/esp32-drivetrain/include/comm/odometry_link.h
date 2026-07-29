@@ -34,7 +34,7 @@ void odometry_link_reset(Pmw3610OdometryLink *link);
 // Only safe when nothing else also reads `uart_link` -- if arm_uart is
 // shared with other traffic (e.g. robot_sequence_controller's status/
 // pi-report frames), use odometry_link_ingest() from a single shared
-// dispatch point instead (see comm/pose_service.h).
+// dispatch point instead (see robot_sequence_controller_update()).
 void odometry_link_poll(Pmw3610OdometryLink *link, UartLink *uart_link);
 
 // Decodes and caches `frame` if it's an odometry frame; otherwise a no-op.

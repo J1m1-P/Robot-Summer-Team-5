@@ -41,5 +41,7 @@ bool pmw3610_odometry_source_update(Pmw3610OdometrySource *source,
     *delta_out = drivetrain_odometry_delta_between(&source->previous_pose,
                                                    &current_pose);
     source->previous_pose = current_pose;
+
+    /* The arm packet is already expressed as forward/lateral body motion. */
     return true;
 }

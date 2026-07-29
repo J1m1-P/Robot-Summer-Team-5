@@ -1,6 +1,7 @@
 /* Implements fused encoder and optical world-frame pose tracking. */
 #include "control/odometry/pose_tracker.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -86,4 +87,24 @@ Pose pose_tracker_get_pose(const PoseTracker *tracker)
         .heading_rad = tracker->odometry.pose.heading_rad,
     };
     return pose;
+}
+
+esp_err_t pose_tracker_set_pose(PoseTracker *tracker, const Pose *pose)
+{
+    if (tracker == NULL || pose == NULL ||
+        !isfinite(pose->x_m) || !isfinite(pose->y_m) ||
+        !isfinite(pose->heading_rad)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const DrivetrainPose corrected = {
+        .x_mm = pose->x_m * 1000.0f,
+        .y_mm = pose->y_m * 1000.0f,
+        .heading_rad = pose->heading_rad,
+    };
+    const esp_err_t error = drivetrain_odometry_set_pose(
+        &tracker->odometry, &corrected);
+    if (error != ESP_OK) return error;
+    tracker->optical_anchor_pose = corrected;
+    return ESP_OK;
 }

@@ -18,6 +18,8 @@ struct TowerActionController {
     bool action_is_timed;
     uint32_t action_complete_ms;
     uint8_t active_command_detail;
+    bool locator_extended;
+    bool locator_contact_reported;
 };
 
 // Connects the controller to initialized UART and stepper hardware.

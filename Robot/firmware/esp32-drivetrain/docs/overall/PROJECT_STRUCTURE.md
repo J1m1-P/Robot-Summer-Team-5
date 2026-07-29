@@ -12,7 +12,7 @@ esp32-drivetrain/
 |   |   |-- drivetrain/    Drivetrain facade, kinematics, odometry
 |   |   |-- line_following/
 |   |   |-- motion/
-|   |   |-- odometry/      Shared fused-pose service
+|   |   |-- odometry/      Shared fused-pose tracking
 |   |   |-- pid/
 |   |   `-- task/          Movement actions and robot sequence
 |   `-- drivers/           Motor, encoder, tape, and ToF hardware access
@@ -47,13 +47,14 @@ Dependencies point downward. Drivers never call task or application code.
 
 1. Holds motor outputs safe.
 2. Initializes the arm UART, drivetrain, tape modules, and pose tracker.
-3. Connects `PoseService`, `LineFollowerContext`, and
-   `PrecisionMoveContext`.
+3. Connects pose dependencies directly to the sequence controller, then
+   configures `LineFollowerContext` and `PrecisionMoveContext`.
 4. Starts the robot sequence after the arm reports ready.
 5. Services idle drivetrain, UART, pose, and sequence updates.
 
-When a blocking maneuver runs, it temporarily owns drivetrain and
-`PoseService` updates. The Arduino loop resumes after that maneuver returns.
+When a blocking maneuver runs, it calls `robot_sequence_controller_update()`
+from its control loop to keep UART and pose current. The Arduino loop resumes
+after that maneuver returns.
 
 ## Where new code belongs
 

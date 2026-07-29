@@ -26,6 +26,7 @@ typedef enum {
     STATUS_ROUTINE_DONE,    // the ESP ran out of sweeps/routine with targets still unfound
     STATUS_FAULT,           // something went wrong; `detail` holds a fault code
     STATUS_ACTION_COMPLETE, // arm ready when detail is NONE; otherwise an action completed
+    STATUS_LOCATOR_CONTACT, // the extended Tower locator microswitch was pressed
     STATUS_MAX
 } StatusCode;
 

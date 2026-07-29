@@ -43,7 +43,6 @@ Drivers do not make course decisions or coordinate the complete drivetrain.
 | `control/drivetrain/drivetrain_odometry_source.*` | Converts encoder-count changes into body deltas. |
 | `control/drivetrain/pmw3610_odometry_source.*` | Converts cumulative optical packets into body deltas. |
 | `control/odometry/pose_tracker.*` | Selects fresh optical deltas and encoder fallback to maintain one fused pose. |
-| `control/odometry/pose_service.*` | Sole reader of the shared arm UART; dispatches frames and advances `PoseTracker`. |
 | `control/motion/translator.*` | Implements blocking body-relative `precision_move()`. |
 | `control/pid/bounded_pid.*` | Reusable bounded PID math with no hardware access. |
 
@@ -53,19 +52,20 @@ Drivers do not make course decisions or coordinate the complete drivetrain.
 |---|---|
 | `control/line_following/line_follower.*` | Implements blocking `follow_tape()`: sensor reads, line error, steering, stop detection, pose servicing, and drivetrain commands. |
 
-The application owns the sensors, drivetrain, and pose service. The follower
-borrows them through `LineFollowerContext`.
+The application owns the sensors, drivetrain, and sequence controller. The
+follower borrows them through `LineFollowerContext`.
 
 ## Robot actions
 
 | Module | Responsibility |
 |---|---|
 | `control/task/movement_action_controller.*` | Maps sequence movement actions to `follow_tape()` or `precision_move()`. |
-| `control/task/robot_sequence_controller.*` | Starts ordered movement/arm steps, handles arm status and Pi reports, and stops on terminal failure. |
+| `control/task/robot_sequence_controller.*` | Owns shared-UART routing and pose updates, starts ordered movement/arm steps, handles reports, and stops on terminal failure. |
 | `comm/odometry_link.*` | Decodes and caches PMW3610 packets already routed from UART. |
 
-`PoseService` is the only production reader of the arm UART. Other modules
-receive already-dequeued frames or cached packets.
+`robot_sequence_controller_update()` is the only production reader of the arm
+UART. Blocking movement loops call the same entry point to keep communication
+and pose updates live.
 
 ## Tests and tools
 
