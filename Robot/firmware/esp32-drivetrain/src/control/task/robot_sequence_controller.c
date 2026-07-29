@@ -22,9 +22,20 @@ static const uint32_t kActionTimeoutMs = 15000;
 #define ALIGN_MAX_ATTEMPTS 4
 #define ALIGN_CENTERED_DEGREES 3.5f
 
-// Distance driven between search checkpoints. Replace after measuring the
-// real tape sections.
-#define PLACEHOLDER_SCAN_DISTANCE_M 1.2f
+// Distance driven to each search checkpoint. Not required to be equal --
+// replace each with a measured distance for its own tape section.
+#define PLACEHOLDER_SCAN_DISTANCE_1_M 1.2f
+#define PLACEHOLDER_SCAN_DISTANCE_2_M 1.2f
+#define PLACEHOLDER_SCAN_DISTANCE_3_M 1.2f
+
+// One teletubby search checkpoint: drive forward along the front tape by
+// distance_m, then run the scan/rotate/flash loop (see service_pi_align).
+// step_is_checkpoint() treats every pair this macro expands to as skippable
+// once PI_RESULT_ALL_FOUND arrives mid-search.
+#define SEARCH_CHECKPOINT(distance_m) \
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE}, \
+     (distance_m)}, \
+    {ROBOT_STEP_PI_ALIGN, {0}, 0.0f}
 
 // When a scan comes back without a usable detection (nothing seen, camera
 // hiccup, Pi didn't answer in time, link error) after we've already rotated
@@ -56,28 +67,23 @@ typedef struct {
 // centered error is the one where the Pi actually flashes -- no separate
 // "aligned" signal is needed, the next scan IS the confirmation.
 static const RobotSequenceStep kRobotSequence[] = {
-    // Retract the locator
+    // ════════════════════════════════════════════════════════════════════
+    // TELETUBBY SEARCH — retract the locator and move the tower arm to a
+    // safe search pose, then run three search checkpoints (tape-follow +
+    // scan/align). See SEARCH_CHECKPOINT() above and service_pi_align()
+    // below for what each checkpoint actually does.
+    // ════════════════════════════════════════════════════════════════════
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
-
-    // Move tower arm from home position to safe idle position
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
 
-    // Search checkpoint 1: tape follow, then align on and flash a Teletubby.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_PI_ALIGN, {0}, 0.0f},
-
-    // Search checkpoint 2.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_PI_ALIGN, {0}, 0.0f},
-
-    // Search checkpoint 3.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_SCAN_DISTANCE_M},
-    {ROBOT_STEP_PI_ALIGN, {0}, 0.0f},
+    SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_1_M),
+    SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_2_M),
+    SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_3_M),
+    // ════════════════════════════════════════════════════════════════════
+    // END TELETUBBY SEARCH
+    // ════════════════════════════════════════════════════════════════════
 
     // Rotate to follow tape on the side to tower pickup, then align.
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
