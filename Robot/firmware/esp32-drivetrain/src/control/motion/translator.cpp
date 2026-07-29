@@ -135,7 +135,7 @@ esp_err_t precision_move(
     const float translation_distance = std::hypot(dx, dy);
 
     enum class State { Translate, FinalRotate };
-    State state = translation_distance > 1.0e-4f
+    State state = translation_distance > 1.0e-4f 
         ? State::Translate : State::FinalRotate;
     const int64_t t0 = esp_timer_get_time();
     FixedRateGate gate = {kCtrlPeriodUs, t0};
