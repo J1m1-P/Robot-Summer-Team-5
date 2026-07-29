@@ -24,6 +24,11 @@ constexpr float kD = 0.1f;
 constexpr float kEmaAlpha = 0.4f;
 constexpr float kMaxOmegaRadS = 2.0;
 
+// Two-sensor mode uses the existing tape error units. These limits keep the
+// new lateral correction from taking over the requested travel speed.
+constexpr float kTwoSensorLateralGain = 0.25f;
+constexpr float kMaxLateralCorrectionMps = 0.25f;
+
 // Deadband due to tape width and sensor pitch
 constexpr float kErrorDeadband = 1.5f;
 
@@ -106,7 +111,8 @@ bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
 }  // namespace
 
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
-                  StopCondition stop_type, float stop_value, float timeout_s) {
+                  StopCondition stop_type, float stop_value, float timeout_s,
+                  TapeFollowMode mode) {
     if (ctx == nullptr || ctx->drivetrain == nullptr ||
         ctx->sequence_controller == nullptr ||
         ctx->sequence_controller->pose_tracker == nullptr ||
@@ -191,7 +197,27 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         }
 
         float raw_error = 0.0f;
-        const bool on_tape = ComputeLineError(ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
+        bool on_tape = ComputeLineError(
+            ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
+        float lateral_error = 0.0f;
+        bool aligned_tape = false;
+        if (mode == TapeFollowMode::FRONT_BACK_ALIGNED &&
+            (dir == Direction::PX || dir == Direction::MX)) {
+            float front_error = 0.0f;
+            float back_error = 0.0f;
+            const bool front_on_tape = ComputeLineError(
+                ctx->sensors[kFrontSensorIndex], kFrontWeights, &front_error);
+            const bool back_on_tape = ComputeLineError(
+                ctx->sensors[kBackSensorIndex], kBackWeights, &back_error);
+            aligned_tape = front_on_tape && back_on_tape;
+            if (aligned_tape) {
+                // The average measures sideways displacement. The difference
+                // measures whether the body is skewed across the tape.
+                lateral_error = (front_error + back_error) * 0.5f;
+                raw_error = (front_error - back_error) * 0.5f;
+                on_tape = true;
+            }
+        }
 
         float omega;
         float vx = 0.0f, vy = 0.0f;
@@ -205,7 +231,16 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             const float deadbanded_error = error_magnitude < kErrorDeadband
                 ? 0.0f
                 : std::copysign(error_magnitude - kErrorDeadband, filtered_error);
-            omega = bounded_pid_update(&steering_pid_state, &kSteeringPidConfig, deadbanded_error, dt_s);
+            omega = bounded_pid_update(
+                &steering_pid_state, &kSteeringPidConfig,
+                deadbanded_error, dt_s);
+            if (aligned_tape) {
+                // Keep the existing angular polarity/gains. The new term is
+                // only the sideways correction needed to center both sensors.
+                vy = clamp(kTwoSensorLateralGain * lateral_error,
+                           -kMaxLateralCorrectionMps,
+                           kMaxLateralCorrectionMps);
+            }
             switch (dir) {
                 case Direction::PX: vx = ramp_target_speed_mps; break;
                 case Direction::MX: vx = -ramp_target_speed_mps; break;

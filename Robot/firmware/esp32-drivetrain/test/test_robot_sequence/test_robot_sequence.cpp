@@ -20,6 +20,7 @@ float last_follow_speed_mps = 0.0f;
 StopCondition last_stop_condition = StopCondition::TIME_ONLY;
 float last_stop_value = 0.0f;
 float last_follow_timeout_s = 0.0f;
+TapeFollowMode last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
 bool service_during_follow = false;
 uint32_t fake_millis = 0;
 
@@ -27,13 +28,14 @@ uint32_t fake_millis = 0;
 
 bool follow_tape(LineFollowerContext *context, Direction direction, float speed_mps,
                  StopCondition stop_condition, float stop_value,
-                 float timeout_s) {
+                 float timeout_s, TapeFollowMode mode) {
     ++follow_tape_calls;
     last_follow_direction = direction;
     last_follow_speed_mps = speed_mps;
     last_stop_condition = stop_condition;
     last_stop_value = stop_value;
     last_follow_timeout_s = timeout_s;
+    last_follow_mode = mode;
     if (service_during_follow) {
         TEST_ASSERT_EQUAL(
             ESP_OK,
@@ -469,6 +471,13 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
             static_cast<int>(last_stop_condition));
         TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.75f, last_stop_value);
         TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.0f, last_follow_timeout_s);
+        const TapeFollowMode expected_mode =
+            directions[index] == Direction::PY
+                ? TapeFollowMode::SINGLE_SENSOR
+                : TapeFollowMode::FRONT_BACK_ALIGNED;
+        TEST_ASSERT_EQUAL(
+            static_cast<int>(expected_mode),
+            static_cast<int>(last_follow_mode));
     }
 }
 

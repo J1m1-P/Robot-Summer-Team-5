@@ -8,6 +8,10 @@
 
 enum class Direction { PX, MX, PY };
 
+// SINGLE_SENSOR preserves the original behavior. FRONT_BACK_ALIGNED uses the
+// front and back modules together and is valid for PX/MX travel.
+enum class TapeFollowMode { SINGLE_SENSOR, FRONT_BACK_ALIGNED };
+
 // RISE_ONE stops on one detected tape edge; RISE_TWO waits for two tape edges
 // with a gap between them. For marker stops, PX uses the side/PY module,
 // PY uses the back/MX module, and MX has no lateral marker module.
@@ -28,6 +32,7 @@ struct LineFollowerContext {
 // known DISTANCE stop point, but there is no post-stop overshoot
 // correction -- callers should not assume the true stop point is hit exactly.
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
-                  StopCondition stop_type, float stop_value, float timeout_s);
+                  StopCondition stop_type, float stop_value, float timeout_s,
+                  TapeFollowMode mode = TapeFollowMode::SINGLE_SENSOR);
 
 #endif

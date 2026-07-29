@@ -73,8 +73,13 @@ bool follow_tape_action(
     StopCondition stop_condition,
     float distance_m,
     float timeout_s) {
+    const TapeFollowMode follow_mode =
+        direction == Direction::PX || direction == Direction::MX
+            ? TapeFollowMode::FRONT_BACK_ALIGNED
+            : TapeFollowMode::SINGLE_SENSOR;
     const bool success = follow_tape(
-        context, direction, speed_mps, stop_condition, distance_m, timeout_s);
+        context, direction, speed_mps, stop_condition, distance_m, timeout_s,
+        follow_mode);
     if (success) sync_planned_pose();
     return success;
 }
