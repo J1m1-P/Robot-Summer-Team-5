@@ -33,7 +33,7 @@ esp_err_t precision_move(const PrecisionMoveContext *context,
 struct TapeAlignContext {
     Drivetrain *drivetrain;
     RobotSequenceController *sequence_controller;
-    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // front, back, side
+    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // PX/front, MX/back, PY/side
 };
 
 // Pivots the robot about `travel_dir`'s guide sensor -- approximated at that

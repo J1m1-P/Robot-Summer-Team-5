@@ -28,67 +28,63 @@ typedef struct {
         CommandOpcode arm;
     } action;
     float action_value;
+    float action_speed_mps;
 } RobotSequenceStep;
 
-// Actual Robot Sequence (To be finished).
+// Tape-rotation test: sweep CCW until the front/PX sensor sees tape, then
+// follow that tape forward for half a metre.
 static const RobotSequenceStep kRobotSequence[] = {
-    
-    // Retract the locator
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
-
-    // Move tower arm from home position to safe idle position
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
-
-
+    // {ROBOT_STEP_MOVEMENT,
+     // {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE}, 180.0f, 1.0f},
+    {ROBOT_STEP_MOVEMENT,
+     {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.0f, 0.6},
     
     // Scan at start
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     
     // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},4.8f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.8f, 0.35f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     // {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
     // // Search checkpoint 2: tape follow, stop, and ask the Pi to scan.
     // // Each scan sets the angle of the following rotation step.
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-    //  PLACEHOLDER_SCAN_DISTANCE_M},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE},
+    //  PLACEHOLDER_SCAN_DISTANCE_M, 0.35f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     // {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
     // // Search checkpoint 3: tape follow, stop, and ask the Pi to scan.
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-    //  PLACEHOLDER_SCAN_DISTANCE_M},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE},
+    //  PLACEHOLDER_SCAN_DISTANCE_M, 0.35f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     // {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
     // // Continue to tape follow
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-    //  PLACEHOLDER_SCAN_DISTANCE_M},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE},
+    //  PLACEHOLDER_SCAN_DISTANCE_M, 0.35f},
 
-    // Rotate to follow tape on the side to tower pickup, then align
-    //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 90.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -95.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f},
+    // // Rotate to follow tape on the side to tower pickup, then align
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 90.0f, 1.0f},
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -105.0f, 1.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_MX_TAPE_STRAFE_ALIGN}, 0.0f, 0.15f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f, 0.2f},
 
     // Tower: Picking up the pieces
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    // TODO: Do following arm steps in parallel with movement to save time
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.50f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
+    // // TODO: Do following arm steps in parallel with movement to save time
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
 
     // Move to the tower base
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE}, 0.08f}, 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR}, 0.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE}, 0.08f, 0.35f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR}, 0.0f, 0.10f},
 
     // Tower: Placing the pieces 
     // TODO: tune Z distances
@@ -107,14 +103,14 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},     // retract locator
     // // TODO: do arm actions while driving to save time
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -1.0f},                  // idle Z position
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},   // idle rotation
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},     // close all claws
     // // TODO: do arm actions while driving to save time
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},                  // idle X position
 
     // // Move to habitat tape to home
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT}}
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT}, 0.0f, 0.35f}
     
     // Habitat: Building actions (enable and tune when the sequence is ready)
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
@@ -126,8 +122,8 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},
 
     // Movement: From tower pieces to tower base
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD}, 1.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 1.0f, 0.2f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},
 };
 
 static const size_t kRobotSequenceLength =
@@ -348,13 +344,14 @@ static esp_err_t start_robot_step(
             step->type == ROBOT_STEP_SCAN_ROTATION
                 ? controller->scan_rotation_degrees
                 : step->action_value;
-        error = movement_action_controller_init(
+        error = movement_action_controller_init_with_speed(
             &controller->movement_action_controller,
             step->action.movement,
-            action_value);
+            action_value,
+            step->action_speed_mps);
         if (error == ESP_OK &&
             step->action.movement ==
-                MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR &&
+                MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR &&
             controller->locator_contact_pending) {
             movement_action_controller_notify_locator_contact(
                 &controller->movement_action_controller);

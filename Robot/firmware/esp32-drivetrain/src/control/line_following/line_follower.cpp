@@ -12,15 +12,17 @@
 namespace {
 
 constexpr int64_t kControlPeriodUs = 5000;  // 200 Hz
-constexpr int kBackSensorIndex = 1, kSideSensorIndex = 2;
+constexpr int kFrontSensorIndex = 0;
+constexpr int kBackSensorIndex = 1;
+constexpr int kSideSensorIndex = 2;
 
 constexpr float kFrontWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
-constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // back is mounted mirrored
+constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // MX is mounted mirrored
 
 constexpr float kP = 0.48f;
 constexpr float kD = 0.1f;
 constexpr float kEmaAlpha = 0.4f;
-constexpr float kMaxOmegaRadS = 1.4;
+constexpr float kMaxOmegaRadS = 2.0;
 
 // Deadband due to tape width and sensor pitch
 constexpr float kErrorDeadband = 1.5f;
@@ -38,11 +40,11 @@ constexpr BoundedPidConfig kSteeringPidConfig = {
     .correction_max = kMaxOmegaRadS,
 };
 
-constexpr float kSearchOmegaRadS = 0.8f;  // spin rate while hunting for lost tape
+constexpr float kSearchOmegaRadS = 2.0f;  // spin rate while hunting for lost tape
 // Sweep toward the last known side by this much; if still not found, reverse
 // and sweep the same amount past the start heading on the other side before
 // giving up.
-constexpr float kSearchSweepRad = 70.0f * static_cast<float>(M_PI) / 180.0f;
+constexpr float kSearchSweepRad = 45.0f * static_cast<float>(M_PI) / 180.0f;
 
 float wrap(float a) {
     while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);
@@ -63,14 +65,14 @@ struct DirectionInfo {
 
 DirectionInfo GetDirectionInfo(Direction dir) {
     switch (dir) {
-        case Direction::PX: return {0, kFrontWeights};
+        case Direction::PX: return {kFrontSensorIndex, kFrontWeights};
         case Direction::MX: return {1, kBackWeights};
         case Direction::PY: return {kSideSensorIndex, kFrontWeights};
     }
     return {0, kFrontWeights};
 }
 
-TapeStopSpec GetLateralStopSpec(Direction dir, StopCondition stop_type) {
+TapeStopSpec GetMarkerStopSpec(Direction dir, StopCondition stop_type) {
     uint8_t sensor_mask = 0U;
     switch (dir) {
         case Direction::PX: sensor_mask = 1U << 2; break;
@@ -82,7 +84,7 @@ TapeStopSpec GetLateralStopSpec(Direction dir, StopCondition stop_type) {
         .required_sensor_count = static_cast<uint8_t>(
             sensor_mask == 0U ? 0U : 1U),
         .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
-        .stop_on_gap = stop_type == StopCondition::LATERAL_TWO,
+        .stop_on_gap = stop_type == StopCondition::RISE_TWO,
         .gap_edge_channel_mask = 1U << TAPE_SENSOR_CHANNEL_1,
         .max_gap_distance_m = 0.08f,
     };
@@ -123,11 +125,11 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     const int64_t start_us = esp_timer_get_time();
     FixedRateGate gate = {kControlPeriodUs, start_us};
     TapeStopCondition tape_stop;
-    const bool lateral_stop_requested =
-        stop_type == StopCondition::LATERAL_ONE ||
-        stop_type == StopCondition::LATERAL_TWO;
-    const TapeStopSpec lateral_stop_spec =
-        GetLateralStopSpec(dir, stop_type);
+    const bool marker_stop_requested =
+        stop_type == StopCondition::RISE_ONE ||
+        stop_type == StopCondition::RISE_TWO;
+    const TapeStopSpec marker_stop_spec =
+        GetMarkerStopSpec(dir, stop_type);
     float cumulative_distance_m = 0.0f;
     float filtered_error = 0.0f;
     BoundedPidState steering_pid_state = {};
@@ -162,20 +164,20 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                                             current_pose.y_m - previous_pose.y_m);
         previous_pose = current_pose;
 
-        const bool lateral_done = lateral_stop_requested &&
-            tape_stop_condition_update(&tape_stop, &lateral_stop_spec,
+        const bool marker_stop_done = marker_stop_requested &&
+            tape_stop_condition_update(&tape_stop, &marker_stop_spec,
                                        ctx->sensors, cumulative_distance_m);
 
         // Ramp speed down over the last kApproachRampDistanceM before stop point
         float ramp_target_speed_mps = speed_mps;
         const float ramp_floor_mps = fminf(kMinRampSpeedMps, speed_mps);
-        if (stop_type == StopCondition::LATERAL_TWO &&
+        if (stop_type == StopCondition::RISE_TWO &&
             tape_stop_condition_candidate_active(
-                &tape_stop, &lateral_stop_spec, ctx->sensors)) {
+                &tape_stop, &marker_stop_spec, ctx->sensors)) {
             ramp_target_speed_mps = ramp_floor_mps;
         }
         const bool has_distance_target = stop_type == StopCondition::DISTANCE ||
-            (lateral_stop_requested &&
+            (marker_stop_requested &&
              tape_stop_condition_triggered(&tape_stop));
         if (has_distance_target) {
             const float target_m =
@@ -245,8 +247,8 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         switch (stop_type) {
             case StopCondition::TIME_ONLY: stop_reached = elapsed_s >= stop_value; break;
             case StopCondition::DISTANCE: stop_reached = cumulative_distance_m >= stop_value; break;
-            case StopCondition::LATERAL_ONE:
-            case StopCondition::LATERAL_TWO: stop_reached = lateral_done; break;
+            case StopCondition::RISE_ONE:
+            case StopCondition::RISE_TWO: stop_reached = marker_stop_done; break;
         }
         if (!stop_reached) continue;
 

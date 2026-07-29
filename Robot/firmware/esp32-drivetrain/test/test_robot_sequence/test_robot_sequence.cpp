@@ -379,7 +379,7 @@ void test_blocking_movement_services_inputs_without_recursive_step_update() {
         ESP_OK,
         movement_action_controller_init(
             &fixture.controller.movement_action_controller,
-            MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
+            MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE,
             4.8f));
 
     LineFollowerContext context = {};
@@ -402,7 +402,7 @@ void test_movement_action_rejects_invalid_values() {
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
             &controller,
-            MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
+            MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE,
             -0.1f));
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
@@ -420,7 +420,7 @@ void test_locator_contact_notifies_only_locator_approach() {
         ESP_OK,
         movement_action_controller_init(
             &controller,
-            MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR,
+            MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
             0.0f));
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
 
@@ -442,9 +442,9 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
     movement_action_controller_set_line_follower_context(&context);
 
     const MovementAction actions[] = {
-        MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE,
-        MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE,
-        MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE,
+        MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE,
+        MOVEMENT_ACTION_MX_TAPE_FOLLOW_DISTANCE,
+        MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE,
     };
     const Direction directions[] = {
         Direction::PX,

@@ -8,15 +8,16 @@
 
 enum class Direction { PX, MX, PY };
 
-// LATERAL_ONE stops on first detection; LATERAL_TWO stops on a full outer-tape
-// / centre-gap pattern. PX uses side, PY uses back, and MX has no -y sensor.
-enum class StopCondition { LATERAL_ONE, LATERAL_TWO, DISTANCE, TIME_ONLY };
+// RISE_ONE stops on one detected tape edge; RISE_TWO waits for two tape edges
+// with a gap between them. For marker stops, PX uses the side/PY module,
+// PY uses the back/MX module, and MX has no lateral marker module.
+enum class StopCondition { RISE_ONE, RISE_TWO, DISTANCE, TIME_ONLY };
 
 // Caller owns/initializes these dependencies once and reuses the context.
 // The controller is borrowed and remains live during blocking maneuvers.
 struct LineFollowerContext {
     Drivetrain *drivetrain;
-    TapeSensor *sensors[3];  // front, back, side
+    TapeSensor *sensors[3];  // PX/front, MX/back, PY/side
     RobotSequenceController *sequence_controller;
 };
 
