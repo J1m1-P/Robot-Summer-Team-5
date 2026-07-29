@@ -163,7 +163,11 @@ bool precision_action(
         target.tape_stop_spec = *tape_stop_spec;
     }
     Pose planned_goal = {};
-    if (g_planned_pose_valid) {
+    // Pure rotations do not need a world-position goal. Reusing the planned
+    // position after a preceding translation can introduce a small position
+    // error and incorrectly send the rotation through the translation phase.
+    if (g_planned_pose_valid &&
+        (std::fabs(dx_body) > 1.0e-6f || std::fabs(dy_body) > 1.0e-6f)) {
         const float c = std::cos(g_planned_pose.heading_rad);
         const float s = std::sin(g_planned_pose.heading_rad);
         planned_goal = {
