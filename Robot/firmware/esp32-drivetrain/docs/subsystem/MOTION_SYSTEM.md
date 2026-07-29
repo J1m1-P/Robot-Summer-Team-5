@@ -48,7 +48,8 @@ align_on_tape(&align_ctx, /*travel_dir=*/Direction::PY,
 ```
 
 `on_gap` must match the stop that preceded it: `false` after `LATERAL_ONE`,
-`true` after `LATERAL_TWO`.
+`true` after `LATERAL_TWO`. The feedback error is EMA-filtered before PID and
+the output omega is EMA-smoothed, same as `follow_tape()`'s steering.
 
 ## Sequence integration
 

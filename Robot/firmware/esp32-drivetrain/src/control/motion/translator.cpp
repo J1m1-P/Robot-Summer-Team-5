@@ -29,6 +29,11 @@ float wrap(float a) {
 constexpr float kAlignWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
 constexpr float kAlignErrorTol = 0.3f;  // channels considered centered below this
 constexpr float kAlignSettleS = 0.15f;  // must stay centered this long to finish
+// Filters the discrete, channel-quantized error before it's differentiated
+// (avoids derivative kick on channel-bit steps) and smooths the commanded
+// omega, matching the line follower's EMA treatment of the same sensors.
+constexpr float kAlignEmaAlpha = 0.4f;
+constexpr float kAlignOmegaEmaAlpha = 0.15f;
 constexpr BoundedPidConfig kAlignPidConfig = {
     .proportional_gain = 0.8f,
     .integral_gain = 0.0f,
@@ -310,6 +315,8 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
     FixedRateGate gate = {kCtrlPeriodUs, t0};
     BoundedPidState pid_state = {};
     float settled_s = 0.0f;
+    float filtered_error = 0.0f;
+    float smoothed_omega = 0.0f;
 
     auto stop = [&]() { drivetrain_stop(context->drivetrain); };
 
@@ -347,8 +354,9 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
             stop();
             return ESP_FAIL;
         }
+        filtered_error = kAlignEmaAlpha * error + (1.0f - kAlignEmaAlpha) * filtered_error;
 
-        if (std::fabs(error) < kAlignErrorTol) {
+        if (std::fabs(filtered_error) < kAlignErrorTol) {
             settled_s += dt;
             if (settled_s >= kAlignSettleS) {
                 stop();
@@ -358,7 +366,11 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
             settled_s = 0.0f;
         }
 
-        const float omega = bounded_pid_update(&pid_state, &kAlignPidConfig, error, dt);
+        const float omega_raw = bounded_pid_update(
+            &pid_state, &kAlignPidConfig, filtered_error, dt);
+        smoothed_omega = kAlignOmegaEmaAlpha * omega_raw +
+            (1.0f - kAlignOmegaEmaAlpha) * smoothed_omega;
+        const float omega = smoothed_omega;
         const float vx = omega * pivot_y_m;
         const float vy = -omega * pivot_x_m;
 
