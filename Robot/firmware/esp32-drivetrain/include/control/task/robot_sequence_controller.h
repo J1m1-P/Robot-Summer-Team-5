@@ -30,8 +30,14 @@ typedef struct {
     bool waiting_for_arm_ready;
     bool locator_contact_pending;
     bool updating_movement;
-    float scan_rotation_degrees;
+    bool pi_search_complete;
     uint8_t last_pi_request_id;
+    uint8_t align_attempts;   // scan+rotate rounds used on the current PI_ALIGN step
+    float last_rotation_degrees;  // most recent rotation commanded, for NOT_FOUND recovery
+    float chase_net_rotation_degrees;  // sum of every rotation actually commanded
+                                        // since the current chase started -- what
+                                        // REPOSITION/ALL_FOUND undo, instead of
+                                        // trusting the Pi's reported error
 } RobotSequenceController;
 
 // Initializes the sequence; call robot_sequence_controller_start() after

@@ -51,11 +51,12 @@ def encode_frame(msg_type, payload=b""):
 
 
 # ─────────────────────────────────────────────
-# COMMAND PAYLOAD — mirrors robot_common/command_packet.h's CommandOpcode.
+# COMMAND PAYLOAD — PROPOSAL. Must match the ESP firmware's decode. Coordinate!
 # ─────────────────────────────────────────────
 CMD_STOP   = 0
-CMD_TURN   = 1   # value = steering error (-1..+1), used only during ALIGN
-CMD_SCAN   = 2   # start the initial scan sweep (angle TBD; value unused)
+CMD_TURN   = 1   # value = steering error (-1..+1). A PIVOT IN PLACE — used by the
+                 #   stop-and-pivot ALIGN in detector_reactive.py.
+CMD_SCAN90 = 2   # start the initial 90° sweep (value unused)
 CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
 CMD_FLASH  = 4
 CMD_DONE   = 5
@@ -91,6 +92,11 @@ PI_RESULT_TIMEOUT = 2
 PI_RESULT_CAMERA_FAULT = 3
 PI_RESULT_LINK_ERROR = 4
 PI_RESULT_INVALID_REQUEST = 5
+PI_RESULT_REPOSITION = 6   # not a detection: horizontal_error is a commanded
+                           # correction rotation (see pi_action_packet.h)
+PI_RESULT_ALL_FOUND = 7    # not a detection: every target has been flashed,
+                           # nothing left to search for (see pi_action_packet.h)
+PI_RESULT_MAX = 8
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -153,7 +159,7 @@ def encode_pi_report(request_id, action, result, target_id=0,
     """Encode the report the arm ESP32 will relay to the drivetrain."""
     if action != PI_ACTION_SCAN_TELETUBBIES:
         raise ValueError("invalid Pi action")
-    if result < PI_RESULT_OK or result > PI_RESULT_INVALID_REQUEST:
+    if result < PI_RESULT_OK or result >= PI_RESULT_MAX:
         raise ValueError("invalid Pi result")
     confidence_percent = max(0, min(100, int(confidence_percent)))
     error_x1000 = int(round(max(-1.0, min(1.0, horizontal_error)) * 1000))
@@ -251,17 +257,25 @@ class RobotLink:
 
     # --- sending ---
     def send_command(self, opcode, value=0.0):
-        self.ser.write(encode_command(opcode, value))
+        self._write(encode_command(opcode, value))
 
     def send_pi_report(self, request_id, action, result, target_id=0,
                        horizontal_error=0.0, confidence_percent=0):
-        self.ser.write(encode_pi_report(
+        self._write(encode_pi_report(
             request_id, action, result, target_id,
             horizontal_error, confidence_percent))
 
+    def _write(self, frame):
+        # A disconnected/flaky USB-serial link should drop this one packet,
+        # not crash the caller's control loop.
+        try:
+            self.ser.write(frame)
+        except OSError as e:
+            print(f"[uart_link] write failed: {e}")
+
     def stop(self):          self.send_command(CMD_STOP)
     def turn(self, error):   self.send_command(CMD_TURN, error)
-    def scan(self):          self.send_command(CMD_SCAN)
+    def scan90(self):        self.send_command(CMD_SCAN90)
     def follow(self):        self.send_command(CMD_FOLLOW)
     def flash(self):         self.send_command(CMD_FLASH)
     def done(self):          self.send_command(CMD_DONE)
@@ -284,9 +298,16 @@ class RobotLink:
         """
         Read whatever bytes have arrived and return a list of completed
         (msg_type, payload) packets. Non-blocking — call it once per loop.
+        Returns an empty list (rather than raising) if the link drops.
         """
+        try:
+            data = self.ser.read(self.rx_chunk)
+        except OSError as e:
+            print(f"[uart_link] read failed: {e}")
+            return []
+
         packets = []
-        for b in self.ser.read(self.rx_chunk):
+        for b in data:
             pkt = self.parser.feed(b)
             if pkt is not None:
                 packets.append(pkt)
@@ -296,17 +317,44 @@ class RobotLink:
         self.ser.close()
 
 
-# Self-test of the ENCODER + PARSER only (no hardware needed):  python uart_link.py
-if __name__ == "__main__":
-    for name, pkt in [("STOP", encode_command(CMD_STOP)),
-                      ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
-                      ("SCAN", encode_command(CMD_SCAN)),
-                      ("FOLLOW", encode_command(CMD_FOLLOW)),
-                      ("RESUME", encode_command(CMD_RESUME))]:
-        print(f"{name:10s}:", pkt.hex(" "))
+def _feed_all(parser, frame):
+    """Feed a whole frame through a parser and return the decoded packet."""
+    out = None
+    for b in frame:
+        out = parser.feed(b) or out
+    return out
 
-    # Round-trip: encode a packet, feed its bytes to the parser, confirm it decodes.
-    parser = PacketParser()
-    for b in encode_command(CMD_TURN, -0.5):
-        out = parser.feed(b)
-    print("round-trip decode (type, payload):", out)
+
+# Self-test of the ENCODER + PARSER only (no hardware needed): python uart_link.py
+if __name__ == "__main__":
+    for name, pkt in [
+        ("STOP", encode_command(CMD_STOP)),
+        ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
+        ("PI_SCAN_TELETUBBIES", encode_command(CMD_PI_SCAN_TELETUBBIES)),
+        ("TOWER_Z_UP 0.5", encode_command(CMD_TOWER_Z_UP, 0.5)),
+    ]:
+        print(f"{name:22s}:", pkt.hex(" "))
+
+    # COMMAND round-trip.
+    out = _feed_all(PacketParser(), encode_command(CMD_TURN, -0.5))
+    assert out is not None and out[0] == PACKET_TYPE_COMMAND
+    print("COMMAND round-trip:", out)
+
+    # PI_REQUEST round-trip (the live path: arm ESP -> Pi, decoded by
+    # decode_pi_request()).
+    request = struct.pack("<BBb", 7, PI_ACTION_SCAN_TELETUBBIES, 0)
+    out = _feed_all(PacketParser(), encode_frame(PACKET_TYPE_PI_REQUEST, request))
+    assert out is not None and out[0] == PACKET_TYPE_PI_REQUEST
+    decoded = decode_pi_request(out[1])
+    assert decoded == (7, PI_ACTION_SCAN_TELETUBBIES, 0.0), decoded
+    print("PI_REQUEST round-trip:", decoded)
+
+    # PI_REPORT round-trip (the live path: Pi -> arm ESP, built by
+    # encode_pi_report()/send_pi_report()).
+    out = _feed_all(PacketParser(), encode_pi_report(
+        7, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_OK,
+        target_id=2, horizontal_error=-0.25, confidence_percent=80))
+    assert out is not None and out[0] == PACKET_TYPE_PI_REPORT
+    print("PI_REPORT round-trip:", out)
+
+    print("uart_link self-test OK")

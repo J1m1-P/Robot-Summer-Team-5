@@ -6,7 +6,9 @@
 namespace {
 
 // Bounds one Pi request so a missing response cannot stall the sequence.
-constexpr uint32_t kResponseTimeoutMs = 15000;
+// Expire before the drivetrain's 15 s action deadline so the timeout report
+// has time to cross the arm UART instead of racing the drivetrain fault.
+constexpr uint32_t kResponseTimeoutMs = 14000;
 
 // Signed subtraction keeps deadline checks valid across millis() wraparound.
 bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
