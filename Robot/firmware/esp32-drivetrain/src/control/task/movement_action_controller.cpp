@@ -75,7 +75,7 @@ bool follow_tape_action(
     float timeout_s) {
     const TapeFollowMode follow_mode =
         direction == Direction::PX || direction == Direction::MX
-            ? TapeFollowMode::FRONT_BACK_ALIGNED
+            ? TapeFollowMode::SINGLE_SENSOR
             : TapeFollowMode::SINGLE_SENSOR;
     const bool success = follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
