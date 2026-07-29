@@ -85,7 +85,7 @@ static void send_status(
 }
 
 static float requested_distance_mm(float command_value) {
-    return fabsf(command_value) * kCommandDistanceUnitMm;
+    return command_value * kCommandDistanceUnitMm;
 }
 
 static bool controller_is_busy(const TowerActionController *controller) {
@@ -258,7 +258,7 @@ static void start_tower_action(
     controller->action_active = true;
     if (controller->active_stepper != nullptr) {
         Serial.printf(
-            "%s %.0f mm\n", start_message, fabsf(distance_mm));
+            "%s %+.0f mm\n", start_message, distance_mm);
     } else {
         Serial.println(start_message);
     }
