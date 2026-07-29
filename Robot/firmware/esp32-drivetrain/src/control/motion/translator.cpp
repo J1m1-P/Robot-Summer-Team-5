@@ -250,9 +250,13 @@ esp_err_t precision_move(
             if (std::fabs(heading_error) > kHeadTol) {
                 // Rotate alone. Mixing translation correction into this
                 // command can saturate the wheel targets.
+                const float requested_omega =
+                    std::fabs(target->body_velocity.omega);
+                const float rotate_limit = requested_omega > 0.0f
+                    ? requested_omega : kMotionOmegaRadS;
                 cmd.omega = clamp(
                     heading_error * kHeadingGain,
-                    -kMotionOmegaRadS, kMotionOmegaRadS);
+                    -rotate_limit, rotate_limit);
                 break;
             }
 
