@@ -20,7 +20,7 @@ import time
 import threading
 import cv2
 
-import teletubby_detector as det   # importing runs its config: opens cam 1, loads best.pt
+import tubby_detector as det   # importing runs its config: opens cam 1, loads best.pt
 
 
 # ── What to feed the loop ─────────────────────────────────────────────────────
