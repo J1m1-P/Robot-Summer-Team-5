@@ -39,7 +39,16 @@ constexpr BoundedPidConfig kSteeringPidConfig = {
 };
 
 constexpr float kSearchOmegaRadS = 0.4f;  // spin rate while hunting for lost tape
-constexpr float kSearchTimeoutS = 2.0f;
+// Sweep toward the last known side by this much; if still not found, reverse
+// and sweep the same amount past the start heading on the other side before
+// giving up.
+constexpr float kSearchSweepRad = 45.0f * static_cast<float>(M_PI) / 180.0f;
+
+float wrap(float a) {
+    while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);
+    while (a < -static_cast<float>(M_PI)) a += 2.0f * static_cast<float>(M_PI);
+    return a;
+}
 
 // Ramps speed down over the last stretch before a known DISTANCE stop
 // point instead of driving at full speed right up to the abrupt stop.
@@ -122,7 +131,9 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     float filtered_error = 0.0f;
     BoundedPidState steering_pid_state = {};
     float last_error_sign = 1.0f;
-    float lost_elapsed_s = 0.0f;
+    bool searching = false;
+    bool search_reversed = false;
+    float search_start_heading_rad = 0.0f;
     float smoothed_omega = 0.0f;
     Pose previous_pose = pose_tracker_get_pose(ctx->pose_service->pose_tracker);
 
@@ -180,7 +191,8 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         float vx = 0.0f, vy = 0.0f;
         if (on_tape) {
             last_error_sign = raw_error >= 0.0f ? 1.0f : -1.0f;
-            lost_elapsed_s = 0.0f;
+            searching = false;
+            search_reversed = false;
             filtered_error = kEmaAlpha * raw_error + (1.0f - kEmaAlpha) * filtered_error;
             // Soft threshold with deadband
             const float error_magnitude = std::fabs(filtered_error);
@@ -194,9 +206,23 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                 case Direction::PY: vy = ramp_target_speed_mps; break;
             }
         } else {
-            lost_elapsed_s += dt_s;
-            if (lost_elapsed_s >= kSearchTimeoutS) return Abort(false);
-            omega = last_error_sign * kSearchOmegaRadS;  // spin toward last known side
+            if (!searching) {
+                searching = true;
+                search_start_heading_rad = current_pose.heading_rad;
+            }
+            // Progress toward last_error_sign's side, normalized so it always
+            // grows from 0 while sweeping that way, regardless of the sign.
+            const float progress_rad =
+                wrap(current_pose.heading_rad - search_start_heading_rad) *
+                last_error_sign;
+            if (!search_reversed) {
+                if (progress_rad >= kSearchSweepRad) search_reversed = true;
+            } else if (progress_rad <= -kSearchSweepRad) {
+                return Abort(false);
+            }
+            // spin toward last known side, then reverse past the start heading
+            omega = (search_reversed ? -last_error_sign : last_error_sign) *
+                kSearchOmegaRadS;
         }
         smoothed_omega = kOmegaEmaAlpha * omega + (1.0f - kOmegaEmaAlpha) * smoothed_omega;
         omega = smoothed_omega;

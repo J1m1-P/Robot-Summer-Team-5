@@ -88,6 +88,8 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE:
+        case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
             return true;
         default:
             return false;
@@ -134,14 +136,17 @@ bool precision_action(
     float dx_body,
     float dy_body,
     float dhead_rad,
-    const TapeStopSpec *tape_stop_spec = nullptr) {
+    const TapeStopSpec *tape_stop_spec = nullptr,
+    float speed_mps = 0.0f) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->pose_service == nullptr) {
         return false;
     }
+    const float vx_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVxMps;
+    const float vy_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVyMps;
     const DrivetrainBodyVelocity body_velocity = {
-        .vx = dx_body == 0.0f ? 0.0f : std::copysign(kPrecisionVxMps, dx_body),
-        .vy = dy_body == 0.0f ? 0.0f : std::copysign(kPrecisionVyMps, dy_body),
+        .vx = dx_body == 0.0f ? 0.0f : std::copysign(vx_mps, dx_body),
+        .vy = dy_body == 0.0f ? 0.0f : std::copysign(vy_mps, dy_body),
         .omega = dhead_rad == 0.0f
             ? 0.0f : std::copysign(kPrecisionOmegaRadS, dhead_rad),
     };
@@ -397,18 +402,24 @@ extern "C" bool movement_action_controller_update(
 #endif
             break;
 
+        // action_value is the cruise speed in m/s; 0 keeps the default speed.
         case MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE:
 #ifdef ARDUINO
             return precision_action(
-                kTapeSeekMaxDistanceM, 0.0f, 0.0f, &kSideTapeStopSpec);
+                kTapeSeekMaxDistanceM, 0.0f, 0.0f, &kSideTapeStopSpec,
+                controller->action_value);
 #else
             return false;
 #endif
 
+        // action_value is the CW sweep bound in degrees (clamped to the
+        // wrap-safe maximum).
         case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
 #ifdef ARDUINO
             return precision_action(
-                0.0f, 0.0f, -kTapeSeekMaxRotationRad,
+                0.0f, 0.0f,
+                -std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
+                           kTapeSeekMaxRotationRad),
                 &kSideTapeStopSpec);
 #else
             return false;

@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include "control/drivetrain/drivetrain.h"
+#include "control/line_following/line_follower.hpp"
 #include "control/line_following/tape_stop_condition.hpp"
 #include "control/odometry/pose_service.h"
 
@@ -28,3 +29,20 @@ struct PrecisionMoveTarget {
 esp_err_t precision_move(const PrecisionMoveContext *context,
                          const PrecisionMoveTarget *target,
                          float timeout_s);
+
+struct TapeAlignContext {
+    Drivetrain *drivetrain;
+    PoseService *pose_service;
+    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // front, back, side
+};
+
+// Pivots the robot about `travel_dir`'s guide sensor -- approximated at that
+// sensor's axle centerpoint from the drivetrain's X-drive geometry -- so it
+// stays roughly in place while the body rotates. The correction is driven by
+// a second, independently chosen sensor (`feedback_dir`'s sensor), since the
+// guide sensor is already on the feature and can't itself reveal body skew:
+// the maneuver ends once the tape (or, when `on_gap` is true, the gap between
+// two tape edges) is centered on the feedback sensor. Blocks until centered
+// or timeout.
+esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
+                        Direction feedback_dir, bool on_gap, float timeout_s);
