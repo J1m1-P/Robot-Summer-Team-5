@@ -15,6 +15,8 @@ constexpr float kHeadTol = 0.0349066f;    // rad: final heading tolerance (2°)
 constexpr float kMotionOmegaRadS = 0.6f;
 constexpr float kApproachRampDistanceM = 0.03f;
 constexpr float kMinRampSpeedMps = 0.1f;
+constexpr float kMinPrecisionTranslateSpeedMps = 0.05f;
+constexpr float kShortMoveNudgeS = 0.05f;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
@@ -135,13 +137,14 @@ esp_err_t precision_move(
     const float translation_distance = std::hypot(dx, dy);
 
     enum class State { Translate, FinalRotate };
-    State state = translation_distance > 1.0e-4f 
+    State state = translation_distance > 1.0e-6f
         ? State::Translate : State::FinalRotate;
     const int64_t t0 = esp_timer_get_time();
     FixedRateGate gate = {kCtrlPeriodUs, t0};
     Pose prev = start;                           // previous estimate
     float cumulative_distance_m = 0.0f;
     TapeStopCondition tape_stop;
+    float translate_elapsed_s = 0.0f;
 
     auto stop = [&]() {
         drivetrain_stop(context->drivetrain);
@@ -208,18 +211,26 @@ esp_err_t precision_move(
 
         switch (state) {
         case State::Translate: {
+            const bool short_translation =
+                translation_distance <= kPosTol;
+            const bool short_move_nudge_active =
+                short_translation && translate_elapsed_s < kShortMoveNudgeS;
             if (distance_error <= kPosTol) {
-                if (std::fabs(target->delta_heading_rad) > kHeadTol) {
+                if (!short_move_nudge_active &&
+                    std::fabs(target->delta_heading_rad) > kHeadTol) {
                     state = State::FinalRotate;
                     break;
                 }
-                if (target->tape_stop_enabled &&
+                if (!short_move_nudge_active &&
+                    target->tape_stop_enabled &&
                     !tape_stop_condition_triggered(&tape_stop)) {
                     stop();
                     return ESP_ERR_TIMEOUT;
                 }
-                state = State::FinalRotate;
-                break;
+                if (!short_move_nudge_active) {
+                    state = State::FinalRotate;
+                    break;
+                }
             }
 
             float command_speed = cruise_speed;
@@ -245,6 +256,16 @@ esp_err_t precision_move(
                 cmd.vx *= scale;
                 cmd.vy *= scale;
             }
+            if (command_norm > 0.0f &&
+                (distance_error > kPosTol || short_move_nudge_active) &&
+                command_norm < kMinPrecisionTranslateSpeedMps) {
+                const float min_speed = std::fmin(
+                    kMinPrecisionTranslateSpeedMps, command_speed);
+                const float scale = min_speed / command_norm;
+                cmd.vx *= scale;
+                cmd.vy *= scale;
+            }
+            translate_elapsed_s += dt;
 
             break;
         }
