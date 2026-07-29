@@ -38,11 +38,11 @@ constexpr BoundedPidConfig kSteeringPidConfig = {
     .correction_max = kMaxOmegaRadS,
 };
 
-constexpr float kSearchOmegaRadS = 0.4f;  // spin rate while hunting for lost tape
+constexpr float kSearchOmegaRadS = 0.8f;  // spin rate while hunting for lost tape
 // Sweep toward the last known side by this much; if still not found, reverse
 // and sweep the same amount past the start heading on the other side before
 // giving up.
-constexpr float kSearchSweepRad = 45.0f * static_cast<float>(M_PI) / 180.0f;
+constexpr float kSearchSweepRad = 70.0f * static_cast<float>(M_PI) / 180.0f;
 
 float wrap(float a) {
     while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);

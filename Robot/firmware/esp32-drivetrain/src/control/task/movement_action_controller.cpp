@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr float kTapeFollowSpeedMps = 0.35f;
+constexpr float kTapeFollowSpeedMps = 0.5f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
 #ifdef ARDUINO
 constexpr float kLocatorApproachSpeedMps = -0.10f;
