@@ -209,6 +209,10 @@ esp_err_t precision_move(
         switch (state) {
         case State::Translate: {
             if (distance_error <= kPosTol) {
+                if (std::fabs(target->delta_heading_rad) > kHeadTol) {
+                    state = State::FinalRotate;
+                    break;
+                }
                 if (target->tape_stop_enabled &&
                     !tape_stop_condition_triggered(&tape_stop)) {
                     stop();
