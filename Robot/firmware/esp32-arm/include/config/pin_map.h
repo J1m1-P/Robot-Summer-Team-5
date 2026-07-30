@@ -12,7 +12,7 @@
 
 // Locating Motor
 #define PIN_LOC_EN          13      // Power on the locating motor
-#define PIN_LOC_SWITCH      14      // Active-low microswitch on locating motor
+#define PIN_LOC_SWITCH      14      // Normally closed to ground; pressed reads HIGH
 
 // Stepper Motor Driver
 #define PIN_STEP1           16      // PWM (not really) for Stepper Motor1

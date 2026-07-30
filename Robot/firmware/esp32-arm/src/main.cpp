@@ -36,6 +36,9 @@ ArmActionDispatcher arm_action_dispatcher = {};
 constexpr int64_t kOdometrySendPeriodUs = 5000;  // 200 Hz, matches the drivetrain's control loop
 FixedRateGate odometry_gate = {kOdometrySendPeriodUs, 0};
 
+constexpr uint32_t kLocatorSwitchReportPeriodMs = 100;  // 10 Hz for switch diagnostics
+uint32_t last_locator_switch_report_ms = 0;
+
 }  // namespace
 
 void setup() {
@@ -126,6 +129,7 @@ void setup() {
         delay(1);
     }
     Serial.println("# Start switch pressed");
+    delay(1000);  // Allow one second before starting the robot sequence.
 }
 
 void loop() {
@@ -145,6 +149,7 @@ void loop() {
     // }
 
     const uint32_t now_ms = millis();
+    Serial.println(digitalRead(PIN_LOC_SWITCH));
     const bool reporting_arm_status = arm_action_dispatcher_update(
         &arm_action_dispatcher, now_ms);
 

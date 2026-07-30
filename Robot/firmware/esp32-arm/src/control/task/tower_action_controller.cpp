@@ -15,6 +15,7 @@ namespace {
 constexpr uint32_t kRotateServoSettleMs = 1000;
 constexpr uint32_t kClawServoSettleMs = 750;
 constexpr uint32_t kHomeSettleMs = 1000;
+constexpr uint32_t kLocatorExtendMs = 750; 
 
 constexpr float kCommandDistanceUnitMm = 100.0f;
 
@@ -230,11 +231,11 @@ static void start_tower_action(
 
         case CMD_TOWER_EXTEND_LOCATOR:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis();
+            controller->action_complete_ms = millis() + kLocatorExtendMs;
             controller->locator_extended = true;
             controller->locator_contact_reported = false;
             noInterrupts();
-            locator_contact_pending = digitalRead(PIN_LOC_SWITCH) == LOW;
+            locator_contact_pending = digitalRead(PIN_LOC_SWITCH) == HIGH;
             locator_contact_armed = !locator_contact_pending;
             interrupts();
             digitalWrite(PIN_LOC_EN, HIGH);
@@ -282,7 +283,7 @@ void tower_action_controller_init(
     attachInterrupt(
         digitalPinToInterrupt(PIN_LOC_SWITCH),
         locator_switch_interrupt,
-        FALLING);
+        RISING);
 
     ESP_ERROR_CHECK(initialize_tower_motors(
         controller->tower_x_stepper,
@@ -332,7 +333,17 @@ bool tower_action_controller_update(
         }
     }
 
-    // Report contact once per extension. The ISR only raises the flag.
+    // Poll as a fallback in case the switch's rising-edge interrupt is missed.
+    if (controller->locator_extended &&
+        !controller->locator_contact_reported &&
+        digitalRead(PIN_LOC_SWITCH) == HIGH) {
+        noInterrupts();
+        locator_contact_armed = false;
+        locator_contact_pending = true;
+        interrupts();
+    }
+
+    // Report contact once per extension. The ISR and polling only raise the flag.
     if (locator_contact_pending && controller->locator_extended &&
         !controller->locator_contact_reported) {
         locator_contact_pending = false;
