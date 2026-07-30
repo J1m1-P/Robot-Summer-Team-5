@@ -173,6 +173,11 @@ esp_err_t precision_move(
             stop();
             return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
         }
+        if (target->external_stop_requested != nullptr &&
+            *target->external_stop_requested) {
+            stop();
+            return ESP_OK;
+        }
 
         const Pose cur = pose_tracker_get_pose(pose_tracker);
         if (!std::isfinite(cur.x_m) || !std::isfinite(cur.y_m) ||
@@ -287,6 +292,11 @@ esp_err_t precision_move(
 
             if (target->tape_stop_enabled &&
                 !tape_stop_condition_triggered(&tape_stop)) {
+                stop();
+                return ESP_ERR_TIMEOUT;
+            }
+            if (target->external_stop_requested != nullptr &&
+                !*target->external_stop_requested) {
                 stop();
                 return ESP_ERR_TIMEOUT;
             }

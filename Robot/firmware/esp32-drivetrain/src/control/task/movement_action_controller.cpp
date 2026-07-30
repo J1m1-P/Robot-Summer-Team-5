@@ -6,18 +6,14 @@
 
 #include "control/line_following/line_follower.hpp"
 #include <Arduino.h>
-#include "esp_timer.h"
 #include "control/motion/translator.hpp"
-#include <robot_common/fixed_rate_gate.h>
 
 namespace {
 
 constexpr float kTapeFollowSpeedMps = 0.35f;
 constexpr float kSideTowerFollowSpeedMps = 0.15f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
-constexpr float kLocatorApproachSpeedMps = -0.10f;
-constexpr float kLocatorApproachTimeoutS = 15.0f;
-constexpr int64_t kLocatorControlPeriodUs = 5000;
+constexpr float kLocatorApproachSpeedMps = 0.10f;
 constexpr float kPrecisionVxMps = 0.2f;
 constexpr float kPrecisionVyMps = 0.15f;
 constexpr float kPrecisionOmegaRadS = 1.0f;
@@ -94,6 +90,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
+        case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
             return true;
         default:
             return false;
@@ -139,7 +136,8 @@ bool precision_action(
     float dhead_rad,
     const TapeStopSpec *tape_stop_spec = nullptr,
     float speed_mps = 0.0f,
-    float omega_rad_s = 0.0f) {
+    float omega_rad_s = 0.0f,
+    const bool *external_stop_requested = nullptr) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->sequence_controller == nullptr) {
         return false;
@@ -164,6 +162,7 @@ bool precision_action(
         target.tape_stop_enabled = true;
         target.tape_stop_spec = *tape_stop_spec;
     }
+    target.external_stop_requested = external_stop_requested;
     Pose planned_goal = {};
     // Pure rotations do not need a world-position goal. Reusing the planned
     // position after a preceding translation can introduce a small position
@@ -183,65 +182,13 @@ bool precision_action(
     const bool success =
         precision_move(g_precision_move_ctx, &target, kPrecisionTimeoutS) ==
         ESP_OK;
-    if (success && tape_stop_spec != nullptr) {
+    if (success &&
+        (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
     } else if (success && g_planned_pose_valid) {
         g_planned_pose = planned_goal;
     }
     return success;
-}
-
-bool drive_backward_until_locator(
-    MovementActionController *controller,
-    float speed_mps) {
-    if (g_precision_move_ctx == nullptr ||
-        g_precision_move_ctx->drivetrain == nullptr ||
-        g_precision_move_ctx->sequence_controller == nullptr) {
-        return false;
-    }
-
-    const int64_t start_us = esp_timer_get_time();
-    FixedRateGate gate = {kLocatorControlPeriodUs, start_us};
-    auto stop = [controller]() {
-        drivetrain_stop(g_precision_move_ctx->drivetrain);
-        return controller->locator_contact_detected;
-    };
-
-    while (true) {
-        const int64_t now_us = esp_timer_get_time();
-        if (controller->locator_contact_detected) return stop();
-        if (static_cast<float>(now_us - start_us) / 1.0e6f >=
-            kLocatorApproachTimeoutS) {
-            return stop();
-        }
-
-        int64_t unused_dt_us = 0;
-        if (!gate.Ready(now_us, &unused_dt_us)) {
-            delay(1);
-            continue;
-        }
-
-        // Keep communication and pose live during this blocking action.
-        if (robot_sequence_controller_update(
-                g_precision_move_ctx->sequence_controller,
-                static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
-            !g_precision_move_ctx->sequence_controller->running ||
-            controller->locator_contact_detected) {
-            return stop();
-        }
-
-        esp_err_t error = drivetrain_set_advanced_body_velocity(
-            g_precision_move_ctx->drivetrain,
-            -speed_mps,
-            0.0f,
-            0.0f);
-        if (error == ESP_OK) {
-            error = drivetrain_update(
-                g_precision_move_ctx->drivetrain,
-                now_us);
-        }
-        if (error != ESP_OK) return stop();
-    }
 }
 
 extern "C" esp_err_t movement_action_controller_init(
@@ -470,10 +417,10 @@ extern "C" bool movement_action_controller_update(
                 speed_or_default(controller->speed, kPrecisionOmegaRadS));
 
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
-            return drive_backward_until_locator(
-                controller,
-                speed_or_default(controller->speed,
-                                 -kLocatorApproachSpeedMps));
+            return precision_action(
+                -controller->action_value, 0.0f, 0.0f, nullptr,
+                speed_or_default(controller->speed, kLocatorApproachSpeedMps),
+                0.0f, &controller->locator_contact_detected);
 
         default:
             return false;
