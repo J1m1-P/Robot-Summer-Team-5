@@ -13,22 +13,22 @@
 static const uint32_t kActionTimeoutMs = 15000;
 
 // Replace this conversion after measuring camera steering on the robot.
-#define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
+#define PLACEHOLDER_VISION_ERROR_TO_DEGREES 60.0f
 
 // ROBOT_STEP_PI_ALIGN tuning. Each pass asks the Pi for one scan and, if the
 // reported error is too large, rotates and scans again. ALIGN_CENTERED_DEGREES
 // should stay close to the Pi's own ALIGN_THRESHOLD (in tubby_detector.py)
 // converted through PLACEHOLDER_VISION_ERROR_TO_DEGREES, since that's the
 // threshold the Pi itself uses to decide whether to flash on a given scan.
-#define ALIGN_MAX_ATTEMPTS 4
+#define ALIGN_MAX_ATTEMPTS 3
 #define ALIGN_CENTERED_DEGREES 3.5f
 
 // Distance driven to each search checkpoint. Not required to be equal --
 // replace each with a measured distance for its own tape section.
-#define PLACEHOLDER_SCAN_DISTANCE_1_M 1.2f
-#define PLACEHOLDER_SCAN_DISTANCE_2_M 1.2f
-#define PLACEHOLDER_SCAN_DISTANCE_3_M 1.2f
-#define PLACEHOLDER_FINAL_SEARCH_DISTANCE_M 1.2f
+#define PLACEHOLDER_SCAN_DISTANCE_1_M 0.1f
+#define PLACEHOLDER_SCAN_DISTANCE_2_M 0.6f
+#define PLACEHOLDER_SCAN_DISTANCE_3_M 1.4f
+#define PLACEHOLDER_FINAL_SEARCH_DISTANCE_M 2.8f
 
 // One teletubby search checkpoint: drive forward along the front tape by
 // distance_m, then run the scan/rotate/flash loop (see service_pi_align).
@@ -73,44 +73,42 @@ static const RobotSequenceStep kRobotSequence[] = {
     // scan/align). See SEARCH_CHECKPOINT() above and service_pi_align()
     // below for what each checkpoint actually does.
     // ════════════════════════════════════════════════════════════════════
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
+  //  {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
+  //  {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},
 
     SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_1_M),
     SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_2_M),
     SEARCH_CHECKPOINT(PLACEHOLDER_SCAN_DISTANCE_3_M),
-    // Preserve line's 4.8 m search-section travel. Once both targets are
+    // Preserve line's 4.8m search-section travel. Once both targets are
     // found, only later scans are skipped; all remaining travel still runs.
-    {ROBOT_STEP_MOVEMENT,
-     {.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE},
-     PLACEHOLDER_FINAL_SEARCH_DISTANCE_M},
+   // {ROBOT_STEP_MOVEMENT,{.movement = MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE}, PLACEHOLDER_FINAL_SEARCH_DISTANCE_M},
     // ════════════════════════════════════════════════════════════════════
     // END TELETUBBY SEARCH
     // ════════════════════════════════════════════════════════════════════
 
     // Rotate to follow tape on the side to tower pickup, then align.
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 90.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -95.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -95.0f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f},
 
     // Tower: Picking up the pieces
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
+  //  {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.50f},
+  //  {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
     // TODO: Do following arm steps in parallel with movement to save time
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
 
     // Move to the tower base
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE}, 0.08f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR}, 0.0f},
+   // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE}, 0.0f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE}, 0.08f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f},
+   // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR}, 0.0f},
 
     // Tower: Placing the pieces
     // TODO: tune Z distances
@@ -182,7 +180,8 @@ static void enter_fault(
 static esp_err_t start_robot_step(
     RobotSequenceController *controller,
     size_t step_index,
-    uint32_t now_ms);
+    uint32_t now_ms,
+    float distance_override_m);
 
 static void advance_sequence(
     RobotSequenceController *controller,
@@ -433,7 +432,8 @@ static void handle_sequence_frame(
             const esp_err_t start_error = start_robot_step(
                 controller,
                 controller->current_step,
-                now_ms);
+                now_ms,
+                NAN);
             if (start_error != ESP_OK) {
                 enter_fault(
                     controller,
@@ -517,15 +517,19 @@ static esp_err_t send_arm_command(
 static esp_err_t start_robot_step(
     RobotSequenceController *controller,
     size_t step_index,
-    uint32_t now_ms) {
+    uint32_t now_ms,
+    float distance_override_m) {
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
     if (step->type == ROBOT_STEP_MOVEMENT) {
+        const float distance_m = isnan(distance_override_m)
+            ? step->action_value
+            : distance_override_m;
         error = movement_action_controller_init(
             &controller->movement_action_controller,
             step->action.movement,
-            step->action_value);
+            distance_m);
         if (error == ESP_OK &&
             step->action.movement ==
                 MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR &&
@@ -553,6 +557,37 @@ static esp_err_t start_robot_step(
     return ESP_OK;
 }
 
+// Once every checkpoint has flashed, advance_sequence() folds any remaining
+// search-checkpoint movement legs -- plus the trailing distance-only leg --
+// into one continuous drive, rather than stopping and re-accelerating at
+// each former checkpoint. Sums action_value forward from `from_index` (a
+// MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE step), through any interleaved
+// ROBOT_STEP_PI_ALIGN steps that would otherwise be skipped one at a time.
+// *last_index_out is set to the last MOVEMENT step folded in, so the caller
+// can resume the table from there once the combined drive completes.
+static float fold_remaining_search_distance_m(
+    size_t from_index,
+    size_t *last_index_out) {
+    float total_m = kRobotSequence[from_index].action_value;
+    size_t last_index = from_index;
+    size_t i = from_index + 1;
+    while (i < kRobotSequenceLength) {
+        const size_t movement_index =
+            kRobotSequence[i].type == ROBOT_STEP_PI_ALIGN ? i + 1 : i;
+        if (movement_index >= kRobotSequenceLength ||
+            kRobotSequence[movement_index].type != ROBOT_STEP_MOVEMENT ||
+            kRobotSequence[movement_index].action.movement !=
+                MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE) {
+            break;
+        }
+        total_m += kRobotSequence[movement_index].action_value;
+        last_index = movement_index;
+        i = movement_index + 1;
+    }
+    *last_index_out = last_index;
+    return total_m;
+}
+
 static void advance_sequence(
     RobotSequenceController *controller,
     uint32_t now_ms) {
@@ -573,8 +608,21 @@ static void advance_sequence(
         return;
     }
 
-    const esp_err_t error =
-        start_robot_step(controller, controller->current_step, now_ms);
+    // Also fold any remaining checkpoint legs into that same drive, so the
+    // robot doesn't still stop at each former checkpoint along the way.
+    float distance_override_m = NAN;
+    if (controller->pi_search_complete &&
+        kRobotSequence[controller->current_step].type == ROBOT_STEP_MOVEMENT &&
+        kRobotSequence[controller->current_step].action.movement ==
+            MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE) {
+        size_t last_index = controller->current_step;
+        distance_override_m = fold_remaining_search_distance_m(
+            controller->current_step, &last_index);
+        controller->current_step = last_index;
+    }
+
+    const esp_err_t error = start_robot_step(
+        controller, controller->current_step, now_ms, distance_override_m);
     if (error != ESP_OK) {
         enter_fault(controller, "failed to start next robot step", error);
     }
@@ -615,7 +663,7 @@ esp_err_t robot_sequence_controller_start(
 
     controller->waiting_for_arm_ready = false;
     const esp_err_t error = start_robot_step(
-        controller, controller->current_step, now_ms);
+        controller, controller->current_step, now_ms, NAN);
     if (error != ESP_OK) controller->waiting_for_arm_ready = true;
     return error;
 }

@@ -539,17 +539,15 @@ void test_all_found_skips_remaining_scans_but_finishes_route() {
     start_sequence_at_first_checkpoint(controller, &now_ms);
     const size_t sent_before = sent_command_count;
 
-    // Finding both targets stops later scans, but the robot must still drive
-    // the rest of line's 4.8 m search section before turning toward the tower.
+    // Finding both targets stops later scans AND folds every remaining
+    // checkpoint leg (0.8 + 1.0 + 1.2 m) into one continuous drive instead of
+    // stopping at each former checkpoint, landing straight on the
+    // rotate-to-tower step in the same update that delivers the report.
     queue_pi_report(1, PI_RESULT_ALL_FOUND);
     deliver_frame(controller, now_ms++);
 
-    // The first remaining travel step completes in the report's update.
-    TEST_ASSERT_EQUAL_UINT32(8, controller->current_step);
-    robot_sequence_controller_update(controller, now_ms++);  // checkpoint 3 travel
-    TEST_ASSERT_EQUAL_UINT32(10, controller->current_step);
-    robot_sequence_controller_update(controller, now_ms++);  // final 1.2 m travel
     TEST_ASSERT_EQUAL_UINT32(11, controller->current_step);  // rotate-to-tower step
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, last_stop_value);  // combined remaining distance
     TEST_ASSERT_EQUAL_UINT32(sent_before, sent_command_count);  // no more PI_SCANs sent
     TEST_ASSERT_TRUE(controller->running);
 }
@@ -570,12 +568,12 @@ void test_all_found_repositions_before_skipping_when_rotation_needed() {
     deliver_frame(controller, now_ms++);
     TEST_ASSERT_EQUAL_UINT32(5, controller->current_step);  // still checkpoint 1
 
-    // The undo rotation happens immediately; later scans are skipped while
-    // the remaining route movements continue normally.
+    // The undo rotation happens immediately; later scans are skipped and the
+    // remaining route folds into one continuous drive same as above.
     queue_pi_report(2, PI_RESULT_ALL_FOUND, 0.0f);
     deliver_frame(controller, now_ms++);
 
-    TEST_ASSERT_EQUAL_UINT32(8, controller->current_step);
+    TEST_ASSERT_EQUAL_UINT32(11, controller->current_step);
     TEST_ASSERT_TRUE(controller->running);
 }
 
