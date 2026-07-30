@@ -12,7 +12,6 @@
 #include <robot_common/status_packet.h>
 
 static const uint32_t kActionTimeoutMs = 15000;
-static const uint32_t kPoseLogPeriodMs = 200;
 
 // Replace this conversion after measuring camera steering on the robot.
 #define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
@@ -35,16 +34,7 @@ typedef struct {
     float action_speed_mps;
 } RobotSequenceStep;
 
-// Odometry validation sequence: wait for the robot to be placed, then execute
-// the requested body-relative translation path at a constant speed. This is
-// the only active robot sequence.
-static const RobotSequenceStep kOdometryCalibrationSequence[] = {
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
-};
-
-// Retained sequence definition for reference while the calibration sequence
-// is active. It is not selected or executed.
-static const RobotSequenceStep kProductionRobotSequence[] = {
+static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
 
 
@@ -206,9 +196,8 @@ static const RobotSequenceStep kProductionRobotSequence[] = {
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},
 };
 
-static const RobotSequenceStep *kRobotSequence = kOdometryCalibrationSequence;
 static const size_t kRobotSequenceLength =
-    sizeof(kOdometryCalibrationSequence) / sizeof(kOdometryCalibrationSequence[0]);
+    sizeof(kRobotSequence) / sizeof(kRobotSequence[0]);
 
 static bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
     return (int32_t)(now_ms - deadline_ms) >= 0;
@@ -221,71 +210,6 @@ static bool step_is_movement(RobotStepType type) {
 
 static bool step_is_delay(RobotStepType type) {
     return type == ROBOT_STEP_DELAY;
-}
-
-static bool is_logged_pose_move(const RobotSequenceStep *step) {
-    if (step == NULL || step->type != ROBOT_STEP_MOVEMENT) return false;
-
-    switch (step->action.movement) {
-        case MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE:
-        case MOVEMENT_ACTION_MX_TAPE_FOLLOW_DISTANCE:
-        case MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE:
-        case MOVEMENT_ACTION_GO_X_DISTANCE:
-        case MOVEMENT_ACTION_GO_Y_DISTANCE:
-        case MOVEMENT_ACTION_GO_MY_DISTANCE:
-        case MOVEMENT_ACTION_GO_PX_DISTANCE:
-        case MOVEMENT_ACTION_GO_PY_DISTANCE:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static void print_pose(const char *label, uint32_t now_ms, Pose pose) {
-    printf(
-        "# %s pose: t=%lu x=%.6f y=%.6f heading=%.6f\n",
-        label,
-        (unsigned long)now_ms,
-        pose.x_m,
-        pose.y_m,
-        pose.heading_rad);
-}
-
-static void print_tape_follow_summary(
-    Pose initial_pose,
-    Pose final_pose) {
-    const float delta_x = final_pose.x_m - initial_pose.x_m;
-    const float delta_y = final_pose.y_m - initial_pose.y_m;
-
-    printf("# ===== ODOMETRY CALIBRATION RESULT =====\n");
-    printf(
-        "# Initial: x=%.6f y=%.6f\n",
-        initial_pose.x_m,
-        initial_pose.y_m);
-    printf(
-        "# Final:   x=%.6f y=%.6f\n",
-        final_pose.x_m,
-        final_pose.y_m);
-    printf(
-        "# Delta:   dx=%.6f dy=%.6f\n",
-        delta_x,
-        delta_y);
-    printf("# =========================================\n");
-}
-
-static void log_pose_if_due(
-    RobotSequenceController *controller,
-    uint32_t now_ms) {
-    if (!controller->pose_logging) return;
-    if (!deadline_reached(now_ms, controller->next_pose_log_ms)) return;
-
-    print_pose(
-        "Tape follow sample",
-        now_ms,
-        pose_tracker_get_pose(controller->pose_tracker));
-    do {
-        controller->next_pose_log_ms += kPoseLogPeriodMs;
-    } while (deadline_reached(now_ms, controller->next_pose_log_ms));
 }
 
 static bool controller_is_valid(const RobotSequenceController *controller) {
@@ -464,11 +388,7 @@ static esp_err_t service_inputs(
     RobotSequenceController *controller,
     uint32_t now_ms) {
     const esp_err_t uart_error = receive_arm_uart(controller, now_ms);
-    if (uart_error != ESP_OK) return uart_error;
-
-    const esp_err_t pose_error = update_pose(controller);
-    if (pose_error == ESP_OK) log_pose_if_due(controller, now_ms);
-    return pose_error;
+    return uart_error == ESP_OK ? update_pose(controller) : uart_error;
 }
 
 // -------------------------- Outgoing UART logic --------------------------
@@ -508,19 +428,6 @@ static esp_err_t start_robot_step(
     }
 
     if (step_is_movement(step->type)) {
-        if (is_logged_pose_move(step)) {
-            controller->pose_logging = true;
-            controller->next_pose_log_ms = now_ms;
-            controller->tape_follow_start_pose =
-                pose_tracker_get_pose(controller->pose_tracker);
-            print_pose(
-                "Pose move initial",
-                now_ms,
-                controller->tape_follow_start_pose);
-            printf("# Pose move started: value=%.3f\n",
-                   step->action_value);
-        }
-
         const float action_value =
             step->type == ROBOT_STEP_SCAN_ROTATION
                 ? controller->scan_rotation_degrees
@@ -642,14 +549,6 @@ esp_err_t robot_sequence_controller_update(
         controller->updating_movement = false;
 
         if (succeeded) {
-            if (controller->pose_logging) {
-                const Pose final_pose =
-                    pose_tracker_get_pose(controller->pose_tracker);
-                print_tape_follow_summary(
-                    controller->tape_follow_start_pose,
-                    final_pose);
-                controller->pose_logging = false;
-            }
             advance_sequence(controller, now_ms);
         } else if (controller->running) {
             // false is always a terminal failure (no repeats)
