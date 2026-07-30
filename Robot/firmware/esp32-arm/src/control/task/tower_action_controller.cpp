@@ -126,7 +126,9 @@ static void start_tower_action(
     float distance_mm = 0.0f;
     const char *start_message = nullptr;
 
-    // Decide what to do for this commmand
+    // Axis commands use both packet parameters:
+    // opcode selects Tower X or Z; value is signed travel in 100 mm units.
+    // Negative moves up/left, while positive moves down/right.
     switch (command.opcode) {
         case CMD_TOWER_HOME:
             controller->action_is_timed = true;

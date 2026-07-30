@@ -72,14 +72,15 @@ bool follow_tape_action(
     float speed_mps,
     StopCondition stop_condition,
     float distance_m,
-    float timeout_s) {
+    float timeout_s,
+    TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO) {
     const TapeFollowMode follow_mode =
         direction == Direction::PX || direction == Direction::MX
             ? TapeFollowMode::SINGLE_SENSOR
             : TapeFollowMode::SINGLE_SENSOR;
     const bool success = follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
-        follow_mode);
+        follow_mode, marker_sensor);
     if (success) sync_planned_pose();
     return success;
 }
@@ -90,6 +91,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_MX_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
+        case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
             return true;
@@ -291,7 +293,10 @@ extern "C" bool movement_action_controller_update(
     MovementActionController *controller) {
     if (controller == NULL) return false;
 
-    // Decide what to do for this action
+    // Movement actions use three controller parameters:
+    // action selects the maneuver; action_value is its distance in metres or
+    // rotation in degrees (zero when sensor feedback determines the stop).
+    // speed is optional in m/s, or rad/s for rotation; zero uses the default.
     switch (controller->action) {
         case MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE:
             if (g_line_follower_ctx != nullptr) {
@@ -358,13 +363,25 @@ extern "C" bool movement_action_controller_update(
             }
             return false;
 
-        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT:
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(
                     g_line_follower_ctx,
                     Direction::PY,
                     speed_or_default(controller->speed, kTapeFollowSpeedMps),
-                    StopCondition::RISE_TWO, 0.0f, kTapeFollowTimeoutS);
+                    StopCondition::RISE_TWO, 0.0f, kTapeFollowTimeoutS,
+                    TapeMarkerSensor::FRONT);
+            }
+            return false;
+
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_BACK:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx,
+                    Direction::PY,
+                    speed_or_default(controller->speed, kTapeFollowSpeedMps),
+                    StopCondition::RISE_TWO, 0.0f, kTapeFollowTimeoutS,
+                    TapeMarkerSensor::BACK);
             }
             return false;
             
@@ -418,6 +435,14 @@ extern "C" bool movement_action_controller_update(
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
             return precision_action(
                 kTapeSeekMaxDistanceM, 0.0f, 0.0f, &kSideTapeStopSpec,
+                speed_or_default(
+                    controller->speed,
+                    controller->action_value > 0.0f
+                        ? controller->action_value : kPrecisionVxMps));
+
+        case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
+            return precision_action(
+                -kTapeSeekMaxDistanceM, 0.0f, 0.0f, &kSideTapeStopSpec,
                 speed_or_default(
                     controller->speed,
                     controller->action_value > 0.0f

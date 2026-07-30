@@ -77,12 +77,28 @@ DirectionInfo GetDirectionInfo(Direction dir) {
     return {0, kFrontWeights};
 }
 
-TapeStopSpec GetMarkerStopSpec(Direction dir, StopCondition stop_type) {
+TapeStopSpec GetMarkerStopSpec(
+    Direction dir,
+    StopCondition stop_type,
+    TapeMarkerSensor marker_sensor) {
     uint8_t sensor_mask = 0U;
-    switch (dir) {
-        case Direction::PX: sensor_mask = 1U << 2; break;
-        case Direction::PY: sensor_mask = 1U << 1; break;
-        case Direction::MX: break;  // No -y sensor is installed.
+    switch (marker_sensor) {
+        case TapeMarkerSensor::FRONT:
+            sensor_mask = 1U << kFrontSensorIndex;
+            break;
+        case TapeMarkerSensor::BACK:
+            sensor_mask = 1U << kBackSensorIndex;
+            break;
+        case TapeMarkerSensor::SIDE:
+            sensor_mask = 1U << kSideSensorIndex;
+            break;
+        case TapeMarkerSensor::AUTO:
+            switch (dir) {
+                case Direction::PX: sensor_mask = 1U << kSideSensorIndex; break;
+                case Direction::PY: sensor_mask = 1U << kBackSensorIndex; break;
+                case Direction::MX: break;  // No -y sensor is installed.
+            }
+            break;
     }
     return {
         .sensor_mask = sensor_mask,
@@ -112,7 +128,7 @@ bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
 
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                   StopCondition stop_type, float stop_value, float timeout_s,
-                  TapeFollowMode mode) {
+                  TapeFollowMode mode, TapeMarkerSensor marker_sensor) {
     if (ctx == nullptr || ctx->drivetrain == nullptr ||
         ctx->sequence_controller == nullptr ||
         ctx->sequence_controller->pose_tracker == nullptr ||
@@ -135,7 +151,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         stop_type == StopCondition::RISE_ONE ||
         stop_type == StopCondition::RISE_TWO;
     const TapeStopSpec marker_stop_spec =
-        GetMarkerStopSpec(dir, stop_type);
+        GetMarkerStopSpec(dir, stop_type, marker_sensor);
     float cumulative_distance_m = 0.0f;
     float filtered_error = 0.0f;
     BoundedPidState steering_pid_state = {};

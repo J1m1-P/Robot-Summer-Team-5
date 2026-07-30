@@ -21,6 +21,7 @@ StopCondition last_stop_condition = StopCondition::TIME_ONLY;
 float last_stop_value = 0.0f;
 float last_follow_timeout_s = 0.0f;
 TapeFollowMode last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
+TapeMarkerSensor last_marker_sensor = TapeMarkerSensor::AUTO;
 bool service_during_follow = false;
 uint32_t fake_millis = 0;
 
@@ -28,7 +29,8 @@ uint32_t fake_millis = 0;
 
 bool follow_tape(LineFollowerContext *context, Direction direction, float speed_mps,
                  StopCondition stop_condition, float stop_value,
-                 float timeout_s, TapeFollowMode mode) {
+                 float timeout_s, TapeFollowMode mode,
+                 TapeMarkerSensor marker_sensor) {
     ++follow_tape_calls;
     last_follow_direction = direction;
     last_follow_speed_mps = speed_mps;
@@ -36,6 +38,7 @@ bool follow_tape(LineFollowerContext *context, Direction direction, float speed_
     last_stop_value = stop_value;
     last_follow_timeout_s = timeout_s;
     last_follow_mode = mode;
+    last_marker_sensor = marker_sensor;
     if (service_during_follow) {
         TEST_ASSERT_EQUAL(
             ESP_OK,
@@ -280,6 +283,8 @@ void setUp() {
     last_stop_condition = StopCondition::TIME_ONLY;
     last_stop_value = 0.0f;
     last_follow_timeout_s = 0.0f;
+    last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
+    last_marker_sensor = TapeMarkerSensor::AUTO;
     service_during_follow = false;
     movement_action_controller_set_line_follower_context(nullptr);
 }
