@@ -29,9 +29,9 @@ struct StepperConfig {
 // stepDelayUs, motionlimitMM, and axis. All installed axes have reversed DIR
 // polarity relative to the robot's positive coordinate convention.
 inline StepperConfig towerXConfig {PIN_STEP1, PIN_STEP1_DIR, true, 3, 1700, 138, X};
-inline StepperConfig towerZConfig {PIN_STEP2, PIN_STEP2_DIR, true, 3, 2500, 220, Z};
+inline StepperConfig towerZConfig {PIN_STEP2, PIN_STEP2_DIR, true, 3, 1700, 220, Z};
 // The Habitat X and Z mechanisms are physically connected to STEP4 and STEP3,
 // respectively. Keep the axis-specific timing and travel limits with the
 // mechanism rather than with the connector number.
 inline StepperConfig habitatXConfig {PIN_STEP4, PIN_STEP4_DIR, true, 3, 1700, 187, X};
-inline StepperConfig habitatZConfig {PIN_STEP3, PIN_STEP3_DIR, true, 3, 2500, 152, Z};
+inline StepperConfig habitatZConfig {PIN_STEP3, PIN_STEP3_DIR, true, 3, 1700, 152, Z};
