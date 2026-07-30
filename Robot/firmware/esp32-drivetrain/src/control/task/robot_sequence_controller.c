@@ -1,7 +1,9 @@
 /* Implements the ordered drivetrain and arm action sequence. */
 #include "control/task/robot_sequence_controller.h"
 
+#include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #include "esp32-hal.h"
 #include <robot_common/command_packet.h>
@@ -19,6 +21,7 @@ typedef enum {
     ROBOT_STEP_ARM,
     ROBOT_STEP_PI_SCAN,
     ROBOT_STEP_SCAN_ROTATION,
+    ROBOT_STEP_DELAY,
 } RobotStepType;
 
 typedef struct {
@@ -90,13 +93,16 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.35f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.065f, 0.2f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
+    {ROBOT_STEP_DELAY, {0}, 1.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE}, 0.08f, 0.35f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.05f, 0.15f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.08f, 0.15f},
 
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, 1.2f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 0.05f, 0.15f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR}, 1.0f, 0.07f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.04f, 0.35f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.006f, 0.35f},
 
@@ -106,17 +112,17 @@ static const RobotSequenceStep kRobotSequence[] = {
     // TODO: tune Z distances
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.8f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_MIDDLE_CLAW}, 0.0f},    // drop middle piece
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_LEFT_CLAW}, 0.0f},  // drop left piece
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.50f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, -1.36f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_RIGHT_CLAW}, 0.0f}, // drop right piece
     
     // // Go back to main tape and put tower arm and locator in safe idle position
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},     // retract locator
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},     // retract locator
 
     // ------------------------ Habitat Code Below ------------------------
 
@@ -202,6 +208,10 @@ static bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
 static bool step_is_movement(RobotStepType type) {
     return type == ROBOT_STEP_MOVEMENT ||
            type == ROBOT_STEP_SCAN_ROTATION;
+}
+
+static bool step_is_delay(RobotStepType type) {
+    return type == ROBOT_STEP_DELAY;
 }
 
 static bool controller_is_valid(const RobotSequenceController *controller) {
@@ -405,6 +415,17 @@ static esp_err_t start_robot_step(
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
+    if (step_is_delay(step->type)) {
+        if (!isfinite(step->action_value) || step->action_value < 0.0f ||
+            step->action_value > (float)UINT32_MAX / 1000.0f) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        controller->step_deadline_ms = now_ms +
+            (uint32_t)(step->action_value * 1000.0f);
+        controller->running = true;
+        return ESP_OK;
+    }
+
     if (step_is_movement(step->type)) {
         const float action_value =
             step->type == ROBOT_STEP_SCAN_ROTATION
@@ -514,6 +535,12 @@ esp_err_t robot_sequence_controller_update(
     // Choose the update logic for the active step.
     const RobotSequenceStep *step =
         &kRobotSequence[controller->current_step];
+    if (step_is_delay(step->type)) {
+        if (deadline_reached(now_ms, controller->step_deadline_ms)) {
+            advance_sequence(controller, now_ms);
+        }
+        return ESP_OK;
+    }
     if (step_is_movement(step->type)) {
         controller->updating_movement = true;
         const bool succeeded = movement_action_controller_update(
