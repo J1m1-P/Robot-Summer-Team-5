@@ -225,6 +225,7 @@ bool drive_backward_until_locator(
         if (robot_sequence_controller_update(
                 g_precision_move_ctx->sequence_controller,
                 static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
+            !g_precision_move_ctx->sequence_controller->running ||
             controller->locator_contact_detected) {
             return stop();
         }

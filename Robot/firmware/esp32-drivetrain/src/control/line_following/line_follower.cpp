@@ -177,7 +177,8 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         if (tape_sensor_driver_read_all(ctx->sensors) != ESP_OK) return Abort(false);
         if (robot_sequence_controller_update(
                 ctx->sequence_controller,
-                static_cast<uint32_t>(now_us / 1000)) != ESP_OK) {
+                static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
+            !ctx->sequence_controller->running) {
             return Abort(false);
         }
         const Pose current_pose =

@@ -169,9 +169,9 @@ esp_err_t precision_move(
         }
         const esp_err_t pose_err = robot_sequence_controller_update(
             context->sequence_controller, static_cast<uint32_t>(now / 1000));
-        if (pose_err != ESP_OK) {
+        if (pose_err != ESP_OK || !context->sequence_controller->running) {
             stop();
-            return pose_err;
+            return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
         }
 
         const Pose cur = pose_tracker_get_pose(pose_tracker);
@@ -372,9 +372,9 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
 
         const esp_err_t pose_err = robot_sequence_controller_update(
             context->sequence_controller, static_cast<uint32_t>(now / 1000));
-        if (pose_err != ESP_OK) {
+        if (pose_err != ESP_OK || !context->sequence_controller->running) {
             stop();
-            return pose_err;
+            return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
         }
         if (tape_sensor_driver_read_all(context->sensors) != ESP_OK) {
             stop();
