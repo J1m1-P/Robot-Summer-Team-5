@@ -50,7 +50,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     
     // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.55f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.55f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     // {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
@@ -94,7 +94,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_DELAY, {0}, 1.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE}, 0.08f, 0.35f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.08f, 0.15f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.15f},
 
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 1.2f},
@@ -108,19 +108,19 @@ static const RobotSequenceStep kRobotSequence[] = {
 
     // Tower: Placing the pieces 
     // TODO: tune Z distances
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.8f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.6f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_MIDDLE_CLAW}, 0.0f},    // drop middle piece
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, 0.68f},
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.40f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_LEFT_CLAW}, 0.0f},  // drop left piece
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.3f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, -1.36f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_RIGHT_CLAW}, 0.0f}, // drop right piece
     
     // // Go back to main tape and put tower arm and locator in safe idle position
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},     // retract locator
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},     // retract locator
 
     // ------------------------ Habitat Code Below ------------------------
 
