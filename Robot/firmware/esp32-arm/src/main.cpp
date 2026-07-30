@@ -1,14 +1,16 @@
 /* Runs arm sensing and the drivetrain-coordinated arm action sequence. */
 #include <Arduino.h>
 
+#include <robot_common/app_log.h>
+#include <robot_common/fixed_rate_gate.h>
 #include <robot_common/uart_link.h>
 
 #include "comm/odometry_link_producer.h"
 #include "config/pin_map.h"
 #include "config/stepper_config.h"
-#include "config/tof_config.h"
+// #include "config/tof_config.h"  // ToF disabled until XSHUT wiring is restored.
 #include "config/uart_link_config.h"
-#include "control/time_of_flight/tof_manager.h"
+// #include "control/time_of_flight/tof_manager.h"
 #include "control/task/arm_action_dispatcher.h"
 #include "control/task/habitat_action_controller.h"
 #include "control/task/pi_action_controller.h"
@@ -17,7 +19,7 @@
 
 namespace {
 
-TofManager tof_manager = {};
+// TofManager tof_manager = {};
 UartLink drivetrain_uart = {};
 UartLink pi_uart = {};
 OdometryLinkProducer odometry_producer = {};
@@ -29,13 +31,20 @@ TowerActionController tower_action_controller = {};
 HabitatActionController habitat_action_controller = {};
 PiActionController pi_action_controller = {};
 ArmActionDispatcher arm_action_dispatcher = {};
-bool tof_ready = false;
+// bool tof_ready = false;
+
+constexpr int64_t kOdometrySendPeriodUs = 5000;  // 200 Hz, matches the drivetrain's control loop
+FixedRateGate odometry_gate = {kOdometrySendPeriodUs, 0};
+
+constexpr uint32_t kLocatorSwitchReportPeriodMs = 100;  // 10 Hz for switch diagnostics
+uint32_t last_locator_switch_report_ms = 0;
 
 }  // namespace
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    app_log_init();
     Serial.println("# Starting arm firmware");
 
     // Bring up the command path before optional sensing. A missing ToF sensor
@@ -91,16 +100,16 @@ void setup() {
         &pi_action_controller);
     Serial.println("# Arm action dispatcher initialized");
 
-    // TOF init
-    esp_err_t tof_error = tof_manager_init(&tof_manager, &ARM_TOF_CONFIG);
-    if (tof_error == ESP_OK) {
-        tof_error = tof_manager_start(&tof_manager);
-    }
-    tof_ready = (tof_error == ESP_OK);
-    if (!tof_ready) {
-        Serial.printf("# ToF unavailable (%s); arm commands remain enabled\n",
-                      esp_err_to_name(tof_error));
-    }
+    // ToF disabled until the XSHUT wiring is restored.
+    // esp_err_t tof_error = tof_manager_init(&tof_manager, &ARM_TOF_CONFIG);
+    // if (tof_error == ESP_OK) {
+    //     tof_error = tof_manager_start(&tof_manager);
+    // }
+    // tof_ready = (tof_error == ESP_OK);
+    // if (!tof_ready) {
+    //     Serial.printf("# ToF unavailable (%s); arm commands remain enabled\n",
+    //                   esp_err_to_name(tof_error));
+    // }
 
     // Optical init
     const PmwPinConfig pmw_pins = {
@@ -112,6 +121,15 @@ void setup() {
     if (!odometry_link_producer_init(&odometry_producer, &pmw_pins)) {
         Serial.println("# Optical odometry unavailable; arm actions still work");
     }
+
+    // The drivetrain starts its sequence when this ESP sends its ready status.
+    pinMode(PIN_START_SWITCH, INPUT_PULLUP);
+    Serial.println("# Waiting for start switch");
+    while (digitalRead(PIN_START_SWITCH) != LOW) {
+        delay(1);
+    }
+    Serial.println("# Start switch pressed");
+    delay(1000);  // Allow one second before starting the robot sequence.
 }
 
 void loop() {
@@ -120,19 +138,24 @@ void loop() {
     stepper_update(&habitat_x_stepper);
     stepper_update(&habitat_z_stepper);
 
-    if (tof_ready) {
-        const esp_err_t tof_error = tof_manager_poll(&tof_manager);
-        if (tof_error != ESP_OK && tof_error != ESP_ERR_NOT_FINISHED) {
-            tof_ready = false;
-            Serial.printf("# ToF polling stopped (%s); arm commands remain enabled\n",
-                          esp_err_to_name(tof_error));
-        }
-    }
+    // ToF disabled until the XSHUT wiring is restored.
+    // if (tof_ready) {
+    //     const esp_err_t tof_error = tof_manager_poll(&tof_manager);
+    //     if (tof_error != ESP_OK && tof_error != ESP_ERR_NOT_FINISHED) {
+    //         tof_ready = false;
+    //         Serial.printf("# ToF polling stopped (%s); arm commands remain enabled\n",
+    //                       esp_err_to_name(tof_error));
+    //     }
+    // }
 
     const uint32_t now_ms = millis();
+    Serial.println(digitalRead(PIN_LOC_SWITCH));
     const bool reporting_arm_status = arm_action_dispatcher_update(
         &arm_action_dispatcher, now_ms);
-    if (!reporting_arm_status) {
+
+    int64_t unused_dt_us = 0;
+    const int64_t now_us = static_cast<int64_t>(now_ms) * 1000;
+    if (!reporting_arm_status && odometry_gate.Ready(now_us, &unused_dt_us)) {
         (void)odometry_link_producer_update(
             &odometry_producer, &drivetrain_uart);
     }

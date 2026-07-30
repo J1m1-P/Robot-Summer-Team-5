@@ -61,26 +61,30 @@ CMD_FLASH  = 4
 CMD_DONE   = 5
 CMD_RESUME = 6   # continue an interrupted sweep/drive routine (reactive detector)
 CMD_TOWER_HOME = 7
-CMD_TOWER_Z_UP = 8
-CMD_TOWER_Z_DOWN = 9
-CMD_TOWER_X_LEFT = 10
-CMD_TOWER_X_RIGHT = 11
-CMD_TOWER_ROTATE_VERTICAL = 12
-CMD_TOWER_ROTATE_HORIZONTAL = 13
-CMD_TOWER_OPEN_CLAW = 14
-CMD_TOWER_CLOSE_CLAW = 15
-CMD_HABITAT_HOME = 16
-CMD_HABITAT_Z_UP = 17
-CMD_HABITAT_Z_DOWN = 18
-CMD_HABITAT_X_LEFT = 19
-CMD_HABITAT_X_RIGHT = 20
-CMD_HABITAT_OPEN_CLAWS = 21
-CMD_HABITAT_CLOSE_CLAWS = 22
-CMD_HABITAT_OPEN_LEFT_CLAW = 23
-CMD_HABITAT_CLOSE_LEFT_CLAW = 24
-CMD_HABITAT_OPEN_RIGHT_CLAW = 25
-CMD_HABITAT_CLOSE_RIGHT_CLAW = 26
-CMD_PI_SCAN_TELETUBBIES = 27
+CMD_TOWER_Z = 8
+CMD_TOWER_X = 9
+CMD_TOWER_ROTATE_VERTICAL = 10
+CMD_TOWER_ROTATE_HORIZONTAL = 11
+CMD_TOWER_OPEN_ALL_CLAWS = 12
+CMD_TOWER_CLOSE_ALL_CLAWS = 13
+CMD_TOWER_OPEN_LEFT_CLAW = 14
+CMD_TOWER_CLOSE_LEFT_CLAW = 15
+CMD_TOWER_OPEN_MIDDLE_CLAW = 16
+CMD_TOWER_CLOSE_MIDDLE_CLAW = 17
+CMD_TOWER_OPEN_RIGHT_CLAW = 18
+CMD_TOWER_CLOSE_RIGHT_CLAW = 19
+CMD_TOWER_EXTEND_LOCATOR = 20
+CMD_TOWER_RETRACT_LOCATOR = 21
+CMD_HABITAT_HOME = 22
+CMD_HABITAT_Z = 23
+CMD_HABITAT_X = 24
+CMD_HABITAT_OPEN_CLAWS = 25
+CMD_HABITAT_CLOSE_CLAWS = 26
+CMD_HABITAT_OPEN_LEFT_CLAW = 27
+CMD_HABITAT_CLOSE_LEFT_CLAW = 28
+CMD_HABITAT_OPEN_RIGHT_CLAW = 29
+CMD_HABITAT_CLOSE_RIGHT_CLAW = 30
+CMD_PI_SCAN_TELETUBBIES = 31
 
 # PiAction and PiResultCode, from pi_action_packet.h
 PI_ACTION_SCAN_TELETUBBIES = 0
@@ -123,6 +127,8 @@ STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN = 17
 STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED = 18
 STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN = 19
 STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED = 20
+STATUS_DETAIL_HABITAT_Z_MOVED = 33
+STATUS_DETAIL_HABITAT_X_MOVED = 34
 
 
 def encode_command(opcode, value=0.0):
@@ -267,17 +273,17 @@ class RobotLink:
     def done(self):          self.send_command(CMD_DONE)
     def resume(self):        self.send_command(CMD_RESUME)
     def tower_z_up(self, distance_mm=100):
-        self.send_command(CMD_TOWER_Z_UP, distance_mm / 100.0)
+        self.send_command(CMD_TOWER_Z, distance_mm / 100.0)
     def tower_z_down(self, distance_mm=100):
-        self.send_command(CMD_TOWER_Z_DOWN, distance_mm / 100.0)
+        self.send_command(CMD_TOWER_Z, -distance_mm / 100.0)
     def tower_rotate_vertical(self):
         self.send_command(CMD_TOWER_ROTATE_VERTICAL)
     def tower_rotate_horizontal(self):
         self.send_command(CMD_TOWER_ROTATE_HORIZONTAL)
     def tower_open_claw(self):
-        self.send_command(CMD_TOWER_OPEN_CLAW)
+        self.send_command(CMD_TOWER_OPEN_ALL_CLAWS)
     def tower_close_claw(self):
-        self.send_command(CMD_TOWER_CLOSE_CLAW)
+        self.send_command(CMD_TOWER_CLOSE_ALL_CLAWS)
 
     # --- receiving ---
     def poll(self):

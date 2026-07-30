@@ -6,6 +6,7 @@
 
 #include "esp_err.h"
 
+#include "control/drivetrain/drivetrain_odometry_source.h"
 #include "control/drivetrain/x_drive_kinematics.h"
 #include "control/drivetrain/wheel_velocity_controller.h"
 #include "control/drivetrain/move_calibration.h"
@@ -143,6 +144,10 @@ int32_t drivetrain_get_encoder_accumulated_count(
     const Drivetrain *drivetrain,
     DrivetrainMotorId motor_id
 );
+
+// Returns all four wheels' accumulated encoder counts in one call, for
+// callers (e.g. odometry sources) that need the full set each cycle.
+DrivetrainWheelCounts drivetrain_get_wheel_counts(const Drivetrain *drivetrain);
 
 // Returns one wheel's latest measured linear velocity in meters per second.
 float drivetrain_get_encoder_velocity_mps(

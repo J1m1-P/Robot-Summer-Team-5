@@ -590,6 +590,16 @@ int32_t drivetrain_get_encoder_accumulated_count(
     return drivetrain->devices.encoders[motor_id].accumulated_count;
 }
 
+DrivetrainWheelCounts drivetrain_get_wheel_counts(const Drivetrain *drivetrain) {
+    DrivetrainWheelCounts counts = {
+        .fl = drivetrain_get_encoder_accumulated_count(drivetrain, DRIVETRAIN_MOTOR_FL),
+        .fr = drivetrain_get_encoder_accumulated_count(drivetrain, DRIVETRAIN_MOTOR_FR),
+        .bl = drivetrain_get_encoder_accumulated_count(drivetrain, DRIVETRAIN_MOTOR_BL),
+        .br = drivetrain_get_encoder_accumulated_count(drivetrain, DRIVETRAIN_MOTOR_BR),
+    };
+    return counts;
+}
+
 // Reads one wheel's measured linear velocity in meters per second.
 float drivetrain_get_encoder_velocity_mps(
     const Drivetrain *drivetrain,

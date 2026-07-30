@@ -5,20 +5,44 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "config/static_calibration.h"
+#include "config/pmw3610_config.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// Compiled calibration avoids making odometry depend on a separate filesystem
+// upload. The measured sensor rotations are close enough to zero that the
+// production link intentionally uses identity matrices.
+static const float kDefaultBaselineMm = 190.5f;
+static const SensorCalibration kDefaultCalLeft = {
+    .m00 = 1.0f, .m01 = 0.0f, .m10 = 0.0f, .m11 = 1.0f};
+static const SensorCalibration kDefaultCalRight = {
+    .m00 = 1.0f, .m01 = 0.0f, .m10 = 0.0f, .m11 = 1.0f};
+
+// Converts raw sensor counts to millimetres after applying sensor rotation.
+static void apply_counts_per_mm(SensorCalibration *matrix, float counts_per_mm) {
+    matrix->m00 *= counts_per_mm;
+    matrix->m01 *= counts_per_mm;
+    matrix->m10 *= counts_per_mm;
+    matrix->m11 *= counts_per_mm;
+}
 
 bool odometry_link_producer_init(OdometryLinkProducer *producer,
                                  const PmwPinConfig *pins) {
     if (producer == NULL) return false;
     memset(producer, 0, sizeof(*producer));
 
-    FusionConfig config = {};
-    if (!static_calibration_load(&config) ||
-        !pmw3610_fusion_configure(&producer->fusion, &config)) {
+    FusionConfig config = {
+        .cal_left = kDefaultCalLeft,
+        .cal_right = kDefaultCalRight,
+        .baseline_mm = kDefaultBaselineMm,
+    };
+    const float counts_per_mm = pmw3610_get_cpi() / 25.4f;
+    apply_counts_per_mm(&config.cal_left, counts_per_mm);
+    apply_counts_per_mm(&config.cal_right, counts_per_mm);
+
+    if (!pmw3610_fusion_configure(&producer->fusion, &config)) {
         producer->ready = false;
         return false;
     }

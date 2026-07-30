@@ -5,7 +5,7 @@
 // Shared PWM timing and maximum duty settings for every drivetrain motor.
 #define MOTOR_PWM_FREQUENCY     9000       // 9kHz
 #define MOTOR_PWM_RESOLUTION    12           // 2**12 resolution
-#define MOTOR_MAX_DUTY          0.8f       // 80% duty cycle
+#define MOTOR_MAX_DUTY          0.95f       // 95% duty cycle
 
 // Front-left motor pin, PWM channel, and direction configuration.
 const MotorDriverConfig FL_MOTOR_CONFIG = {
