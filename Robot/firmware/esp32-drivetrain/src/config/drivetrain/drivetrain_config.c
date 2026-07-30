@@ -64,6 +64,8 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
          * likely well under breakaway duty, which is why the pulse couldn't
          * reliably overcome static friction. */
         .duty_slew_per_s = 1000.0f,
+        // Empirical startup assist for low-speed commands from rest.
+        .breakaway_duty = 0.30f,
     },
     .max_duty = 0.95f,
     .max_vx_mps = 0.7f,
