@@ -103,6 +103,14 @@ TARGETS_TO_FIND    = 2    # only two teletubbies exist — leave at 2. Once this
                           #         many are in `visited`, report
                           #         PI_RESULT_ALL_FOUND and shut down.
 
+# ── training image collection ─────────────────────────────────────────────────
+# Saves raw camera frames to disk (no YOLO inference) while IDLE, for building
+# up a training set. Off by default -- flip on for a data-collection run,
+# leave off for a real match.
+COLLECT_IMAGES     = False   # ADJUST: True to save frames while idling
+COLLECT_INTERVAL_S = 1.0     # ADJUST: seconds between saved frames
+COLLECT_DIR = Path(__file__).resolve().parent / "collected_images"
+,
 # ── flash hardware ──────────────────────────────────────────────────────────────
 FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
 FLASH_ON_TIME = 0.05      # ADJUST: seconds the flash stays on per pulse
@@ -258,6 +266,7 @@ def handle_scan_request(request_id, parameter):
         if not ok:
             continue
         frames_read += 1
+        _maybe_collect_image(frame)
         dets = yolo_detect_all(frame, frame.shape[1], exclude=visited)
         for identity in {d[0] for d in dets}:      # count each identity once per frame
             seen_counts[identity] += 1
@@ -396,6 +405,30 @@ def _reopen_camera():
     return False
 
 
+_last_collect_time = 0.0
+_collect_count = 0
+
+
+def _maybe_collect_image(frame):
+    """
+    Saves one raw idle frame to COLLECT_DIR at most every COLLECT_INTERVAL_S
+    -- no YOLO involved, just building up a training set. No-op unless
+    COLLECT_IMAGES is on.
+    """
+    global _last_collect_time, _collect_count
+    if not COLLECT_IMAGES:
+        return
+    now = time.time()
+    if now - _last_collect_time < COLLECT_INTERVAL_S:
+        return
+    _last_collect_time = now
+    COLLECT_DIR.mkdir(parents=True, exist_ok=True)
+    _collect_count += 1
+    filename = COLLECT_DIR / f"{int(now)}_{_collect_count:05d}.jpg"
+    cv2.imwrite(str(filename), frame)
+    print(f"[collect] saved {filename.name} ({_collect_count} total)")
+
+
 def control_loop():
     """Owns the camera. Idles (streaming only) until a PI_REQUEST arrives."""
     consecutive_failures = 0
@@ -432,6 +465,7 @@ def control_loop():
             continue
         consecutive_failures = 0
 
+        _maybe_collect_image(frame)
         publish_frame(frame, None, "IDLE")
         time.sleep(0.03)
 
