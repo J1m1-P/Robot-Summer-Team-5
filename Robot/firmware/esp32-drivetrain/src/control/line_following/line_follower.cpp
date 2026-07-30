@@ -124,6 +124,11 @@ bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
     return true;
 }
 
+bool AllChannelsOn(const TapeSensor *sensor) {
+    return sensor != nullptr && sensor->channel_0 && sensor->channel_1 &&
+           sensor->channel_2 && sensor->channel_3;
+}
+
 }  // namespace
 
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
@@ -186,6 +191,15 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         cumulative_distance_m += std::hypot(current_pose.x_m - previous_pose.x_m,
                                             current_pose.y_m - previous_pose.y_m);
         previous_pose = current_pose;
+
+        // This stop condition applies to the sensor module used to follow
+        // the current direction: front for PX, back for MX, and side for PY.
+        // Check it before issuing another drive command so the stop is
+        // immediate on the first sample where all four channels are on tape.
+        if (stop_type == StopCondition::ALL_CHANNELS_ON &&
+            AllChannelsOn(ctx->sensors[steer.sensor_index])) {
+            return Abort(true);
+        }
 
         const bool marker_stop_done = marker_stop_requested &&
             tape_stop_condition_update(&tape_stop, &marker_stop_spec,
@@ -301,6 +315,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             case StopCondition::DISTANCE: stop_reached = cumulative_distance_m >= stop_value; break;
             case StopCondition::RISE_ONE:
             case StopCondition::RISE_TWO: stop_reached = marker_stop_done; break;
+            case StopCondition::ALL_CHANNELS_ON: break;
         }
         if (!stop_reached) continue;
 

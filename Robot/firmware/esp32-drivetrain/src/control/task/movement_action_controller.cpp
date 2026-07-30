@@ -317,6 +317,17 @@ extern "C" bool movement_action_controller_update(
             }
             return false;
 
+        case MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx,
+                    Direction::PX,
+                    speed_or_default(controller->speed, kTapeFollowSpeedMps),
+                    StopCondition::ALL_CHANNELS_ON, 0.0f,
+                    kTapeFollowTimeoutS);
+            }
+            return false;
+
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(

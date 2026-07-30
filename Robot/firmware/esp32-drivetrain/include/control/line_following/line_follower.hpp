@@ -16,9 +16,17 @@ enum class TapeFollowMode { SINGLE_SENSOR, FRONT_BACK_ALIGNED };
 enum class TapeMarkerSensor { AUTO, FRONT, BACK, SIDE };
 
 // RISE_ONE stops on one detected tape edge; RISE_TWO waits for two tape edges
-// with a gap between them. AUTO marker selection uses side for PX travel,
-// back for PY travel, and no marker module for MX travel.
-enum class StopCondition { RISE_ONE, RISE_TWO, DISTANCE, TIME_ONLY };
+// with a gap between them. ALL_CHANNELS_ON stops when all four channels of the
+// sensor used for the current travel direction are on tape. AUTO marker
+// selection uses side for PX travel, back for PY travel, and no marker module
+// for MX travel.
+enum class StopCondition {
+    RISE_ONE,
+    RISE_TWO,
+    ALL_CHANNELS_ON,
+    DISTANCE,
+    TIME_ONLY,
+};
 
 // Caller owns/initializes these dependencies once and reuses the context.
 // The controller is borrowed and remains live during blocking maneuvers.
