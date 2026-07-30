@@ -67,7 +67,7 @@ void setup() {
     Serial.println("# Starting drivetrain firmware");
 
     // TODO: replace this delay with the physical start-button signal.
-    delay(5000);
+    delay(3000);
 
     Serial.println("# Starting Task Sequence");
 
