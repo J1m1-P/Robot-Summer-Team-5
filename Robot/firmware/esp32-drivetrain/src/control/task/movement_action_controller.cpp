@@ -186,7 +186,13 @@ bool precision_action(
         (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
     } else if (success && g_planned_pose_valid) {
-        g_planned_pose = planned_goal;
+        if (std::fabs(dx_body) > 1.0e-6f ||
+            std::fabs(dy_body) > 1.0e-6f) {
+            g_planned_pose = planned_goal;
+        } else {
+            g_planned_pose.heading_rad = wrap_angle(
+                g_planned_pose.heading_rad + dhead_rad);
+        }
     }
     return success;
 }
@@ -343,13 +349,15 @@ extern "C" bool movement_action_controller_update(
                 controller->action_value, 0.0f, 0.0f, nullptr,
                 speed_or_default(controller->speed, kPrecisionVxMps));
 
-        // positive action value is right, negative is left
+        // Positive action value is body +y (left); negative is body -y
+        // (right), matching DrivetrainBodyVelocity's documented frame.
         case MOVEMENT_ACTION_GO_Y_DISTANCE:
             return precision_action(
                 0.0f, controller->action_value, 0.0f, nullptr,
                 speed_or_default(controller->speed, kPrecisionVyMps));
 
-        // positive action is counterclockwise, negative is clockwise
+        // Positive action value is body -y (right); negative is body +y
+        // (left).
 
         case MOVEMENT_ACTION_GO_MY_DISTANCE:
             return precision_action(

@@ -132,6 +132,11 @@ esp_err_t precision_move(
             wrap(start.heading_rad + target->delta_heading_rad),
         };
     }
+    // Translation and rotation are executed as separate phases. Hold the
+    // heading that was active at translation start; any requested heading
+    // change is applied afterward by FinalRotate.
+    const float translation_heading = wrap(
+        goal.heading_rad - target->delta_heading_rad);
     const float cruise_speed = std::hypot(
         target->body_velocity.vx, target->body_velocity.vy);
     const float translation_distance = std::hypot(dx, dy);
@@ -270,6 +275,12 @@ esp_err_t precision_move(
                 cmd.vx *= scale;
                 cmd.vy *= scale;
             }
+            const float heading_error = wrap(
+                translation_heading - cur.heading_rad);
+            cmd.omega = clamp(
+                heading_error * kHeadingGain,
+                -kMotionOmegaRadS,
+                kMotionOmegaRadS);
             translate_elapsed_s += dt;
 
             break;
@@ -310,13 +321,22 @@ esp_err_t precision_move(
                 break;
             }
 
-            const Pose corrected_goal = {
-                goal.x_m, goal.y_m, goal.heading_rad};
-            const esp_err_t snap_error = pose_tracker_set_pose(
-                pose_tracker, &corrected_goal);
-            if (snap_error != ESP_OK) {
-                stop();
-                return snap_error;
+            // Ordinary precision moves commit their nominal endpoint so
+            // small tracking errors do not compound across a sequence. Tape
+            // and external-stop actions return above before this point when
+            // their measured stop point should be preserved.
+            const bool preserve_measured_endpoint =
+                target->tape_stop_enabled ||
+                target->external_stop_requested != nullptr;
+            if (!preserve_measured_endpoint) {
+                const Pose corrected_goal = {
+                    goal.x_m, goal.y_m, goal.heading_rad};
+                const esp_err_t snap_error = pose_tracker_set_pose(
+                    pose_tracker, &corrected_goal);
+                if (snap_error != ESP_OK) {
+                    stop();
+                    return snap_error;
+                }
             }
             stop();
             return ESP_OK;

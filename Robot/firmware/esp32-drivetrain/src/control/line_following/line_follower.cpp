@@ -20,7 +20,7 @@ constexpr float kFrontWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
 constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // MX is mounted mirrored
 
 constexpr float kP = 0.48f;
-constexpr float kD = 0.1f;
+constexpr float kD = 0.15f;
 constexpr float kEmaAlpha = 0.4f;
 constexpr float kMaxOmegaRadS = 2.0;
 

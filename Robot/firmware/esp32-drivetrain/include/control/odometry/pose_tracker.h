@@ -21,8 +21,9 @@ typedef struct {
 } Pose;
 
 /* Fuses wheel-encoder and PMW3610-optical odometry into one cumulative
- * pose: prefers a fresh optical sample each cycle, falling back to encoder
- * dead reckoning when none is available. Never touches hardware directly --
+ * pose: prefers a fresh optical sample for position each cycle, falling back
+ * to encoder dead reckoning when none is available. Fresh optical heading is
+ * blended with encoder heading. Never touches hardware directly --
  * the caller reads wheel counts and the latest optical packet and passes
  * them in each cycle, matching every other pure control module here.
  *
@@ -39,6 +40,9 @@ typedef struct {
     Pmw3610OdometrySource optical_source;
     DrivetrainOdometrySourceConfig encoder_config;
     DrivetrainPose optical_anchor_pose;
+    // Encoder heading accumulated since the last optical delta. This keeps
+    // the two heading measurements time-aligned before blending them.
+    float encoder_heading_since_optical_rad;
     // Diagnostic only: counts which branch pose_tracker_update() actually
     // took each cycle, so a caller can tell "optical is arriving but not
     // being used" apart from "optical genuinely isn't arriving often".

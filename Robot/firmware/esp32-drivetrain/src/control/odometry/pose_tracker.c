@@ -5,6 +5,22 @@
 #include <stddef.h>
 #include <string.h>
 
+/* Optical-only coordinate shear from the tape calibration.  Encoder deltas
+ * are intentionally left untouched because their axes are already usable.
+ * The +x and +y calibration runs define the correction in the body frame
+ * before the delta is rotated into the fused world frame. */
+static const float kOpticalShearXFromY = -0.09f;
+static const float kOpticalShearYFromX = -0.05f;
+static const float kOpticalHeadingWeight = 0.25f;
+static const float kEncoderHeadingWeight = 1.0f - kOpticalHeadingWeight;
+
+static void apply_optical_shear(DrivetrainOdometryDelta *delta) {
+    const float forward = delta->forward_mm;
+    const float lateral = delta->lateral_mm;
+    delta->forward_mm = forward + kOpticalShearXFromY * lateral;
+    delta->lateral_mm = lateral + kOpticalShearYFromX * forward;
+}
+
 esp_err_t pose_tracker_init(PoseTracker *tracker,
                             const DrivetrainOdometrySourceConfig *encoder_config)
 {
@@ -27,6 +43,7 @@ void pose_tracker_reset(PoseTracker *tracker)
     drivetrain_odometry_source_reset(&tracker->encoder_source);
     pmw3610_odometry_source_reset(&tracker->optical_source);
     tracker->optical_anchor_pose = (DrivetrainPose){0};
+    tracker->encoder_heading_since_optical_rad = 0.0f;
     tracker->optical_update_count = 0;
     tracker->encoder_update_count = 0;
 }
@@ -52,9 +69,21 @@ esp_err_t pose_tracker_update(PoseTracker *tracker,
         return error;
     }
 
+    if (has_encoder_delta && encoder_valid) {
+        tracker->encoder_heading_since_optical_rad +=
+            encoder_delta.heading_delta_rad;
+    }
+
     DrivetrainOdometryDelta optical_delta = {0};
+    const bool optical_was_primed = tracker->optical_source.has_previous;
     if (pmw3610_odometry_source_update(&tracker->optical_source, optical_packet,
                                        &optical_delta)) {
+        apply_optical_shear(&optical_delta);
+        optical_delta.heading_delta_rad =
+            kOpticalHeadingWeight * optical_delta.heading_delta_rad +
+            kEncoderHeadingWeight *
+                tracker->encoder_heading_since_optical_rad;
+        tracker->encoder_heading_since_optical_rad = 0.0f;
         // Compose from the last-known-good optical anchor, not from
         // tracker->odometry.pose -- that may have drifted via encoder
         // fallback since the last optical fix, and this reading overrides
@@ -66,6 +95,14 @@ esp_err_t pose_tracker_update(PoseTracker *tracker,
         tracker->optical_anchor_pose = anchored.pose;
         ++tracker->optical_update_count;
         return drivetrain_odometry_set_pose(&tracker->odometry, &anchored.pose);
+    }
+
+    // The first optical packet only establishes the optical baseline. The
+    // encoder heading accumulated before that packet does not cover the same
+    // interval as the next optical delta, so discard it after preserving the
+    // current encoder fallback update.
+    if (!optical_was_primed && tracker->optical_source.has_previous) {
+        tracker->encoder_heading_since_optical_rad = 0.0f;
     }
 
     if (!has_encoder_delta) {
