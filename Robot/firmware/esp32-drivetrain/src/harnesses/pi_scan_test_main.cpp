@@ -6,22 +6,45 @@
  * so this exercises the same wire path robot_sequence_controller.c uses for
  * ROBOT_STEP_PI_ALIGN without needing the robot to actually drive anywhere.
  *
+ * Auto-fires one CMD_PI_SCAN_TELETUBBIES every kAutoScanIntervalMs so you
+ * don't have to type into this monitor to keep scans coming -- useful when
+ * you're watching this board's monitor side by side with the arm ESP's own,
+ * looking for where a report goes missing. Waits for the in-flight request
+ * to finish (report received, or kAutoScanSafetyMs elapses with nothing
+ * back at all) before firing the next one, so it never piles up requests
+ * the arm would just reject as busy.
+ *
  * Serial commands (type + Enter in the monitor):
- *   scan      send one CMD_PI_SCAN_TELETUBBIES
+ *   scan      send one CMD_PI_SCAN_TELETUBBIES immediately
  *   identify  print a ready line, for scripted use
  */
 #include <Arduino.h>
 
 #include <robot_common/command_packet.h>
+#include <robot_common/odometry_packet.h>
 #include <robot_common/pi_action_packet.h>
+#include <robot_common/status_packet.h>
 #include <robot_common/uart_link.h>
 
 #include "config/communication/uart_link_config.h"
 
 namespace {
 
+// Gap between auto-fired scans once the previous one has finished.
+constexpr uint32_t kAutoScanIntervalMs = 5000U;
+// Safety fallback if a report never comes back at all, so a single
+// fully-lost report can't stall the auto loop forever. Must stay above the
+// arm's own PiActionController timeout (see pi_action_controller.cpp) or
+// this harness will re-fire and get rejected as "busy" while the arm is
+// still waiting -- kept 2s above it, currently TEMPORARILY raised to 25s
+// for bench debugging.
+constexpr uint32_t kAutoScanSafetyMs = 27000U;
+
 UartLink arm_uart = {};
 String command;
+bool waiting_for_report = false;
+uint32_t last_send_ms = 0U;
+uint32_t scans_sent = 0U;
 
 const char *result_name(PiResultCode result) {
     switch (result) {
@@ -37,20 +60,24 @@ const char *result_name(PiResultCode result) {
     }
 }
 
-void send_scan_request() {
+void send_scan_request(uint32_t now_ms) {
     const CommandPacket command_packet = {
         .opcode = CMD_PI_SCAN_TELETUBBIES,
         .value = 0.0f,
     };
     const esp_err_t error = command_packet_send(&arm_uart, &command_packet);
+    last_send_ms = now_ms;
+    waiting_for_report = true;
     if (error == ESP_OK) {
-        Serial.println("PISCAN,SENT");
+        ++scans_sent;
+        Serial.printf("PISCAN,SENT,n=%u\n", scans_sent);
     } else {
         Serial.printf("PISCAN,SEND_FAILED,%s\n", esp_err_to_name(error));
     }
 }
 
 void print_report(const PiReportPacket &report) {
+    waiting_for_report = false;
     Serial.printf(
         "PISCAN,REPORT,request=%u,result=%s,target=%u,error=%.3f,conf=%u\n",
         report.request_id, result_name(report.result), report.target_id,
@@ -59,7 +86,7 @@ void print_report(const PiReportPacket &report) {
 
 void handle_command(const String &line) {
     if (line == "scan") {
-        send_scan_request();
+        send_scan_request(millis());
     } else if (line == "identify") {
         Serial.println("PISCAN,READY,drivetrain");
     } else {
@@ -79,8 +106,10 @@ void setup() {
         Serial.printf("PISCAN,FAULT,uart_init,%s\n", esp_err_to_name(error));
     }
     Serial.println("PISCAN,READY,drivetrain");
-    Serial.println(
-        "PISCAN,HELP,type 'scan' + enter to send one CMD_PI_SCAN_TELETUBBIES");
+    Serial.printf(
+        "PISCAN,HELP,auto-scanning every %ums; type 'scan' + enter for an "
+        "extra one on demand\n",
+        kAutoScanIntervalMs);
 }
 
 void loop() {
@@ -94,6 +123,15 @@ void loop() {
         } else if (command.length() < 32U) {
             command += value;
         }
+    }
+
+    const uint32_t now_ms = millis();
+    const uint32_t elapsed_ms = now_ms - last_send_ms;
+    const bool due = waiting_for_report ? elapsed_ms >= kAutoScanSafetyMs
+                                         : elapsed_ms >= kAutoScanIntervalMs;
+    if (due) {
+        if (waiting_for_report) Serial.println("PISCAN,AUTO,no report -- retrying");
+        send_scan_request(now_ms);
     }
 
     const esp_err_t update_error = uart_link_update(&arm_uart);
@@ -112,6 +150,24 @@ void loop() {
             } else {
                 Serial.println("PISCAN,ERROR,decode_failed");
             }
+        } else if (odometry_packet_is(&frame)) {
+            // The arm's regular firmware streams these continuously to
+            // whatever's on the other end of arm_uart, scan or no scan --
+            // expected noise on this link, not worth printing.
+            continue;
+        } else if (status_packet_is(&frame)) {
+            StatusPacket status = {};
+            if (status_packet_decode(&frame, &status) == ESP_OK &&
+                status.code == STATUS_ACTION_COMPLETE &&
+                status.detail == STATUS_DETAIL_NONE) {
+                // The arm's "ready" heartbeat -- repeats every 20ms until it
+                // accepts its first command (see
+                // arm_action_dispatcher.cpp's readiness_pending). Expected,
+                // stops for good once the first "scan" is sent.
+                continue;
+            }
+            Serial.printf("PISCAN,ARM_STATUS,code=%u,detail=%u\n",
+                          status.code, status.detail);
         } else {
             Serial.printf("PISCAN,UNEXPECTED_PACKET,type=%u,len=%u\n",
                           frame.message_type, frame.payload_len);

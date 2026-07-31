@@ -8,7 +8,14 @@ namespace {
 // Bounds one Pi request so a missing response cannot stall the sequence.
 // Expire before the drivetrain's 15 s action deadline so the timeout report
 // has time to cross the arm UART instead of racing the drivetrain fault.
-constexpr uint32_t kResponseTimeoutMs = 14000;
+//
+// TEMPORARY (bench debugging): raised well past 15s so we can see a reply
+// actually land instead of always losing the race against this deadline --
+// replies have been observed arriving ~14s after being sent, right around
+// the old limit. Set this back to 14000 (and keep it under the drivetrain's
+// 15s step deadline) once the delay itself is root-caused -- a real mission
+// step must not wait this long.
+constexpr uint32_t kResponseTimeoutMs = 25000;
 
 // Signed subtraction keeps deadline checks valid across millis() wraparound.
 bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
@@ -113,6 +120,19 @@ bool pi_action_controller_update(
                 report.request_id == controller->request_id) {
                 finish_action(controller, report);
                 report_sent = true;
+            } else {
+                // Diagnostic: this packet passed the outer frame's checksum
+                // but didn't decode into the report we're waiting for --
+                // dump the raw bytes so we can tell a corrupted-but-real
+                // report (an XOR checksum lets an even number of bit flips
+                // cancel out) apart from something structurally unrelated.
+                Serial.printf(
+                    "# Pi packet mismatch: type=%u len=%u payload=[",
+                    frame.message_type, frame.payload_len);
+                for (uint8_t i = 0U; i < frame.payload_len; ++i) {
+                    Serial.printf("%02X ", frame.payload[i]);
+                }
+                Serial.println("]");
             }
         }
     }
@@ -120,7 +140,18 @@ bool pi_action_controller_update(
     // Convert a missing Pi response into a timeout report for drivetrain.
     if (controller->action_active &&
         deadline_reached(now_ms, controller->response_deadline_ms)) {
-        Serial.println("# Pi action timed out");
+        // Distinguishes two very different failure shapes on pi_uart: bytes
+        // that arrived but failed to parse/checksum (link is noisy) versus
+        // counters that never moved at all (nothing usable arrived --
+        // points at a broken/disconnected wire instead).
+        Serial.printf(
+            "# Pi action timed out (pi_uart: received=%lu checksum_errors=%lu "
+            "parse_errors=%lu overwritten=%lu)\n",
+            static_cast<unsigned long>(controller->pi_uart->packets_received),
+            static_cast<unsigned long>(controller->pi_uart->checksum_errors),
+            static_cast<unsigned long>(controller->pi_uart->parse_errors),
+            static_cast<unsigned long>(
+                controller->pi_uart->packets_overwritten));
         finish_with_error(controller, PI_RESULT_TIMEOUT);
         report_sent = true;
     }
