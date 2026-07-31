@@ -99,7 +99,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
 
 bool action_requires_positive_sweep(MovementAction action) {
     return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
-           action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE;
+           action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE;
 }
 
 }  // namespace
@@ -433,7 +433,7 @@ extern "C" bool movement_action_controller_update(
 
         // action_value is the CCW sweep bound in degrees. The precision
         // motion layer clamps it just inside +/-180 degrees.
-        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
+        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE:
             return precision_action(
                 0.0f, 0.0f,
                 std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,

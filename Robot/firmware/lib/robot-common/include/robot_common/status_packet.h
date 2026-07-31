@@ -67,6 +67,8 @@ typedef enum {
     STATUS_DETAIL_TOWER_LOCATOR_RETRACTED,
     STATUS_DETAIL_HABITAT_Z_MOVED,
     STATUS_DETAIL_HABITAT_X_MOVED,
+    STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED,
+    STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED,
 } ActionStatusDetail;
 
 // Maps any arm command to its command-specific completion detail.

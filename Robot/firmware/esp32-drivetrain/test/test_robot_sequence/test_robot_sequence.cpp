@@ -263,6 +263,10 @@ extern "C" ActionStatusDetail arm_action_status_detail(
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN;
         case CMD_HABITAT_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
         default:
             return STATUS_DETAIL_NONE;
     }
@@ -417,13 +421,13 @@ void test_movement_action_rejects_invalid_values() {
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
             &controller,
-            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
             0.0f));
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
             &controller,
-            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
             180.0f));
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
@@ -511,6 +515,8 @@ void test_habitat_actions_have_unique_completion_details() {
         CMD_HABITAT_CLOSE_LEFT_CLAW,
         CMD_HABITAT_OPEN_RIGHT_CLAW,
         CMD_HABITAT_CLOSE_RIGHT_CLAW,
+        CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
+        CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
     };
 
     for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);

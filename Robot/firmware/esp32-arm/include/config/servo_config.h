@@ -29,6 +29,19 @@ constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2500;
 
 static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 129, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 135, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+
+constexpr uint8_t servo_position_midpoint(const ServoConfig &config) {
+    return static_cast<uint8_t>(
+        (static_cast<uint16_t>(config.anglePositionA) +
+         static_cast<uint16_t>(config.anglePositionB)) /
+        2U);
+}
+
+constexpr uint8_t HABITAT_LEFT_CLAW_SEMI_CLOSED_ANGLE =
+    servo_position_midpoint(habitatLeftServoConfig);
+constexpr uint8_t HABITAT_RIGHT_CLAW_SEMI_CLOSED_ANGLE =
+    servo_position_midpoint(habitatRightServoConfig);
+
 static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 46, 120, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 89, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
