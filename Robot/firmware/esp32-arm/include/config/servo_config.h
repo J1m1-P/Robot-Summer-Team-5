@@ -27,8 +27,8 @@ constexpr uint16_t SERVO_FREQUENCY_HZ = 50;
 constexpr uint16_t SERVO_MIN_PULSE_WIDTH_US = 500;
 constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2500;
 
-static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 129, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 135, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 46, 120, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 89, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
