@@ -28,6 +28,8 @@ typedef enum {
     MOVEMENT_ACTION_ROTATE,
     MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE,
+    // Require a positive maximum sweep in degrees. CW watches the side
+    // sensor; CCW watches the front/PX sensor.
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE,
     MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,

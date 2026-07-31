@@ -410,6 +410,24 @@ void test_movement_action_rejects_invalid_values() {
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE,
+            180.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
             &controller, MOVEMENT_ACTION_MAX, 1.0f));
     TEST_ASSERT_EQUAL(
         ESP_OK,

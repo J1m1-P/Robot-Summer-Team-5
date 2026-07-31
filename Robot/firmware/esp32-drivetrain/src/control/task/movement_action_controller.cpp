@@ -28,10 +28,12 @@ constexpr TapeStopSpec kSideTapeStopSpec = {
     .required_sensor_count = 1,
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
 };
-constexpr TapeStopSpec kFrontTapeStopSpec = {
+constexpr TapeStopSpec kFrontLeftTapeStopSpec = {
     .sensor_mask = 1U << 0,  // front/PX sensor
     .required_sensor_count = 1,
-    .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
+    // Front channels run from absolute right (0) to absolute left (3).
+    // During a CCW sweep, the left detector reaches the tape first.
+    .channel_mask = 1U << TAPE_SENSOR_CHANNEL_3,
 };
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
@@ -88,13 +90,16 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
-        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
-        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
             return true;
         default:
             return false;
     }
+}
+
+bool action_requires_positive_sweep(MovementAction action) {
+    return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
+           action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE;
 }
 
 }  // namespace
@@ -214,7 +219,8 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
         (unsigned int)action >= (unsigned int)MOVEMENT_ACTION_MAX ||
         !std::isfinite(action_value) ||
         !std::isfinite(speed) || speed < 0.0f ||
-        (action_requires_nonnegative_distance(action) && action_value < 0.0f)) {
+        (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
+        (action_requires_positive_sweep(action) && action_value <= 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -432,7 +438,7 @@ extern "C" bool movement_action_controller_update(
                 0.0f, 0.0f,
                 std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
                           kTapeSeekMaxRotationRad),
-                &kFrontTapeStopSpec, 0.0f,
+                &kFrontLeftTapeStopSpec, 0.0f,
                 speed_or_default(controller->speed, kPrecisionOmegaRadS));
 
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
