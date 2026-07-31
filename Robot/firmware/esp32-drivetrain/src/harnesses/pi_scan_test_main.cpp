@@ -86,6 +86,7 @@ void setup() {
 void loop() {
     while (Serial.available()) {
         const char value = static_cast<char>(Serial.read());
+        Serial.write(value);   // local echo -- the monitor doesn't echo on its own
         if (value == '\n' || value == '\r') {
             command.trim();
             if (!command.isEmpty()) handle_command(command);
