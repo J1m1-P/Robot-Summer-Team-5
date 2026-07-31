@@ -75,6 +75,11 @@ except (ImportError, RuntimeError):
 # ══════════════════════════════════════════════════════════════════════════════
 # ── camera ────────────────────────────────────────────────────────────────────
 CAMERA_INDEX = 1          # ADJUST: 0 if one camera, 1 for built-in + USB
+# Capped well above IMGSZ (below) so YOLO's own downsample to IMGSZ isn't
+# losing anything -- this just stops the Pi from encoding/streaming a much
+# bigger frame than the model ever looks at.
+CAMERA_WIDTH  = 640       # ADJUST: keep >= IMGSZ
+CAMERA_HEIGHT = 480       # ADJUST: keep >= IMGSZ
 
 # ── model / detection ─────────────────────────────────────────────────────────
 # Override for development; production defaults to the model committed beside
@@ -110,7 +115,7 @@ TARGETS_TO_FIND    = 2    # only two teletubbies exist — leave at 2. Once this
 COLLECT_IMAGES     = False   # ADJUST: True to save frames while idling
 COLLECT_INTERVAL_S = 1.0     # ADJUST: seconds between saved frames
 COLLECT_DIR = Path(__file__).resolve().parent / "collected_images"
-,
+
 # ── flash hardware ──────────────────────────────────────────────────────────────
 FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
 FLASH_ON_TIME = 0.05      # ADJUST: seconds the flash stays on per pulse
@@ -384,7 +389,13 @@ stop_event = threading.Event()
 # CONTROL LOOP
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _configure_camera(capture):
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+
+
 cap = cv2.VideoCapture(CAMERA_INDEX)
+_configure_camera(cap)
 
 
 def _reopen_camera():
@@ -396,6 +407,7 @@ def _reopen_camera():
     print("[control_loop] camera unresponsive — attempting to reopen")
     cap.release()
     cap = cv2.VideoCapture(CAMERA_INDEX)
+    _configure_camera(cap)
     for _ in range(5):
         ok, _ = cap.read()
         if ok:
