@@ -28,6 +28,13 @@ constexpr TapeStopSpec kSideTapeStopSpec = {
     .required_sensor_count = 1,
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
 };
+constexpr TapeStopSpec kFrontRightTapeStopSpec = {
+    .sensor_mask = 1U << 0,  // front/PX sensor
+    .required_sensor_count = 1,
+    // Front channels run from absolute right (0) to absolute left (3).
+    // During a CW sweep, the right detector reaches the tape first.
+    .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
+};
 constexpr TapeStopSpec kFrontLeftTapeStopSpec = {
     .sensor_mask = 1U << 0,  // front/PX sensor
     .required_sensor_count = 1,
@@ -99,6 +106,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
 
 bool action_requires_positive_sweep(MovementAction action) {
     return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
+           action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE ||
            action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE;
 }
 
@@ -429,6 +437,16 @@ extern "C" bool movement_action_controller_update(
                 -std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
                            kTapeSeekMaxRotationRad),
                 &kSideTapeStopSpec, 0.0f,
+                speed_or_default(controller->speed, kPrecisionOmegaRadS));
+
+        // action_value is the CW sweep bound in degrees (clamped to the
+        // wrap-safe maximum). The front sensor's right detector leads CW.
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE:
+            return precision_action(
+                0.0f, 0.0f,
+                -std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
+                           kTapeSeekMaxRotationRad),
+                &kFrontRightTapeStopSpec, 0.0f,
                 speed_or_default(controller->speed, kPrecisionOmegaRadS));
 
         // action_value is the CCW sweep bound in degrees. The precision

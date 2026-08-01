@@ -33,5 +33,5 @@ inline StepperConfig towerZConfig {PIN_STEP2, PIN_STEP2_DIR, true, 3, 1700, 220,
 // The Habitat X and Z mechanisms are physically connected to STEP4 and STEP3,
 // respectively. Keep the axis-specific timing and travel limits with the
 // mechanism rather than with the connector number.
-inline StepperConfig habitatXConfig {PIN_STEP4, PIN_STEP4_DIR, true, 3, 1500, 187, X};
+inline StepperConfig habitatXConfig {PIN_STEP4, PIN_STEP4_DIR, true, 3, 2000, 187, X};
 inline StepperConfig habitatZConfig {PIN_STEP3, PIN_STEP3_DIR, true, 3, 1700, 152, Z};
