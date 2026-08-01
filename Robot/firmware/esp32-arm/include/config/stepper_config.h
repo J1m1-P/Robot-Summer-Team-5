@@ -14,7 +14,7 @@ struct StepperConfig {
     bool directionInverted;
 
     // Step pulse is the time the step pin is held high in microseconds.
-    // Step delay is the time between steps in microseconds.
+    // Step delay is the cruise interval between steps in microseconds.
     uint32_t stepPulseUs;
     uint32_t stepDelayUs;
 
@@ -28,10 +28,10 @@ struct StepperConfig {
 // Field order is stepPin, dirPin, directionInverted, stepPulseUs,
 // stepDelayUs, motionlimitMM, and axis. All installed axes have reversed DIR
 // polarity relative to the robot's positive coordinate convention.
-inline StepperConfig towerXConfig {PIN_STEP1, PIN_STEP1_DIR, true, 3, 1500, 150, X};
-inline StepperConfig towerZConfig {PIN_STEP2, PIN_STEP2_DIR, true, 3, 1700, 220, Z};
+inline StepperConfig towerXConfig {PIN_STEP1, PIN_STEP1_DIR, true, 3, 1000, 150, X};
+inline StepperConfig towerZConfig {PIN_STEP2, PIN_STEP2_DIR, true, 3, 1000, 220, Z};
 // The Habitat X and Z mechanisms are physically connected to STEP4 and STEP3,
 // respectively. Keep the axis-specific timing and travel limits with the
 // mechanism rather than with the connector number.
-inline StepperConfig habitatXConfig {PIN_STEP4, PIN_STEP4_DIR, true, 3, 2000, 187, X};
-inline StepperConfig habitatZConfig {PIN_STEP3, PIN_STEP3_DIR, true, 3, 1700, 152, Z};
+inline StepperConfig habitatXConfig {PIN_STEP4, PIN_STEP4_DIR, true, 3, 1000, 187, X};
+inline StepperConfig habitatZConfig {PIN_STEP3, PIN_STEP3_DIR, true, 3, 1000, 152, Z};
