@@ -2,20 +2,14 @@
 #include "control/task/pi_action_controller.h"
 
 #include <Arduino.h>
+#include "driver/uart.h"
 
 namespace {
 
 // Bounds one Pi request so a missing response cannot stall the sequence.
 // Expire before the drivetrain's 15 s action deadline so the timeout report
 // has time to cross the arm UART instead of racing the drivetrain fault.
-//
-// TEMPORARY (bench debugging): raised well past 15s so we can see a reply
-// actually land instead of always losing the race against this deadline --
-// replies have been observed arriving ~14s after being sent, right around
-// the old limit. Set this back to 14000 (and keep it under the drivetrain's
-// 15s step deadline) once the delay itself is root-caused -- a real mission
-// step must not wait this long.
-constexpr uint32_t kResponseTimeoutMs = 25000;
+constexpr uint32_t kResponseTimeoutMs = 14000;
 
 // Signed subtraction keeps deadline checks valid across millis() wraparound.
 bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
@@ -93,6 +87,11 @@ void pi_action_controller_start(
 
     controller->action_active = true;
     controller->response_deadline_ms = now_ms + kResponseTimeoutMs;
+    // TEMPORARY (bench debugging): timestamp the send so the arm's own
+    // console alone can show the full request->reply gap, even when only
+    // one monitor can be watched at a time.
+    Serial.printf("# Pi request %u sent at %lu ms\n",
+                  controller->request_id, static_cast<unsigned long>(now_ms));
 }
 
 bool pi_action_controller_update(
@@ -127,8 +126,9 @@ bool pi_action_controller_update(
                 // report (an XOR checksum lets an even number of bit flips
                 // cancel out) apart from something structurally unrelated.
                 Serial.printf(
-                    "# Pi packet mismatch: type=%u len=%u payload=[",
-                    frame.message_type, frame.payload_len);
+                    "# Pi packet mismatch at %lu ms: type=%u len=%u payload=[",
+                    static_cast<unsigned long>(now_ms), frame.message_type,
+                    frame.payload_len);
                 for (uint8_t i = 0U; i < frame.payload_len; ++i) {
                     Serial.printf("%02X ", frame.payload[i]);
                 }
@@ -144,14 +144,27 @@ bool pi_action_controller_update(
         // that arrived but failed to parse/checksum (link is noisy) versus
         // counters that never moved at all (nothing usable arrived --
         // points at a broken/disconnected wire instead).
+        //
+        // TEMPORARY (bench debugging): also reports how many bytes the
+        // driver's software ring buffer is holding for pi_uart right now --
+        // 0 here means the bytes are still stuck in the hardware FIFO
+        // (an ESP-IDF/interrupt-side issue); nonzero means they're already
+        // visible to uart_read_bytes() and something in our own drain loop
+        // (uart_link_update()/parser) is failing to consume them.
+        size_t buffered_len = 0U;
+        uart_get_buffered_data_len(
+            controller->pi_uart->config->uart_num, &buffered_len);
         Serial.printf(
-            "# Pi action timed out (pi_uart: received=%lu checksum_errors=%lu "
-            "parse_errors=%lu overwritten=%lu)\n",
+            "# Pi action timed out at %lu ms (pi_uart: received=%lu "
+            "checksum_errors=%lu parse_errors=%lu overwritten=%lu "
+            "buffered_now=%lu)\n",
+            static_cast<unsigned long>(now_ms),
             static_cast<unsigned long>(controller->pi_uart->packets_received),
             static_cast<unsigned long>(controller->pi_uart->checksum_errors),
             static_cast<unsigned long>(controller->pi_uart->parse_errors),
             static_cast<unsigned long>(
-                controller->pi_uart->packets_overwritten));
+                controller->pi_uart->packets_overwritten),
+            static_cast<unsigned long>(buffered_len));
         finish_with_error(controller, PI_RESULT_TIMEOUT);
         report_sent = true;
     }

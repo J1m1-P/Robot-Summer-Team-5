@@ -36,9 +36,8 @@ constexpr uint32_t kAutoScanIntervalMs = 5000U;
 // fully-lost report can't stall the auto loop forever. Must stay above the
 // arm's own PiActionController timeout (see pi_action_controller.cpp) or
 // this harness will re-fire and get rejected as "busy" while the arm is
-// still waiting -- kept 2s above it, currently TEMPORARILY raised to 25s
-// for bench debugging.
-constexpr uint32_t kAutoScanSafetyMs = 27000U;
+// still waiting -- kept a few seconds above it.
+constexpr uint32_t kAutoScanSafetyMs = 17000U;
 
 UartLink arm_uart = {};
 String command;
