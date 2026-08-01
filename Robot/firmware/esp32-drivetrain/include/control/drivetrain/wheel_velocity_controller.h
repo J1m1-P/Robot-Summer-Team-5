@@ -20,9 +20,6 @@ typedef struct {
     float integral_min;
     float integral_max;
     float duty_slew_per_s;
-    // Minimum first-cycle duty for a stationary wheel, used to overcome
-    // static friction. Zero disables the breakaway assist.
-    float breakaway_duty;
 } WheelVelocityControllerConfig;
 
 // Stores integral history and the previous output for one wheel controller.

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <Arduino.h>
 #include "esp_timer.h"
+#include "control/motion/stall_escalation.h"
 #include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/math_utils.h>
@@ -150,6 +151,7 @@ esp_err_t precision_move(
     float cumulative_distance_m = 0.0f;
     TapeStopCondition tape_stop;
     float translate_elapsed_s = 0.0f;
+    StallEscalation stall = {};
 
     auto stop = [&]() {
         drivetrain_stop(context->drivetrain);
@@ -191,8 +193,9 @@ esp_err_t precision_move(
             return ESP_ERR_INVALID_STATE;
         }
 
-        cumulative_distance_m += std::hypot(cur.x_m - prev.x_m,
-                                            cur.y_m - prev.y_m);
+        const float step_distance_m = std::hypot(cur.x_m - prev.x_m,
+                                                 cur.y_m - prev.y_m);
+        cumulative_distance_m += step_distance_m;
         prev = cur;
 
         if (target->tape_stop_enabled) {
@@ -342,6 +345,13 @@ esp_err_t precision_move(
             return ESP_OK;
         }
         }
+
+        const float scale = stall_escalation_update(
+            &stall, std::hypot(cmd.vx, cmd.vy), step_distance_m, dt);
+        const DrivetrainConfig *drivetrain_config = context->drivetrain->config;
+        stall_escalation_apply_scale(&cmd.vx, &cmd.vy, scale,
+                                     drivetrain_config->max_vx_mps,
+                                     drivetrain_config->max_vy_mps);
 
         const esp_err_t command_err = drivetrain_set_advanced_body_velocity(
             context->drivetrain, cmd.vx, cmd.vy, cmd.omega);
