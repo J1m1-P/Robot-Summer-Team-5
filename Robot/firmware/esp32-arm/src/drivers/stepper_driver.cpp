@@ -8,7 +8,7 @@ namespace {
 constexpr uint8_t kHardwareTimerCount = 4;
 constexpr uint16_t kTimerDivider = 80;  // 80 MHz APB / 80 = one tick per microsecond.
 constexpr uint32_t kRampStartDelayUs = 2500;
-constexpr long kRampSteps = 200;
+constexpr long kRampSteps = 100;
 
 StepperDriver *timerDrivers[kHardwareTimerCount] = {};
 

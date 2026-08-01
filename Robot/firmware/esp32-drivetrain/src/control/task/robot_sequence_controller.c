@@ -217,22 +217,23 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.25f, 0.2f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f}, 
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.95},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f}, 
 
     // PLACEDOWN Sequence 3
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -2.0f, 1.0f}, 
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.15f}, 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.12f, 0.17f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.12f, 0.17f},
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
 
     
     // PLACEDOWN Sequence 4
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},    
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.5},    
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.1f, 0.17f},
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},    
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.5},    
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.1f, 0.17f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
      
     /*------------------------ Solar Panel Code Below ------------------------*/
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.40f, 0.3f},   // move back to solar panel
