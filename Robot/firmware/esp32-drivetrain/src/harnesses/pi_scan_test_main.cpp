@@ -165,8 +165,7 @@ void loop() {
                 // stops for good once the first "scan" is sent.
                 continue;
             }
-            Serial.printf("PISCAN,ARM_STATUS,code=%u,detail=%u\n",
-                          status.code, status.detail);
+           // Serial.printf("PISCAN,ARM_STATUS,code=%u,detail=%u\n",status.code, status.detail);
         } else {
             Serial.printf("PISCAN,UNEXPECTED_PACKET,type=%u,len=%u\n",
                           frame.message_type, frame.payload_len);

@@ -87,6 +87,13 @@ COLLECT_DIR = Path(__file__).resolve().parent / "collected_images"
 FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
 FLASH_ON_TIME = 0.5      # ADJUST: seconds the flash stays on per pulse
 
+# ── simple flash mode ──────────────────────────────────────────────────────────
+# Still answers real scan requests over the same wire protocol (ESP needs no
+# changes) but skips burst-voting and the alignment/centering gate: a single
+# frame decides. Sees an unflashed tubby -> flash + PI_RESULT_OK, error=0.
+# Sees nothing -> PI_RESULT_NOT_FOUND. Flip off for a real match.
+SIMPLE_FLASH_MODE = False  # ADJUST: True for single-frame flash-on-sight scans
+
 if GPIO is not None:
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(FLASH_PIN, GPIO.OUT, initial=GPIO.LOW)
@@ -303,6 +310,48 @@ def handle_scan_request(request_id, parameter):
         _shutdown(0)
 
 
+def handle_scan_request_simple(request_id, parameter):
+    """
+    SIMPLE_FLASH_MODE's answer to a scan request: one frame, no burst voting,
+    no alignment gate, no chase/reposition. Flashes and reports OK the instant
+    an unflashed tubby is in frame (error forced to 0 -- nothing measures how
+    centered it is), else NOT_FOUND. Same wire protocol as the full handler
+    (see handle_scan_request), so nothing on the ESP side needs to change.
+    """
+    ok, frame = cap.read()
+    if not ok:
+        print(f"[SCAN #{request_id}] camera unavailable")
+        send_report(request_id, PI_RESULT_CAMERA_FAULT)
+        return
+
+    dets = yolo_detect_all(frame, frame.shape[1], exclude=visited)
+    _report_state("SCANNING", pick_target(dets))
+    if not dets:
+        print(f"[SCAN #{request_id}] no unflashed detection (visited={visited})")
+        send_report(request_id, PI_RESULT_NOT_FOUND)
+        return
+
+    winner = dets[0][0]   # yolo_detect_all already orders by confidence
+    for _ in range(FLASH_COUNT):
+        flash_once()
+    visited.add(winner)
+    print(f"[SCAN #{request_id}] flashed {winner}")
+
+    result = PI_RESULT_OK
+    if len(visited) >= TARGETS_TO_FIND:
+        result = PI_RESULT_ALL_FOUND
+        print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
+
+    send_report(request_id, result, target_id=IDENTITY_TO_TARGET_ID[winner],
+                horizontal_error=0.0)
+
+    if result == PI_RESULT_ALL_FOUND:
+        # Give the report a moment to actually go out over the wire first.
+        time.sleep(0.1)
+        print("[control_loop] all targets found — shutting down")
+        _shutdown(0)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONSOLE STATE REPORTING — replaces the old Flask/browser view
 # ══════════════════════════════════════════════════════════════════════════════
@@ -417,7 +466,10 @@ def control_loop():
                     # Pi is ready, so any request proves the beacon landed.
                     _ready_pending = False
                     if action == PI_ACTION_SCAN_TELETUBBIES:
-                        handle_scan_request(request_id, parameter)
+                        if SIMPLE_FLASH_MODE:
+                            handle_scan_request_simple(request_id, parameter)
+                        else:
+                            handle_scan_request(request_id, parameter)
 
             ok, frame = cap.read()
             if not ok:
