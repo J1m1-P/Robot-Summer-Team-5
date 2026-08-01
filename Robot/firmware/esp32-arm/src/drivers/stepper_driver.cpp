@@ -7,8 +7,29 @@ namespace {
 
 constexpr uint8_t kHardwareTimerCount = 4;
 constexpr uint16_t kTimerDivider = 80;  // 80 MHz APB / 80 = one tick per microsecond.
+constexpr uint32_t kRampStartDelayUs = 2500;
+constexpr long kRampSteps = 200;
 
 StepperDriver *timerDrivers[kHardwareTimerCount] = {};
+
+// Returns the delay for the next step. Long moves use a trapezoidal profile;
+// short moves naturally use a triangular profile and never jump to full speed.
+uint32_t IRAM_ATTR step_delay_us(const StepperDriver *driver) {
+    const uint32_t cruise_delay_us = driver->config.stepDelayUs;
+    if (cruise_delay_us >= kRampStartDelayUs) return cruise_delay_us;
+
+    const long steps_completed = driver->totalSteps - driver->stepsRemaining;
+    long ramp_progress = steps_completed < driver->stepsRemaining
+        ? steps_completed
+        : driver->stepsRemaining;
+    if (ramp_progress > kRampSteps) ramp_progress = kRampSteps;
+
+    const uint32_t delay_range_us = kRampStartDelayUs - cruise_delay_us;
+    return kRampStartDelayUs -
+        static_cast<uint32_t>(
+            (static_cast<uint64_t>(delay_range_us) * ramp_progress) /
+            kRampSteps);
+}
 
 inline timer_group_t IRAM_ATTR timer_group(uint8_t index) {
     return (index & 1U) == 0U ? TIMER_GROUP_0 : TIMER_GROUP_1;
@@ -39,7 +60,7 @@ bool IRAM_ATTR stepper_timer_interrupt(void *argument) {
 
     const uint32_t interval_us =
         driver->state == 1 ? driver->config.stepPulseUs
-                           : driver->config.stepDelayUs;
+                           : step_delay_us(driver);
     const timer_group_t group = timer_group(driver->timerIndex);
     const timer_idx_t number = timer_number(driver->timerIndex);
     const uint64_t next_alarm =
@@ -74,6 +95,7 @@ static void stepper_stop_internal(StepperDriver *driver) {
     timerAlarmDisable(driver->timer);
     driver->isMoving = false;
     driver->stepsRemaining = 0;
+    driver->totalSteps = 0;
     driver->state = 0;
     digitalWrite(driver->config.stepPin, LOW);
 }
@@ -109,6 +131,7 @@ esp_err_t stepper_init(StepperDriver *driver, StepperConfig config) {
     driver->config = config;
     driver->isMoving = false;
     driver->stepsRemaining = 0;
+    driver->totalSteps = 0;
     driver->direction = true;
     driver->state = 0;
     driver->timerIndex = timer_index;
@@ -151,13 +174,20 @@ void stepper_move_steps(StepperDriver *driver, long steps) {
         stepper_set_direction(driver, true);
     }
 
-    // Start the first pulse now; subsequent edges are hardware timed.
     driver->stepsRemaining = steps;
+    driver->totalSteps = steps;
     driver->isMoving = true;
-    driver->state = 1;
-    digitalWrite(driver->config.stepPin, HIGH);
+    driver->state = 0;
+    digitalWrite(driver->config.stepPin, LOW);
     timerRestart(driver->timer);
-    timerAlarmWrite(driver->timer, driver->config.stepPulseUs, false);
+    // Waiting one starting interval gives DIR ample setup time and begins the
+    // motor at the ramp's lowest speed before the first STEP edge.
+    timerAlarmWrite(
+        driver->timer,
+        driver->config.stepDelayUs < kRampStartDelayUs
+            ? kRampStartDelayUs
+            : driver->config.stepDelayUs,
+        false);
     timerAlarmEnable(driver->timer);
 }
 
