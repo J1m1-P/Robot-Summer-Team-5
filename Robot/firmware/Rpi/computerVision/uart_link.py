@@ -270,6 +270,8 @@ class RobotLink:
         # not crash the caller's control loop.
         try:
             self.ser.write(frame)
+            self.ser.flush()  # block until bytes are actually clocked out,
+                              # not just queued in the OS write buffer
         except OSError as e:
             print(f"[uart_link] write failed: {e}")
 
