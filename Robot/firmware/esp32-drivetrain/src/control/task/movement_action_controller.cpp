@@ -310,6 +310,17 @@ extern "C" bool movement_action_controller_update(
             }
             return false;
 
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER_FRONT:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx,
+                    Direction::PY,
+                    speed_or_default(controller->speed, kSideTowerFollowSpeedMps),
+                    StopCondition::RISE_ONE, 0.0f,
+                    kTapeFollowTimeoutS, TapeMarkerSensor::FRONT);
+            }
+            return false;
+
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(

@@ -8,7 +8,7 @@ namespace {
 constexpr float kMinCommandedSpeedMps = 0.05f;
 // Progress below this over the elapsed dt counts as "not moving" for a wheel
 // meant to be rolling at kMinCommandedSpeedMps or faster.
-constexpr float kStalledSpeedMps = 0.02f;
+constexpr float kStalledSpeedMps = 0.07f;
 // Grace period before escalating, so the normal startup ramp isn't mistaken
 // for a stall. Initial estimate -- not yet validated against real odometry
 // update cadence, which could be noisier/slower than the 200 Hz control loop
