@@ -70,7 +70,7 @@ DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request (well under the ESP's 15s timeout)
 SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before PI_RESULT_OK
 ALIGN_THRESHOLD     = 0.08 # ADJUST: |mean error| below this = "centered" -> flash
-FLASH_COUNT         = 3    # ADJUST: flashes fired once centered
+FLASH_COUNT         = 2    # ADJUST: flashes fired once centered
 CHASE_STALE_SECONDS = 10.0 # ADJUST: gap before a same-identity chase is treated as new
                            #         (stops a stale rotation sum leaking into a later checkpoint)
 TARGETS_TO_FIND     = 2    # only two teletubbies exist — leave at 2
@@ -85,7 +85,7 @@ COLLECT_DIR = Path(__file__).resolve().parent / "collected_images"
 
 # ── flash hardware ──────────────────────────────────────────────────────────────
 FLASH_PIN     = 18        # ADJUST: BCM GPIO number driving the flash
-FLASH_ON_TIME = 0.05      # ADJUST: seconds the flash stays on per pulse
+FLASH_ON_TIME = 0.5      # ADJUST: seconds the flash stays on per pulse
 
 if GPIO is not None:
     GPIO.setmode(GPIO.BCM)
