@@ -234,44 +234,12 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
      
-
-
-    // //Following has not been tested
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.3f},
-    // // Add MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.6f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.1f, 0.4f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.1f},
-
-    // Pickup sequence 2
-
-    // Go back to base 2
-
-    // // PLACEDOWN Sequence 2
-
-    // // Solar Panel
-
-
-
-
-    
-
-
-
-
-
-    // Habitat: Building actions (enable and tune when the sequence is ready)
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_HOME}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.30f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.90f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},
-
-    // Movement: From tower pieces to tower base
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 1.0f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},
+    /*------------------------ Solar Panel Code Below ------------------------*/
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.40f, 0.3f},   // move back to solar panel
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},    // rotate so spikes are aligned
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                   // move claw to position in Y
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.16f},                                   // move claw to position in X
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.5f, 0.25f},   // move and remove cover
 };
 
 static const size_t kRobotSequenceLength =
