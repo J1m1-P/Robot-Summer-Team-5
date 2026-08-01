@@ -31,7 +31,7 @@
 namespace {
 
 // Gap between auto-fired scans once the previous one has finished.
-constexpr uint32_t kAutoScanIntervalMs = 5000U;
+constexpr uint32_t kAutoScanIntervalMs = 1000U;
 // Safety fallback if a report never comes back at all, so a single
 // fully-lost report can't stall the auto loop forever. Must stay above the
 // arm's own PiActionController timeout (see pi_action_controller.cpp) or

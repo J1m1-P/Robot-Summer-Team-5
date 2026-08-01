@@ -92,7 +92,7 @@ FLASH_ON_TIME = 0.5      # ADJUST: seconds the flash stays on per pulse
 # changes) but skips burst-voting and the alignment/centering gate: a single
 # frame decides. Sees an unflashed tubby -> flash + PI_RESULT_OK, error=0.
 # Sees nothing -> PI_RESULT_NOT_FOUND. Flip off for a real match.
-SIMPLE_FLASH_MODE = False  # ADJUST: True for single-frame flash-on-sight scans
+SIMPLE_FLASH_MODE = True  # ADJUST: True for single-frame flash-on-sight scans
 
 if GPIO is not None:
     GPIO.setmode(GPIO.BCM)
