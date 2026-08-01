@@ -21,6 +21,7 @@ typedef enum {
     PACKET_TYPE_STATUS,
     PACKET_TYPE_PI_REQUEST,
     PACKET_TYPE_PI_REPORT,
+    PACKET_TYPE_PI_READY,   // Pi -> arm, unsolicited, empty payload: camera/model ready
     PACKET_TYPE_MAX
 } PacketMessageType;
 

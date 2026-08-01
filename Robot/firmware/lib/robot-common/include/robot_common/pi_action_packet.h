@@ -77,6 +77,9 @@ esp_err_t pi_report_packet_decode(
     const PacketFrame *frame,
     PiReportPacket *packet_out);
 
+// Identifies the Pi's unsolicited "camera/model ready" beacon (empty payload).
+bool pi_ready_packet_is(const PacketFrame *frame);
+
 #ifdef __cplusplus
 }
 #endif

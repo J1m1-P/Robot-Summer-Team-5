@@ -30,7 +30,8 @@ PACKET_TYPE_COMMAND  = 2
 PACKET_TYPE_STATUS   = 3
 PACKET_TYPE_PI_REQUEST = 4
 PACKET_TYPE_PI_REPORT  = 5
-PACKET_TYPE_MAX        = 6
+PACKET_TYPE_PI_READY   = 6   # Pi -> ESP, unsolicited, empty payload: camera/model ready
+PACKET_TYPE_MAX        = 7
 
 PACKET_MAX_PAYLOAD_SIZE = 64
 
@@ -175,6 +176,15 @@ def encode_pi_report(request_id, action, result, target_id=0,
     return encode_frame(PACKET_TYPE_PI_REPORT, payload)
 
 
+def encode_pi_ready():
+    """
+    Encode the unsolicited PI_READY beacon (empty payload, no request_id):
+    tells the arm ESP the camera opened and the YOLO model finished loading,
+    so it's safe to start relaying scan requests.
+    """
+    return encode_frame(PACKET_TYPE_PI_READY)
+
+
 # ─────────────────────────────────────────────
 # RECEIVE — reassemble packets the ESP sends back
 # ─────────────────────────────────────────────
@@ -265,6 +275,9 @@ class RobotLink:
             request_id, action, result, target_id,
             horizontal_error, confidence_percent))
 
+    def send_pi_ready(self):
+        self._write(encode_pi_ready())
+
     def _write(self, frame):
         # A disconnected/flaky USB-serial link should drop this one packet,
         # not crash the caller's control loop.
@@ -334,6 +347,7 @@ if __name__ == "__main__":
         ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
         ("PI_SCAN_TELETUBBIES", encode_command(CMD_PI_SCAN_TELETUBBIES)),
         ("TOWER_Z_UP 0.5", encode_command(CMD_TOWER_Z_UP, 0.5)),
+        ("PI_READY", encode_pi_ready()),
     ]:
         print(f"{name:22s}:", pkt.hex(" "))
 

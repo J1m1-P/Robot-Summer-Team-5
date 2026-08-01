@@ -52,7 +52,7 @@ except (ImportError, RuntimeError):
 # CONFIGURATION — everything you tune lives here
 # ══════════════════════════════════════════════════════════════════════════════
 # ── camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 1          # ADJUST: 0 if one camera, 1 for built-in + USB
+CAMERA_INDEX = 0          # ADJUST: 0 if one camera, 1 for built-in + USB
 CAMERA_WIDTH  = 640       # ADJUST: keep >= IMGSZ, no point capturing bigger
 CAMERA_HEIGHT = 480       # ADJUST: than what YOLO's own downsample will use
 
@@ -337,6 +337,16 @@ def _configure_camera(capture):
 cap = cv2.VideoCapture(CAMERA_INDEX)
 _configure_camera(cap)
 
+# ── readiness beacon ────────────────────────────────────────────────────────
+# Camera's open and the model (loaded above, before this point) is warm, so
+# tell the arm ESP it's safe to start relaying scan requests. Repeated at
+# READY_REPEAT_INTERVAL_S -- like arm_action_dispatcher.cpp's own startup
+# beacon -- so one lost byte on this link can't strand the ESP waiting
+# forever; it stops once the first request proves the ESP already knows.
+READY_REPEAT_INTERVAL_S = 0.2
+_ready_pending = True
+_last_ready_sent_time = 0.0
+
 
 def _reopen_camera():
     """
@@ -383,12 +393,19 @@ def _maybe_collect_image(frame):
 
 def control_loop():
     """Owns the camera. Idles until a PI_REQUEST arrives."""
+    global _ready_pending, _last_ready_sent_time
     consecutive_failures = 0
     MAX_FAILURES = 30        # ADJUST: bad reads in a row before trying to reopen
 
     try:
         while True:
             if link is not None:
+                if _ready_pending:
+                    now = time.time()
+                    if now - _last_ready_sent_time >= READY_REPEAT_INTERVAL_S:
+                        _last_ready_sent_time = now
+                        link.send_pi_ready()
+
                 for msg_type, payload in link.poll():
                     if msg_type != PACKET_TYPE_PI_REQUEST:
                         continue
@@ -396,6 +413,9 @@ def control_loop():
                         request_id, action, parameter = decode_pi_request(payload)
                     except ValueError:
                         continue
+                    # The ESP only sends a request once it already knows the
+                    # Pi is ready, so any request proves the beacon landed.
+                    _ready_pending = False
                     if action == PI_ACTION_SCAN_TELETUBBIES:
                         handle_scan_request(request_id, parameter)
 

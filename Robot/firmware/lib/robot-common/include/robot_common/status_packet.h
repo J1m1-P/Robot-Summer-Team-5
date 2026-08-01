@@ -27,6 +27,8 @@ typedef enum {
     STATUS_FAULT,           // something went wrong; `detail` holds a fault code
     STATUS_ACTION_COMPLETE, // arm ready when detail is NONE; otherwise an action completed
     STATUS_LOCATOR_CONTACT, // the extended Tower locator microswitch was pressed
+    STATUS_PI_READY,        // relayed from the arm: the Pi's camera/model finished
+                             // initializing and is ready to answer scan requests
     STATUS_MAX
 } StatusCode;
 

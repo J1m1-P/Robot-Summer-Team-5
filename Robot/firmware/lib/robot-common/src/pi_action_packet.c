@@ -112,3 +112,9 @@ esp_err_t pi_report_packet_decode(
     packet_out->confidence_percent = frame->payload[6];
     return ESP_OK;
 }
+
+bool pi_ready_packet_is(const PacketFrame *frame) {
+    return frame != NULL &&
+        frame->message_type == (uint8_t)PACKET_TYPE_PI_READY &&
+        frame->payload_len == 0U;
+}

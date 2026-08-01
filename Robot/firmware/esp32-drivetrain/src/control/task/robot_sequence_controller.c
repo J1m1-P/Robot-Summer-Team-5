@@ -12,6 +12,12 @@
 
 static const uint32_t kActionTimeoutMs = 15000;
 
+// How long the first teletubby checkpoint waits for the Pi's camera/model
+// ready beacon (relayed by the arm as STATUS_PI_READY) before giving up on
+// the whole search and just driving the route. Generous because the Pi's
+// model load + camera open can legitimately take several seconds after boot.
+static const uint32_t kPiReadyTimeoutMs = 10000;
+
 // Replace this conversion after measuring camera steering on the robot.
 #define PLACEHOLDER_VISION_ERROR_TO_DEGREES 60.0f
 
@@ -422,6 +428,14 @@ static void handle_sequence_frame(
             return;
         }
 
+        if (status.code == STATUS_PI_READY) {
+            // Just a flag update -- the actual wait/timeout is driven from
+            // robot_sequence_controller_update() so it applies whether or
+            // not this arrives while we're actively waiting on it.
+            controller->pi_ready = true;
+            return;
+        }
+
         if (controller->waiting_for_arm_ready) {
             if (status.code != STATUS_ACTION_COMPLETE ||
                 status.detail != STATUS_DETAIL_NONE) {
@@ -542,6 +556,16 @@ static esp_err_t start_robot_step(
         controller->align_attempts = 0;
         controller->last_rotation_degrees = 0.0f;
         controller->chase_net_rotation_degrees = 0.0f;
+        if (!controller->pi_ready) {
+            // Don't request a scan the Pi can't be listening for yet --
+            // robot_sequence_controller_update() waits here (bounded by
+            // kPiReadyTimeoutMs) and either resumes the scan once pi_ready
+            // arrives or gives up the whole search if it never does.
+            controller->waiting_for_pi_ready = true;
+            controller->pi_ready_deadline_ms = now_ms + kPiReadyTimeoutMs;
+            controller->running = true;
+            return ESP_OK;
+        }
         error = send_pi_scan(controller, now_ms);
     } else {
         if (step->action.arm == CMD_TOWER_EXTEND_LOCATOR) {
@@ -682,6 +706,28 @@ esp_err_t robot_sequence_controller_update(
     if (!controller->running ||
         controller->waiting_for_arm_ready ||
         controller->updating_movement) {
+        return ESP_OK;
+    }
+
+    if (controller->waiting_for_pi_ready) {
+        if (controller->pi_ready) {
+            controller->waiting_for_pi_ready = false;
+            const esp_err_t scan_error = send_pi_scan(controller, now_ms);
+            if (scan_error != ESP_OK) {
+                enter_fault(
+                    controller, "failed to start Pi scan after ready",
+                    scan_error);
+            }
+            return ESP_OK;
+        }
+        if (deadline_reached(now_ms, controller->pi_ready_deadline_ms)) {
+            printf(
+                "# Pi never reported ready; abandoning teletubby search, "
+                "continuing route\n");
+            controller->waiting_for_pi_ready = false;
+            controller->pi_search_complete = true;
+            advance_sequence(controller, now_ms);
+        }
         return ESP_OK;
     }
 

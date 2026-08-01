@@ -118,6 +118,10 @@ void deliver_frame(RobotSequenceController *controller, uint32_t now_ms) {
 void start_sequence_at_first_checkpoint(
     RobotSequenceController *controller, uint32_t *now_ms) {
     queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);
+    // The Pi is already ready by the time the sequence starts in this
+    // fixture -- tests that care about the ready-gate itself build their own
+    // sequence below instead of using this helper.
+    queue_status(STATUS_PI_READY, STATUS_DETAIL_NONE);
     deliver_frame(controller, (*now_ms)++);  // arm ready -> starts step 0
 
     const uint8_t preamble_details[] = {
@@ -343,6 +347,69 @@ void test_sequence_waits_for_arm_then_starts_first_checkpoint() {
     TEST_ASSERT_EQUAL(CMD_TOWER_Z, sent_commands[2]);
     TEST_ASSERT_EQUAL(CMD_TOWER_ROTATE_HORIZONTAL, sent_commands[3]);
     TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[4]);
+}
+
+// These two tests build the sequence manually instead of using
+// start_sequence_at_first_checkpoint() (which pre-seeds STATUS_PI_READY),
+// since they exist specifically to exercise the pi_ready gate itself.
+// They assume the current kRobotSequence -- Tower preamble steps commented
+// out -- so checkpoint 1's PI_ALIGN is step 1 (step 0 is its tape-follow).
+void test_pi_align_waits_for_pi_ready_before_scanning() {
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+
+    uint32_t now_ms = 100;
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);  // arm ready only
+    deliver_frame(controller, now_ms++);
+
+    // Checkpoint 1's tape-follow completes (fake line follower), landing on
+    // its PI_ALIGN step -- which should block instead of sending a scan the
+    // Pi isn't listening for yet.
+    TEST_ASSERT_EQUAL_UINT32(1, controller->current_step);
+    TEST_ASSERT_TRUE(controller->waiting_for_pi_ready);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
+
+    // The Pi announces ready; the deferred scan should go out immediately,
+    // in this same tick.
+    queue_status(STATUS_PI_READY, STATUS_DETAIL_NONE);
+    deliver_frame(controller, now_ms++);
+
+    TEST_ASSERT_FALSE(controller->waiting_for_pi_ready);
+    TEST_ASSERT_EQUAL_UINT32(1, controller->current_step);  // still checkpoint 1
+    TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[0]);
+}
+
+void test_pi_align_gives_up_search_when_pi_never_ready() {
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+
+    uint32_t now_ms = 100;
+    queue_status(STATUS_ACTION_COMPLETE, STATUS_DETAIL_NONE);  // arm ready only
+    deliver_frame(controller, now_ms++);
+    TEST_ASSERT_TRUE(controller->waiting_for_pi_ready);
+    const uint32_t deadline_ms = controller->pi_ready_deadline_ms;
+
+    // No STATUS_PI_READY ever arrives. Once the wait deadline passes, the
+    // whole search should be abandoned -- not just this one checkpoint --
+    // and the remaining checkpoint legs folded into one continuous drive.
+    deliver_frame(controller, deadline_ms);
+    TEST_ASSERT_FALSE(controller->waiting_for_pi_ready);
+    TEST_ASSERT_TRUE(controller->pi_search_complete);
+    TEST_ASSERT_TRUE(controller->running);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);  // never scanned
+
+    // The next tick actually drives the folded distance (checkpoints 2 + 3:
+    // PLACEHOLDER_SCAN_DISTANCE_2_M + PLACEHOLDER_SCAN_DISTANCE_3_M).
+    deliver_frame(controller, deadline_ms + 1);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 2.0f, last_stop_value);
+
+    // With no more PI_ALIGN steps left to skip, the sequence runs straight
+    // to completion via line-following alone.
+    TEST_ASSERT_FALSE(controller->running);
+    TEST_ASSERT_EQUAL_UINT32(0, sent_command_count);
 }
 
 void test_checkpoint_not_found_advances_to_next_checkpoint() {
@@ -779,6 +846,8 @@ void test_tower_actions_have_unique_completion_details() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_sequence_waits_for_arm_then_starts_first_checkpoint);
+    RUN_TEST(test_pi_align_waits_for_pi_ready_before_scanning);
+    RUN_TEST(test_pi_align_gives_up_search_when_pi_never_ready);
     RUN_TEST(test_checkpoint_not_found_advances_to_next_checkpoint);
     RUN_TEST(test_uncentered_scan_rotates_and_rescans_in_one_call);
     RUN_TEST(test_centered_scan_advances_without_rotating);

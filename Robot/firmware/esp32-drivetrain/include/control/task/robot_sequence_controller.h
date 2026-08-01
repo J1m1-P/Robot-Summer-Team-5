@@ -31,6 +31,9 @@ typedef struct {
     bool locator_contact_pending;
     bool updating_movement;
     bool pi_search_complete;
+    bool pi_ready;              // latched true once the arm relays STATUS_PI_READY
+    bool waiting_for_pi_ready;  // blocking the first PI_ALIGN step on pi_ready
+    uint32_t pi_ready_deadline_ms;
     uint8_t last_pi_request_id;
     uint8_t align_attempts;   // scan+rotate rounds used on the current PI_ALIGN step
     float last_rotation_degrees;  // most recent rotation commanded, for NOT_FOUND recovery

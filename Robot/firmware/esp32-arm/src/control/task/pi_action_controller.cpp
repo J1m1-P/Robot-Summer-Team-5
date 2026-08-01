@@ -62,6 +62,11 @@ bool pi_action_controller_is_busy(const PiActionController *controller) {
     return controller->action_active;
 }
 
+// True once the Pi's ready beacon has been seen on pi_uart.
+bool pi_action_controller_is_ready(const PiActionController *controller) {
+    return controller->pi_ready;
+}
+
 // Starts one scan request and records the response deadline.
 void pi_action_controller_start(
     PiActionController *controller,
@@ -102,16 +107,30 @@ bool pi_action_controller_update(
     // This controller is the only reader of the dedicated Pi UART.
     const esp_err_t update_error = uart_link_update(controller->pi_uart);
 
-    if (update_error != ESP_OK && controller->action_active) {
-        Serial.printf(
-            "# Pi UART update failed (%s)\n",
-            esp_err_to_name(update_error));
-        finish_with_error(controller, PI_RESULT_LINK_ERROR);
-        report_sent = true;
-    } else if (controller->action_active) {
-        // Consume at most one complete report per update.
+    if (update_error != ESP_OK) {
+        if (controller->action_active) {
+            Serial.printf(
+                "# Pi UART update failed (%s)\n",
+                esp_err_to_name(update_error));
+            finish_with_error(controller, PI_RESULT_LINK_ERROR);
+            report_sent = true;
+        }
+    } else {
+        // Drain every queued packet, not just one -- the ready beacon can
+        // arrive whether or not a request is active, and it shouldn't be
+        // left stranded in the queue behind (or ahead of) a report.
         PacketFrame frame = {};
-        if (uart_link_take_packet(controller->pi_uart, &frame) == ESP_OK) {
+        while (uart_link_take_packet(controller->pi_uart, &frame) == ESP_OK) {
+            if (pi_ready_packet_is(&frame)) {
+                if (!controller->pi_ready) {
+                    Serial.println("# Pi camera/model ready");
+                }
+                controller->pi_ready = true;
+                continue;
+            }
+
+            if (!controller->action_active) continue;
+
             PiReportPacket report = {};
 
             // Only the report for the active request can finish this action.
