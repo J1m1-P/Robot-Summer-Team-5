@@ -97,6 +97,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
+        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
             return true;
         default:
@@ -428,6 +429,15 @@ extern "C" bool movement_action_controller_update(
                     controller->speed,
                     controller->action_value > 0.0f
                         ? controller->action_value : kPrecisionVxMps));
+
+        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
+            return precision_action(
+                0.0f, kTapeSeekMaxDistanceM, 0.0f,
+                &kFrontLeftTapeStopSpec,
+                speed_or_default(
+                    controller->speed,
+                    controller->action_value > 0.0f
+                        ? controller->action_value : kPrecisionVyMps));
 
         // action_value is the CW sweep bound in degrees (clamped to the
         // wrap-safe maximum).
