@@ -1,25 +1,30 @@
 """
-Teletubby Detector — answers scan requests on the arm ESP's pi_uart link.
-The drivetrain owns the search sequence (robot_sequence_controller.c): each
-checkpoint requests a scan, re-requesting if the error's too large. This
-script only answers — it never drives the robot.
+Teletubby Detector — SIMPLE FLASH MODE. Answers scan requests on the arm
+ESP's pi_uart link, same wire protocol as tubby_detector.py, except it never
+asks the ESP to rotate for centering: it flashes the burst-voted winner
+immediately, however off-center it is. Use this instead of
+tubby_detector.py when alignment accuracy isn't worth spending extra scan
+requests on.
+
+Only run one of tubby_detector.py / tubby_detector_simple.py at a time --
+both claim the camera and serial port exclusively.
 
 FLOW
   IDLE      Camera runs, no YOLO; state/detections print to the console.
-  SCANNING  Vote each identity across SCAN_BURST_FRAMES (needs SCAN_MIN_VOTES
-            to win, so near-equidistant targets can't split each other's
-            votes). A centered winner (|error| < ALIGN_THRESHOLD) gets
-            flashed and added to `visited`, then reports ALL_FOUND
-            (TARGETS_TO_FIND flashed), REPOSITION (a second unflashed target
-            was also seen — ESP turns back for it), or done. One report per
-            request, then back to IDLE.
+  SCANNING  Vote the one unflashed identity across SCAN_BURST_FRAMES (needs
+            SCAN_MIN_VOTES to count -- only one teletubby is ever in frame
+            at a time, so this just filters out single-frame noise, not
+            competing candidates). A solid winner is flashed immediately and
+            added to `visited`, then reports ALL_FOUND (TARGETS_TO_FIND
+            flashed) or plain OK. One report per request, then back to IDLE.
 
-WIRE (robot_common/pi_action_packet.h)
+WIRE (robot_common/pi_action_packet.h) -- identical to tubby_detector.py.
   ESP->Pi PI_REQUEST: request_id, action, parameter (unused).
   Pi->ESP PI_REPORT:  request_id, result, target_id, horizontal_error
-                      (-1 left..+1 right), confidence_percent.
-  REPOSITION/ALL_FOUND are flags, not detections: horizontal_error is
-  ignored — the ESP tracks/undoes its own rotation instead.
+                      (always 0 here -- nothing measures how centered the
+                      winner was), confidence_percent.
+  ALL_FOUND is a flag, not a detection: horizontal_error is ignored -- the
+  ESP just moves on to Tower pickup.
 """
 
 import os
@@ -38,7 +43,6 @@ from uart_link import (
     PI_RESULT_OK,
     PI_RESULT_NOT_FOUND,
     PI_RESULT_CAMERA_FAULT,
-    PI_RESULT_REPOSITION,
     PI_RESULT_ALL_FOUND,
 )   # the ESP32 serial link
 
@@ -68,11 +72,8 @@ DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── answering one scan request ────────────────────────────────────────────────
 SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request (well under the ESP's 15s timeout)
-SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before PI_RESULT_OK
-ALIGN_THRESHOLD     = 0.08 # ADJUST: |mean error| below this = "centered" -> flash
-FLASH_COUNT         = 2    # ADJUST: flashes fired once centered
-CHASE_STALE_SECONDS = 10.0 # ADJUST: gap before a same-identity chase is treated as new
-                           #         (stops a stale rotation sum leaking into a later checkpoint)
+SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before flashing
+FLASH_COUNT         = 2    # ADJUST: flashes fired once a winner is voted
 TARGETS_TO_FIND     = 2    # only two teletubbies exist — leave at 2
 
 # ── training image collection ─────────────────────────────────────────────────
@@ -108,16 +109,8 @@ YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"
 IDENTITY_TO_TARGET_ID = {"dipsy": 0, "laa_laa": 1, "po": 2, "tinky_winky": 3}
 
 # Identities already flashed. Persists across checkpoints so a teletubby seen
-# from more than one checkpoint is only flashed once, and a scan seeing both
-# picks whichever still needs flashing instead of just the closest one.
+# from more than one checkpoint is only flashed once.
 visited = set()
-
-# Tracks the current "chase": did a second, unflashed teletubby share the
-# view with `_chase_identity` before any turning started? If so, flashing
-# the first triggers PI_RESULT_REPOSITION. See handle_scan_request().
-_chase_identity = None
-_chase_saw_second = False
-_chase_last_call_time = 0.0
 
 
 def yolo_detect_all(frame, frame_w, exclude=None):
@@ -159,14 +152,6 @@ def pick_target(detections):
 # ANSWERING ONE SCAN REQUEST
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _reset_chase():
-    """Clear the running chase state — the current identity is done (flashed,
-    lost, or abandoned) so nothing should carry over to whatever's next."""
-    global _chase_identity, _chase_saw_second
-    _chase_identity = None
-    _chase_saw_second = False
-
-
 def flash_once():
     """Fire the onboard flash once via GPIO18."""
     if GPIO is None:
@@ -191,7 +176,7 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
                  confidence_percent=0):
     """
     Send one PiReportPacket, or just print it in dev mode (link is None) --
-    lets handle_scan_request's detection/voting/chase logic be exercised
+    lets handle_scan_request_simple's detection/voting logic be exercised
     (e.g. by a standalone test harness) without a real serial link.
     """
     if link is None:
@@ -204,19 +189,16 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
         confidence_percent=confidence_percent)
 
 
-def handle_scan_request(request_id, parameter):
+def handle_scan_request_simple(request_id, parameter):
     """
-    Sample a short burst of frames, vote on the best not-yet-flashed target,
-    flash it if it's already centered, and send back exactly one report.
+    Sample a short burst of frames, vote on the best not-yet-flashed target
+    (same voting as tubby_detector.py's handle_scan_request), and flash it
+    immediately -- no centering check, no cross-request chase tracking, since
+    every call either flashes on the spot or reports NOT_FOUND/CAMERA_FAULT.
     `parameter` is decoded but unused (reserved by the wire format for future
     per-scan tuning).
     """
-    global _chase_identity, _chase_saw_second, _chase_last_call_time
-
-    # Vote per identity across the burst rather than per-frame-closest, so two
-    # near-equidistant targets can't split each other's votes (see docstring).
     seen_counts = Counter()
-    err_by_id = defaultdict(list)
     frames_read = 0
     for _ in range(SCAN_BURST_FRAMES):
         ok, frame = cap.read()
@@ -227,76 +209,43 @@ def handle_scan_request(request_id, parameter):
         dets = yolo_detect_all(frame, frame.shape[1], exclude=visited)
         for identity in {d[0] for d in dets}:      # count each identity once per frame
             seen_counts[identity] += 1
-        for identity, _box, error in dets:
-            err_by_id[identity].append(error)
         _report_state("SCANNING", pick_target(dets))
 
     if frames_read == 0:
         print(f"[SCAN #{request_id}] camera unavailable")
         send_report(request_id, PI_RESULT_CAMERA_FAULT)
-        _reset_chase()   # this checkpoint is over either way -- see robot_sequence_controller.c
         return
 
+    # Only one teletubby is ever in frame at a time, so at most one identity
+    # can reach SCAN_MIN_VOTES.
     solid = [identity for identity, n in seen_counts.items() if n >= SCAN_MIN_VOTES]
     if not solid:
         print(f"[SCAN #{request_id}] no unflashed detection (visited={visited})")
         send_report(request_id, PI_RESULT_NOT_FOUND)
-        _reset_chase()
         return
 
-    winner = min(solid, key=lambda i: abs(sum(err_by_id[i]) / len(err_by_id[i])))
-    matching_errors = err_by_id[winner]
-    mean_error = sum(matching_errors) / len(matching_errors)
+    winner = solid[0]
     confidence_percent = round(100 * seen_counts[winner] / SCAN_BURST_FRAMES)
 
-    print(f"[SCAN #{request_id}] {winner} err={mean_error:+.3f} conf={confidence_percent}%")
+    for _ in range(FLASH_COUNT):
+        flash_once()
+    visited.add(winner)
+    print(f"[SCAN #{request_id}] flashed {winner} conf={confidence_percent}%")
 
-    # Continue the chase for `winner` if we were already centering on it
-    # recently; otherwise start fresh (new identity, or stale — see
-    # CHASE_STALE_SECONDS). `saw_second` only latches on a chase's first scan,
-    # while net rotation is still zero — undoing the whole chase then is
-    # guaranteed to land back where the second target was actually seen.
-    now = time.time()
-    if winner != _chase_identity or (now - _chase_last_call_time) > CHASE_STALE_SECONDS:
-        _chase_identity = winner
-        _chase_saw_second = len(solid) >= 2
-    _chase_last_call_time = now
-
-    report_error, report_result = mean_error, PI_RESULT_OK
-
-    # The robot is stationary during a scan, so a centered reading means it's
-    # pointed at the target right now — flash before replying, not after.
-    if abs(mean_error) < ALIGN_THRESHOLD:
-        for _ in range(FLASH_COUNT):
-            flash_once()
-        visited.add(winner)
-        print(f"[SCAN #{request_id}] flashed {winner}")
-
-        if len(visited) >= TARGETS_TO_FIND:
-            # Nothing left to search for — the ESP undoes its own net
-            # rotation to return to roughly its starting heading (see
-            # WIRE CONTRACT above) before moving on to Tower pickup.
-            report_error = 0
-            report_result = PI_RESULT_ALL_FOUND
-            print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
-        elif _chase_saw_second:
-            # A second unflashed teletubby was in view before we turned to
-            # center on `winner` — ask the ESP to undo that turn instead of
-            # reporting done, so the next scan finds it from where it was seen.
-            report_error = 0
-            report_result = PI_RESULT_REPOSITION
-            print(f"[SCAN #{request_id}] requesting reposition to re-expose the other one")
-        else:
-            report_error = 0
-        _reset_chase()
+    if len(visited) >= TARGETS_TO_FIND:
+        # Nothing left to search for — the ESP moves on to Tower pickup.
+        result = PI_RESULT_ALL_FOUND
+        print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
+    else:
+        result = PI_RESULT_OK
 
     send_report(
-        request_id, report_result,
+        request_id, result,
         target_id=IDENTITY_TO_TARGET_ID[winner],
-        horizontal_error=report_error,
+        horizontal_error=0.0,
         confidence_percent=confidence_percent)
 
-    if report_result == PI_RESULT_ALL_FOUND:
+    if result == PI_RESULT_ALL_FOUND:
         # Give the report a moment to actually go out over the wire first.
         time.sleep(0.1)
         print("[control_loop] all targets found — shutting down")
@@ -417,7 +366,7 @@ def control_loop():
                     # Pi is ready, so any request proves the beacon landed.
                     _ready_pending = False
                     if action == PI_ACTION_SCAN_TELETUBBIES:
-                        handle_scan_request(request_id, parameter)
+                        handle_scan_request_simple(request_id, parameter)
 
             ok, frame = cap.read()
             if not ok:
