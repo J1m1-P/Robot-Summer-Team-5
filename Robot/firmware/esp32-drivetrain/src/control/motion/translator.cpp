@@ -25,11 +25,13 @@ constexpr float kShortMoveNudgeS = 0.05f;
 // Endpoint correction uses a bounded pulse above the wheel-controller
 // deadband, followed by a pause for fresh odometry. Continuous low-speed
 // correction can command PWM without producing useful wheel motion.
-constexpr float kEndpointNudgeBandM = 0.025f;
+// Use continuous closed-loop travel until the final 10 mm, then apply the
+// bounded nudge correction for settling without making small moves pulse.
+constexpr float kEndpointNudgeBandM = 0.010f;
 constexpr float kEndpointNudgeSpeedMps = 0.10f;
 constexpr float kEndpointNudgePulseS = 0.05f;
 constexpr float kEndpointNudgeRampS = 0.005f;
-constexpr float kEndpointNudgePauseS = 0.10f;
+constexpr float kEndpointNudgePauseS = 0.02f;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
