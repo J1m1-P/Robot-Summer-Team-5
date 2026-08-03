@@ -15,7 +15,6 @@ inference (see the note at the bottom).
 """
 
 import glob
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +30,7 @@ PT_MODEL = r"E:\runs\detect\train-9\weights\best.pt"
 # Whatever you pick here, detector_final must run inference at the SAME size
 # (pass imgsz=... in yolo_confirm's model() call), or you lose the speed / the
 # boxes shift.
-IMGSZ = 320   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
+IMGSZ = 640   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
 
 # DECISION 2 — fp16. Near-free accuracy, faster. Keep True.
 # Do NOT switch to int8 export unless FPS forces it: int8 needs a calibration set
@@ -40,6 +39,11 @@ HALF = True
 
 # The folder export() produces (printed when it runs). It sits next to best.pt.
 NCNN_DIR = r"E:\runs\detect\train-9\weights\best_ncnn_model"
+
+# Confidence sanity_check() runs both models at -- matches the 0.5 default
+# used elsewhere in this codebase (tubby_detector.py's DETECT_CONF), so the
+# comparison reflects real match-time conditions.
+SANITY_CHECK_CONF = 0.5
 
 # ── LINK YOUR TEST IMAGES HERE ────────────────────────────────────────────────
 # JPEGs that contain tubbies — include at least one with dipsy AND laa_laa in
@@ -59,6 +63,29 @@ def export():
     # the exact output path when this runs — it should match NCNN_DIR above.
 
 
+def iou(box_a, box_b):
+    """
+    Intersection-over-Union of two boxes given as (x1, y1, x2, y2) corners.
+    It's the overlap area divided by the combined area: 0.0 = no overlap,
+    1.0 = identical. Used to check the pt model's box and the ncnn model's
+    box describe the SAME object, not two different detections.
+    """
+    inter_x1 = max(box_a[0], box_b[0])
+    inter_y1 = max(box_a[1], box_b[1])
+    inter_x2 = min(box_a[2], box_b[2])
+    inter_y2 = min(box_a[3], box_b[3])
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_h = max(0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - intersection
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
 def sanity_check(ncnn_dir, image_paths):
     """
     Verify the export didn't change the model's answers. Export can subtly shift
@@ -76,15 +103,6 @@ def sanity_check(ncnn_dir, image_paths):
               f"-- point TEST_IMAGES_DIR at a real folder of tubby photos first")
         return
 
-    # Reuse the detector's own IoU + the confidence it actually runs at, so this
-    # test mirrors real CONFIRM conditions rather than some arbitrary settings.
-    # teletubby_detector_with_HSV.py lives in the sibling Extra/ folder, not on
-    # sys.path by default -- add it here rather than assuming a package layout.
-    extra_dir = Path(__file__).resolve().parent.parent / "Extra"
-    if str(extra_dir) not in sys.path:
-        sys.path.insert(0, str(extra_dir))
-    from teletubby_detector_with_HSV import iou, CONFIRM_CONF
-
     IOU_SAME_OBJECT = 0.8   # below this, the two boxes point at different things
 
     print(f"[sanity_check] comparing {PT_MODEL} vs {ncnn_dir} "
@@ -101,8 +119,8 @@ def sanity_check(ncnn_dir, image_paths):
             continue
 
         # Run both models under identical, real-world settings.
-        rp = pt(frame,   conf=CONFIRM_CONF, imgsz=IMGSZ, verbose=False)[0]
-        rn = ncnn(frame, conf=CONFIRM_CONF, imgsz=IMGSZ, verbose=False)[0]
+        rp = pt(frame,   conf=SANITY_CHECK_CONF, imgsz=IMGSZ, verbose=False)[0]
+        rn = ncnn(frame, conf=SANITY_CHECK_CONF, imgsz=IMGSZ, verbose=False)[0]
 
         pt_boxes   = rp.boxes.xyxy.cpu().numpy()
         pt_cls     = rp.boxes.cls.cpu().numpy().astype(int)

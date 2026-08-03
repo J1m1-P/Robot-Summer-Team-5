@@ -1,14 +1,5 @@
 """
-Teletubby Detector — SIMPLE FLASH MODE. Answers scan requests on the arm
-ESP's pi_uart link, same wire protocol as tubby_detector.py, except it never
-asks the ESP to rotate for centering: it flashes the burst-voted winner
-immediately, however off-center it is. Use this instead of
-tubby_detector.py when alignment accuracy isn't worth spending extra scan
-requests on.
-
-Only run one of tubby_detector.py / tubby_detector_simple.py at a time --
-both claim the camera and serial port exclusively.
-
+Teletubby Detector — SIMPLE FLASH MODE. 
 FLOW
   IDLE      Camera runs, no YOLO; state/detections print to the console.
   SCANNING  Vote the one unflashed identity across SCAN_BURST_FRAMES (needs
@@ -23,8 +14,7 @@ WIRE (robot_common/pi_action_packet.h) -- identical to tubby_detector.py.
   Pi->ESP PI_REPORT:  request_id, result, target_id, horizontal_error
                       (always 0 here -- nothing measures how centered the
                       winner was), confidence_percent.
-  ALL_FOUND is a flag, not a detection: horizontal_error is ignored -- the
-  ESP just moves on to Tower pickup.
+  ALL_FOUND is a flag, not a detection: horizontal_error is ignored
 """
 
 import os
@@ -67,7 +57,7 @@ MODEL_PATH  = os.environ.get(
     "TUBBY_MODEL_PATH",
     str(Path(__file__).resolve().parent.parent / "best_ncnn_model"),
 )
-IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — smaller = faster, less accurate
+IMGSZ       = 640         # ADJUST: 320 / 480 / 640 — smaller = faster, less accurate
 DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── answering one scan request ────────────────────────────────────────────────
