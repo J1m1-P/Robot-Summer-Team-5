@@ -6,9 +6,12 @@
 #include <robot_common/command_packet.h>
 #include <robot_common/status_packet.h>
 
+#include "config/pin_map.h"
+
 namespace {
 
 constexpr uint32_t kReadyRepeatPeriodMs = 20;
+constexpr uint32_t kSolarPanelContactRepeatPeriodMs = 20;
 
 // Helper function to send Status Packet to drivetrain through UART
 void send_status(
@@ -21,6 +24,26 @@ void send_status(
         .detail = detail,
     };
     (void)status_packet_send(dispatcher->drivetrain_uart, &status);
+}
+
+// The normally-closed switch grounds the pin while open. When pressed, the
+// circuit opens and INPUT_PULLUP makes the pin read HIGH. Repeat the contact
+// status while pressed so the drivetrain cannot miss it at an action boundary.
+bool report_solar_panel_contact(
+    ArmActionDispatcher *dispatcher,
+    uint32_t now_ms) {
+    if (digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) != HIGH ||
+        now_ms - dispatcher->last_solar_panel_contact_status_ms <
+            kSolarPanelContactRepeatPeriodMs) {
+        return false;
+    }
+
+    dispatcher->last_solar_panel_contact_status_ms = now_ms;
+    send_status(
+        dispatcher,
+        STATUS_SOLAR_PANEL_CONTACT,
+        STATUS_DETAIL_NONE);
+    return true;
 }
 
 // Receives one drivetrain command and routes it to Tower, Habitat, or RPI.
@@ -120,6 +143,7 @@ void arm_action_dispatcher_init(
     dispatcher->habitat_controller = habitat_controller;
     dispatcher->pi_controller = pi_controller;
     dispatcher->readiness_pending = true;
+    pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
 }
 
 // Called during loop() to service UART, readiness, and both controllers.
@@ -159,6 +183,10 @@ bool arm_action_dispatcher_update(
     const bool reporting_pi = pi_action_controller_update(
         dispatcher->pi_controller, now_ms);
 
+    const bool reporting_solar_panel = report_solar_panel_contact(
+        dispatcher, now_ms);
+
     // Reserve the shared UART while any controller reports completion.
-    return reporting_tower || reporting_habitat || reporting_pi;
+    return reporting_tower || reporting_habitat || reporting_pi ||
+        reporting_solar_panel;
 }

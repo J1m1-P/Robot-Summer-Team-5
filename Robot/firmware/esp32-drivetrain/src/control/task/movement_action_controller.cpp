@@ -99,6 +99,7 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
+        case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
             return true;
         default:
             return false;
@@ -128,6 +129,14 @@ extern "C" void movement_action_controller_notify_locator_contact(
     if (controller != nullptr &&
         controller->action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR) {
         controller->locator_contact_detected = true;
+    }
+}
+
+extern "C" void movement_action_controller_notify_solar_panel_contact(
+    MovementActionController *controller) {
+    if (controller != nullptr &&
+        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL) {
+        controller->solar_panel_contact_detected = true;
     }
 }
 
@@ -485,6 +494,12 @@ extern "C" bool movement_action_controller_update(
                 -controller->action_value, 0.0f, 0.0f, nullptr,
                 speed_or_default(controller->speed, kLocatorApproachSpeedMps),
                 0.0f, &controller->locator_contact_detected);
+
+        case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
+            return precision_action(
+                0.0f, controller->action_value, 0.0f, nullptr,
+                speed_or_default(controller->speed, kLocatorApproachSpeedMps),
+                0.0f, &controller->solar_panel_contact_detected);
 
         default:
             return false;

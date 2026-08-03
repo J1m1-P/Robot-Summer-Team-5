@@ -35,6 +35,7 @@ typedef enum {
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
     MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
     MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
+    MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
     MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP,
     MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_GAP,
     MOVEMENT_ACTION_GO_PY_DISTANCE,
@@ -51,6 +52,7 @@ typedef struct {
     // Translation speed in m/s, or angular speed in rad/s for rotation.
     float speed;
     bool locator_contact_detected;
+    bool solar_panel_contact_detected;
     float dx_body_m;
     float dy_body_m;
     float delta_heading_rad;
@@ -96,6 +98,10 @@ void movement_action_controller_set_precision_move_context(
 
 // Called when the arm ESP reports that the locator microswitch was pressed.
 void movement_action_controller_notify_locator_contact(
+    MovementActionController *controller);
+
+// Called when the arm ESP reports that the solar-panel microswitch was pressed.
+void movement_action_controller_notify_solar_panel_contact(
     MovementActionController *controller);
 
 // Anchors subsequent precision actions to one world-frame sequence origin.

@@ -9,7 +9,6 @@ static const ServoConfig *const servoConfigs[] = {
     // &towerLeftServoConfig,
     // &towerMiddleServoConfig,
     // &towerRightServoConfig,
-    // &solarPanelServoConfig,
 };
 
 static constexpr size_t SERVO_COUNT = sizeof(servoConfigs) / sizeof(servoConfigs[0]);
