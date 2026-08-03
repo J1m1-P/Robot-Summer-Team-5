@@ -45,10 +45,8 @@ typedef enum {
 
     // Habitat Tasks
     CMD_HABITAT_HOME,
-    CMD_HABITAT_Z_UP,
-    CMD_HABITAT_Z_DOWN,
-    CMD_HABITAT_X_LEFT,
-    CMD_HABITAT_X_RIGHT,
+    CMD_HABITAT_Z,
+    CMD_HABITAT_X,
     CMD_HABITAT_OPEN_CLAWS,
     CMD_HABITAT_CLOSE_CLAWS,
     CMD_HABITAT_OPEN_LEFT_CLAW,
@@ -58,6 +56,11 @@ typedef enum {
 
     // Raspberry Pi Tasks
     CMD_PI_SCAN_TELETUBBIES,
+
+    // Additional Habitat Tasks
+    // Appended to preserve the existing command values on the wire.
+    CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
+    CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
 
     CMD_MAX
 } CommandOpcode;

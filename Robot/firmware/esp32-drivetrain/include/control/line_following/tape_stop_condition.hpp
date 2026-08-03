@@ -5,14 +5,17 @@
 
 #include "drivers/tape_sensor/tape_sensor_driver.h"
 
-// Sensor bits: 0=front, 1=back, 2=side.
+// Sensor-module bits used by TapeStopSpec::sensor_mask:
+//   bit 0 = PX/front, bit 1 = MX/back, bit 2 = PY/side.
+// TapeStopSpec::channel_mask is a separate mask over channels 0..3 within
+// each selected module; it does not select a sensor module.
 constexpr uint8_t kTapeStopAllSensors =
     (1U << TAPE_SENSOR_MODULE_COUNT) - 1U;
 
 struct TapeStopSpec {
-    uint8_t sensor_mask = 0;
+    uint8_t sensor_mask = 0;  // which sensor modules to inspect
     uint8_t required_sensor_count = 0;
-    uint8_t channel_mask = 1U << TAPE_SENSOR_CHANNEL_0;
+    uint8_t channel_mask = 1U << TAPE_SENSOR_CHANNEL_0;  // channels to inspect
     bool stop_on_gap = false;
     uint8_t gap_edge_channel_mask = 1U << TAPE_SENSOR_CHANNEL_1;
     float max_gap_distance_m = 0.08f;

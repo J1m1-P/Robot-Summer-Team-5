@@ -8,15 +8,31 @@
 
 enum class Direction { PX, MX, PY };
 
-// LATERAL_ONE stops on first detection; LATERAL_TWO stops on a full outer-tape
-// / centre-gap pattern. PX uses side, PY uses back, and MX has no -y sensor.
-enum class StopCondition { LATERAL_ONE, LATERAL_TWO, DISTANCE, TIME_ONLY };
+// SINGLE_SENSOR preserves the original behavior. FRONT_BACK_ALIGNED uses the
+// front and back modules together and is valid for PX/MX travel.
+enum class TapeFollowMode { SINGLE_SENSOR, FRONT_BACK_ALIGNED };
+
+// Selects which module detects a marker while another module follows tape.
+enum class TapeMarkerSensor { AUTO, FRONT, BACK, SIDE };
+
+// RISE_ONE stops on one detected tape edge; RISE_TWO waits for two tape edges
+// with a gap between them. ALL_CHANNELS_ON stops when all four channels of the
+// sensor used for the current travel direction are on tape. AUTO marker
+// selection uses side for PX travel, back for PY travel, and no marker module
+// for MX travel.
+enum class StopCondition {
+    RISE_ONE,
+    RISE_TWO,
+    ALL_CHANNELS_ON,
+    DISTANCE,
+    TIME_ONLY,
+};
 
 // Caller owns/initializes these dependencies once and reuses the context.
 // The controller is borrowed and remains live during blocking maneuvers.
 struct LineFollowerContext {
     Drivetrain *drivetrain;
-    TapeSensor *sensors[3];  // front, back, side
+    TapeSensor *sensors[3];  // PX/front, MX/back, PY/side
     RobotSequenceController *sequence_controller;
 };
 
@@ -27,6 +43,8 @@ struct LineFollowerContext {
 // known DISTANCE stop point, but there is no post-stop overshoot
 // correction -- callers should not assume the true stop point is hit exactly.
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
-                  StopCondition stop_type, float stop_value, float timeout_s);
+                  StopCondition stop_type, float stop_value, float timeout_s,
+                  TapeFollowMode mode = TapeFollowMode::SINGLE_SENSOR,
+                  TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO);
 
 #endif

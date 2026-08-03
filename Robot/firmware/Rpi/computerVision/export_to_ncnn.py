@@ -14,6 +14,10 @@ auto-install it on first export. On the Pi you'll also need ncnn present for
 inference (see the note at the bottom).
 """
 
+import glob
+import sys
+from pathlib import Path
+
 import numpy as np
 from ultralytics import YOLO
 
@@ -39,21 +43,20 @@ NCNN_DIR = r"E:\runs\detect\train-9\weights\best_ncnn_model"
 
 # ── LINK YOUR TEST IMAGES HERE ────────────────────────────────────────────────
 # JPEGs that contain tubbies — include at least one with dipsy AND laa_laa in
-# frame, since that's the call fp16 is most likely to disturb. Put the files
-# anywhere and paste their full paths here (grab frames from your test video, or
-# snap photos). These are what the .pt and NCNN models get compared on.
-import glob
-TEST_IMAGES = glob.glob(r"E:\ENPH253\TeletubbyImages\Labeled3\valid\images")
+# frame, since that's the call fp16 is most likely to disturb. Point this at
+# a folder of such images (grab frames from your test video, or snap photos).
+# These are what the .pt and NCNN models get compared on.
+TEST_IMAGES_DIR = r"E:\ENPH253\TeletubbyImages\Labeled3\valid\images"
+TEST_IMAGES = glob.glob(str(Path(TEST_IMAGES_DIR) / "*.jpg"))
 
 
 def export():
     """Load the .pt weights and emit best_ncnn_model/ next to them."""
     model = YOLO(PT_MODEL)
-    # TODO: run the export. Ultralytics prints the output folder path — note it.
     model.export(format="ncnn", imgsz=IMGSZ, half=HALF)
     # The result is a directory (e.g. E:\runs\...\weights\best_ncnn_model\),
-    # NOT a single file — copy the whole folder to the Pi.
-    
+    # NOT a single file — copy the whole folder to the Pi. Ultralytics prints
+    # the exact output path when this runs — it should match NCNN_DIR above.
 
 
 def sanity_check(ncnn_dir, image_paths):
@@ -67,12 +70,25 @@ def sanity_check(ncnn_dir, image_paths):
     mismatches) means the NCNN model is safe to swap in.
     """
     import cv2
+
+    if not image_paths:
+        print(f"[sanity_check] no test images found under {TEST_IMAGES_DIR} "
+              f"-- point TEST_IMAGES_DIR at a real folder of tubby photos first")
+        return
+
     # Reuse the detector's own IoU + the confidence it actually runs at, so this
     # test mirrors real CONFIRM conditions rather than some arbitrary settings.
-    from Robot.firmware.Rpi.Extra.teletubby_detector_with_HSV import iou, CONFIRM_CONF
+    # teletubby_detector_with_HSV.py lives in the sibling Extra/ folder, not on
+    # sys.path by default -- add it here rather than assuming a package layout.
+    extra_dir = Path(__file__).resolve().parent.parent / "Extra"
+    if str(extra_dir) not in sys.path:
+        sys.path.insert(0, str(extra_dir))
+    from teletubby_detector_with_HSV import iou, CONFIRM_CONF
 
     IOU_SAME_OBJECT = 0.8   # below this, the two boxes point at different things
 
+    print(f"[sanity_check] comparing {PT_MODEL} vs {ncnn_dir} "
+          f"on {len(image_paths)} image(s)")
     pt   = YOLO(PT_MODEL)   # original fp32 weights — the "ground truth" here
     ncnn = YOLO(ncnn_dir)   # the exported fp16 NCNN model we're vetting
     names = pt.names        # class-index -> short name (e.g. {0:'DP', 1:'LL', ...})

@@ -46,8 +46,8 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
         .kff_offset = 0.15f,
         .kp = 0.4f,
         .ki = 0.1f,
-        .output_min = -0.8f,
-        .output_max = 0.8f,
+        .output_min = -0.95f,
+        .output_max = 0.95f,
         .integral_min = -0.8f,
         .integral_max = 0.8f,
         /* No slew limiting needed on this hardware -- removed rather than
@@ -61,15 +61,15 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
          * slew rate" convention for the unlimited case. This was capping
          * endpoint-settle's corrective pulses (~50ms) at ~0.1 duty when the
          * feedforward for their 0.08-0.12 m/s target wanted ~0.25-0.29 --
-         * likely well under breakaway duty, which is why the pulse couldn't
-         * reliably overcome static friction. */
+         * likely well under what's needed to overcome static friction,
+         * which is why the pulse couldn't reliably break the wheel free. */
         .duty_slew_per_s = 1000.0f,
     },
-    .max_duty = 0.8f,
-    .max_vx_mps = 1.0f,
-    .max_vy_mps = 1.0f,
-    .max_omega_rad_s = 2.0f,
-    .max_wheel_speed_mps = 0.54f,
+    .max_duty = 0.95f,
+    .max_vx_mps = 0.7f,
+    .max_vy_mps = 0.5f,
+    .max_omega_rad_s = 2.4f,
+    .max_wheel_speed_mps = 0.7f,
     .max_control_dt_s = 0.05f,
     .command_timeout_us = 250000LL,
     .brake_pin = PIN_M_BRK,

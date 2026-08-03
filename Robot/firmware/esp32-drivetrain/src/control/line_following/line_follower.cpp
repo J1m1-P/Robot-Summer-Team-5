@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "esp_timer.h"
+#include "control/motion/stall_escalation.h"
 #include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/math_utils.h>
@@ -12,15 +13,22 @@
 namespace {
 
 constexpr int64_t kControlPeriodUs = 5000;  // 200 Hz
-constexpr int kBackSensorIndex = 1, kSideSensorIndex = 2;
+constexpr int kFrontSensorIndex = 0;
+constexpr int kBackSensorIndex = 1;
+constexpr int kSideSensorIndex = 2;
 
 constexpr float kFrontWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
-constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // back is mounted mirrored
+constexpr float kBackWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};  // MX is mounted mirrored
 
 constexpr float kP = 0.48f;
-constexpr float kD = 0.1f;
+constexpr float kD = 0.15f;
 constexpr float kEmaAlpha = 0.4f;
-constexpr float kMaxOmegaRadS = 1.4;
+constexpr float kMaxOmegaRadS = 2.0;
+
+// Two-sensor mode uses the existing tape error units. These limits keep the
+// new lateral correction from taking over the requested travel speed.
+constexpr float kTwoSensorLateralGain = 0.25f;
+constexpr float kMaxLateralCorrectionMps = 0.25f;
 
 // Deadband due to tape width and sensor pitch
 constexpr float kErrorDeadband = 1.5f;
@@ -38,11 +46,11 @@ constexpr BoundedPidConfig kSteeringPidConfig = {
     .correction_max = kMaxOmegaRadS,
 };
 
-constexpr float kSearchOmegaRadS = 0.8f;  // spin rate while hunting for lost tape
+constexpr float kSearchOmegaRadS = 2.0f;  // spin rate while hunting for lost tape
 // Sweep toward the last known side by this much; if still not found, reverse
 // and sweep the same amount past the start heading on the other side before
 // giving up.
-constexpr float kSearchSweepRad = 70.0f * static_cast<float>(M_PI) / 180.0f;
+constexpr float kSearchSweepRad = 45.0f * static_cast<float>(M_PI) / 180.0f;
 
 float wrap(float a) {
     while (a > static_cast<float>(M_PI)) a -= 2.0f * static_cast<float>(M_PI);
@@ -63,26 +71,42 @@ struct DirectionInfo {
 
 DirectionInfo GetDirectionInfo(Direction dir) {
     switch (dir) {
-        case Direction::PX: return {0, kFrontWeights};
+        case Direction::PX: return {kFrontSensorIndex, kFrontWeights};
         case Direction::MX: return {1, kBackWeights};
         case Direction::PY: return {kSideSensorIndex, kFrontWeights};
     }
     return {0, kFrontWeights};
 }
 
-TapeStopSpec GetLateralStopSpec(Direction dir, StopCondition stop_type) {
+TapeStopSpec GetMarkerStopSpec(
+    Direction dir,
+    StopCondition stop_type,
+    TapeMarkerSensor marker_sensor) {
     uint8_t sensor_mask = 0U;
-    switch (dir) {
-        case Direction::PX: sensor_mask = 1U << 2; break;
-        case Direction::PY: sensor_mask = 1U << 1; break;
-        case Direction::MX: break;  // No -y sensor is installed.
+    switch (marker_sensor) {
+        case TapeMarkerSensor::FRONT:
+            sensor_mask = 1U << kFrontSensorIndex;
+            break;
+        case TapeMarkerSensor::BACK:
+            sensor_mask = 1U << kBackSensorIndex;
+            break;
+        case TapeMarkerSensor::SIDE:
+            sensor_mask = 1U << kSideSensorIndex;
+            break;
+        case TapeMarkerSensor::AUTO:
+            switch (dir) {
+                case Direction::PX: sensor_mask = 1U << kSideSensorIndex; break;
+                case Direction::PY: sensor_mask = 1U << kBackSensorIndex; break;
+                case Direction::MX: break;  // No -y sensor is installed.
+            }
+            break;
     }
     return {
         .sensor_mask = sensor_mask,
         .required_sensor_count = static_cast<uint8_t>(
             sensor_mask == 0U ? 0U : 1U),
         .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
-        .stop_on_gap = stop_type == StopCondition::LATERAL_TWO,
+        .stop_on_gap = stop_type == StopCondition::RISE_TWO,
         .gap_edge_channel_mask = 1U << TAPE_SENSOR_CHANNEL_1,
         .max_gap_distance_m = 0.08f,
     };
@@ -101,10 +125,16 @@ bool ComputeLineError(const TapeSensor *s, const float w[4], float *error_out) {
     return true;
 }
 
+bool AllChannelsOn(const TapeSensor *sensor) {
+    return sensor != nullptr && sensor->channel_0 && sensor->channel_1 &&
+           sensor->channel_2 && sensor->channel_3;
+}
+
 }  // namespace
 
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
-                  StopCondition stop_type, float stop_value, float timeout_s) {
+                  StopCondition stop_type, float stop_value, float timeout_s,
+                  TapeFollowMode mode, TapeMarkerSensor marker_sensor) {
     if (ctx == nullptr || ctx->drivetrain == nullptr ||
         ctx->sequence_controller == nullptr ||
         ctx->sequence_controller->pose_tracker == nullptr ||
@@ -123,11 +153,11 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     const int64_t start_us = esp_timer_get_time();
     FixedRateGate gate = {kControlPeriodUs, start_us};
     TapeStopCondition tape_stop;
-    const bool lateral_stop_requested =
-        stop_type == StopCondition::LATERAL_ONE ||
-        stop_type == StopCondition::LATERAL_TWO;
-    const TapeStopSpec lateral_stop_spec =
-        GetLateralStopSpec(dir, stop_type);
+    const bool marker_stop_requested =
+        stop_type == StopCondition::RISE_ONE ||
+        stop_type == StopCondition::RISE_TWO;
+    const TapeStopSpec marker_stop_spec =
+        GetMarkerStopSpec(dir, stop_type, marker_sensor);
     float cumulative_distance_m = 0.0f;
     float filtered_error = 0.0f;
     BoundedPidState steering_pid_state = {};
@@ -137,6 +167,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     float search_start_heading_rad = 0.0f;
     float smoothed_omega = 0.0f;
     Pose previous_pose = pose_tracker_get_pose(controller->pose_tracker);
+    StallEscalation stall = {};
 
     while (true) {
         const int64_t now_us = esp_timer_get_time();
@@ -153,29 +184,41 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         if (tape_sensor_driver_read_all(ctx->sensors) != ESP_OK) return Abort(false);
         if (robot_sequence_controller_update(
                 ctx->sequence_controller,
-                static_cast<uint32_t>(now_us / 1000)) != ESP_OK) {
+                static_cast<uint32_t>(now_us / 1000)) != ESP_OK ||
+            !ctx->sequence_controller->running) {
             return Abort(false);
         }
         const Pose current_pose =
             pose_tracker_get_pose(controller->pose_tracker);
-        cumulative_distance_m += std::hypot(current_pose.x_m - previous_pose.x_m,
-                                            current_pose.y_m - previous_pose.y_m);
+        const float step_distance_m = std::hypot(
+            current_pose.x_m - previous_pose.x_m,
+            current_pose.y_m - previous_pose.y_m);
+        cumulative_distance_m += step_distance_m;
         previous_pose = current_pose;
 
-        const bool lateral_done = lateral_stop_requested &&
-            tape_stop_condition_update(&tape_stop, &lateral_stop_spec,
+        // This stop condition applies to the sensor module used to follow
+        // the current direction: front for PX, back for MX, and side for PY.
+        // Check it before issuing another drive command so the stop is
+        // immediate on the first sample where all four channels are on tape.
+        if (stop_type == StopCondition::ALL_CHANNELS_ON &&
+            AllChannelsOn(ctx->sensors[steer.sensor_index])) {
+            return Abort(true);
+        }
+
+        const bool marker_stop_done = marker_stop_requested &&
+            tape_stop_condition_update(&tape_stop, &marker_stop_spec,
                                        ctx->sensors, cumulative_distance_m);
 
         // Ramp speed down over the last kApproachRampDistanceM before stop point
         float ramp_target_speed_mps = speed_mps;
         const float ramp_floor_mps = fminf(kMinRampSpeedMps, speed_mps);
-        if (stop_type == StopCondition::LATERAL_TWO &&
+        if (stop_type == StopCondition::RISE_TWO &&
             tape_stop_condition_candidate_active(
-                &tape_stop, &lateral_stop_spec, ctx->sensors)) {
+                &tape_stop, &marker_stop_spec, ctx->sensors)) {
             ramp_target_speed_mps = ramp_floor_mps;
         }
         const bool has_distance_target = stop_type == StopCondition::DISTANCE ||
-            (lateral_stop_requested &&
+            (marker_stop_requested &&
              tape_stop_condition_triggered(&tape_stop));
         if (has_distance_target) {
             const float target_m =
@@ -189,7 +232,27 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         }
 
         float raw_error = 0.0f;
-        const bool on_tape = ComputeLineError(ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
+        bool on_tape = ComputeLineError(
+            ctx->sensors[steer.sensor_index], steer.weights, &raw_error);
+        float lateral_error = 0.0f;
+        bool aligned_tape = false;
+        if (mode == TapeFollowMode::FRONT_BACK_ALIGNED &&
+            (dir == Direction::PX || dir == Direction::MX)) {
+            float front_error = 0.0f;
+            float back_error = 0.0f;
+            const bool front_on_tape = ComputeLineError(
+                ctx->sensors[kFrontSensorIndex], kFrontWeights, &front_error);
+            const bool back_on_tape = ComputeLineError(
+                ctx->sensors[kBackSensorIndex], kBackWeights, &back_error);
+            aligned_tape = front_on_tape && back_on_tape;
+            if (aligned_tape) {
+                // The average measures sideways displacement. The difference
+                // measures whether the body is skewed across the tape.
+                lateral_error = (front_error + back_error) * 0.5f;
+                raw_error = (front_error - back_error) * 0.5f;
+                on_tape = true;
+            }
+        }
 
         float omega;
         float vx = 0.0f, vy = 0.0f;
@@ -203,7 +266,16 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             const float deadbanded_error = error_magnitude < kErrorDeadband
                 ? 0.0f
                 : std::copysign(error_magnitude - kErrorDeadband, filtered_error);
-            omega = bounded_pid_update(&steering_pid_state, &kSteeringPidConfig, deadbanded_error, dt_s);
+            omega = bounded_pid_update(
+                &steering_pid_state, &kSteeringPidConfig,
+                deadbanded_error, dt_s);
+            if (aligned_tape) {
+                // Keep the existing angular polarity/gains. The new term is
+                // only the sideways correction needed to center both sensors.
+                vy = clamp(kTwoSensorLateralGain * lateral_error,
+                           -kMaxLateralCorrectionMps,
+                           kMaxLateralCorrectionMps);
+            }
             switch (dir) {
                 case Direction::PX: vx = ramp_target_speed_mps; break;
                 case Direction::MX: vx = -ramp_target_speed_mps; break;
@@ -231,6 +303,13 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         smoothed_omega = kOmegaEmaAlpha * omega + (1.0f - kOmegaEmaAlpha) * smoothed_omega;
         omega = smoothed_omega;
 
+        const float scale = stall_escalation_update(
+            &stall, std::hypot(vx, vy), step_distance_m, dt_s);
+        const DrivetrainConfig *drivetrain_config = ctx->drivetrain->config;
+        stall_escalation_apply_scale(&vx, &vy, scale,
+                                     drivetrain_config->max_vx_mps,
+                                     drivetrain_config->max_vy_mps);
+
         // use corrected velocity with calibration
         const esp_err_t command_error = drivetrain_set_advanced_body_velocity(
             ctx->drivetrain, vx, vy, omega);
@@ -245,8 +324,9 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         switch (stop_type) {
             case StopCondition::TIME_ONLY: stop_reached = elapsed_s >= stop_value; break;
             case StopCondition::DISTANCE: stop_reached = cumulative_distance_m >= stop_value; break;
-            case StopCondition::LATERAL_ONE:
-            case StopCondition::LATERAL_TWO: stop_reached = lateral_done; break;
+            case StopCondition::RISE_ONE:
+            case StopCondition::RISE_TWO: stop_reached = marker_stop_done; break;
+            case StopCondition::ALL_CHANNELS_ON: break;
         }
         if (!stop_reached) continue;
 

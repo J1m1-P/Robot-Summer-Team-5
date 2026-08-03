@@ -90,17 +90,30 @@ FLASH_ON_TIME = 0.5      # ADJUST: seconds the flash stays on per pulse
 if GPIO is not None:
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(FLASH_PIN, GPIO.OUT, initial=GPIO.LOW)
+    print(f"[startup] flash ready on GPIO{FLASH_PIN}")
+else:
+    print("[startup] no RPi.GPIO -- dev machine, flashes will just log")
 
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
 SERIAL_PORT = "/dev/serial0"  # ADJUST: "COM5"/"/dev/ttyUSB0"/etc.; None = dev mode, no link
 SERIAL_BAUD = 115200          # ADJUST: must match PI_UART_LINK_CONFIG on the ESP
-link = RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None
+if SERIAL_PORT:
+    link = RobotLink(SERIAL_PORT, SERIAL_BAUD)
+else:
+    link = None
+    print("[startup] SERIAL_PORT is None -- dev mode, reports print to console only")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # YOLO DETECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-model = YOLO(MODEL_PATH)
+print(f"[startup] loading model from {MODEL_PATH} ...")
+try:
+    model = YOLO(MODEL_PATH)
+except Exception as e:
+    print(f"[startup] FAILED to load model from {MODEL_PATH}: {e}")
+    raise
+print(f"[startup] model loaded, classes={list(model.names.values())}")
 YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"}
 
 # PiReportPacket.target_id is a single wire byte — map each identity to a stable
@@ -334,8 +347,14 @@ def _configure_camera(capture):
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
 
 
+print(f"[startup] opening camera index {CAMERA_INDEX} ...")
 cap = cv2.VideoCapture(CAMERA_INDEX)
 _configure_camera(cap)
+if cap.isOpened():
+    print(f"[startup] camera ready ({CAMERA_WIDTH}x{CAMERA_HEIGHT})")
+else:
+    print(f"[startup] WARNING: camera index {CAMERA_INDEX} did not open -- "
+          f"check it's connected; control_loop will keep retrying")
 
 # ── readiness beacon ────────────────────────────────────────────────────────
 # Camera's open and the model (loaded above, before this point) is warm, so

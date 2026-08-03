@@ -15,7 +15,7 @@ WorkingDirectory=/home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi
 ExecStartPre=/bin/sleep 8
 
 # Use the venv's python directly (no need to "source activate").
-ExecStart=/home/admin5/robotSummer/ComputerVision/venv/bin/python /home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision/tubby_detector.py
+ExecStart=/home/admin5/robotSummer/ComputerVision/venv/bin/python /home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision/tubby_simple.py
 
 # If the detector crashes (camera hiccup, etc.), bring it back automatically.
 Restart=on-failure

@@ -66,11 +66,6 @@ void setup() {
     Serial.begin(115200);
     Serial.println("# Starting drivetrain firmware");
 
-    // TODO: replace this delay with the physical start-button signal.
-    delay(5000);
-
-    Serial.println("# Starting Task Sequence");
-
     // UART init
     esp_err_t err = uart_link_init(&arm_uart, &TOP_ESP_UART_LINK_CONFIG);
     if (err != ESP_OK) {
@@ -120,14 +115,9 @@ void setup() {
     movement_action_controller_set_line_follower_context(&line_follower_ctx);
     movement_action_controller_set_precision_move_context(&precision_move_ctx);
     movement_action_controller_begin_sequence();
-
-    err = robot_sequence_controller_start(
-        &robot_sequence_controller, millis());
-    if (err != ESP_OK) {
-        Serial.printf("# FAULT: robot sequence start failed (%s)\n",
-                      esp_err_to_name(err));
-        drivetrain_stop(&drivetrain);
-    }
+    Serial.println("# Waiting for arm start switch");
+    // robot_sequence_controller_init() leaves the sequence waiting for the
+    // arm's repeated ready status, which begins after its switch is pressed.
 }
 
 void loop() {

@@ -19,6 +19,8 @@ struct PrecisionMoveTarget {
     DrivetrainBodyVelocity body_velocity;  // cruise/feed-forward velocity
     bool tape_stop_enabled = false;
     TapeStopSpec tape_stop_spec = {};
+    // Optional level-triggered completion condition serviced with UART/pose.
+    const bool *external_stop_requested = nullptr;
     bool world_goal_enabled = false;
     Pose world_goal = {};
 };
@@ -33,7 +35,7 @@ esp_err_t precision_move(const PrecisionMoveContext *context,
 struct TapeAlignContext {
     Drivetrain *drivetrain;
     RobotSequenceController *sequence_controller;
-    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // front, back, side
+    TapeSensor *sensors[TAPE_SENSOR_MODULE_COUNT];  // PX/front, MX/back, PY/side
 };
 
 // Pivots the robot about `travel_dir`'s guide sensor -- approximated at that

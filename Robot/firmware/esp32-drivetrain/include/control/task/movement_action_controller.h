@@ -16,30 +16,40 @@ extern "C" {
 #endif
 
 typedef enum {
-    MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_DISTANCE = 0,
-    MOVEMENT_ACTION_BACK_TAPE_FOLLOW_DISTANCE,
-    MOVEMENT_ACTION_LEFT_TAPE_FOLLOW_DISTANCE,
+    MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE = 0,
+    MOVEMENT_ACTION_MX_TAPE_FOLLOW_DISTANCE,
+    MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE,
     MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER,
-    MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT,
-    MOVEMENT_ACTION_BACK_TAPE_STRAFE_ALIGN,
+    MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER_FRONT,
+    MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT,
+    MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_BACK,
+    MOVEMENT_ACTION_MX_TAPE_STRAFE_ALIGN,
     MOVEMENT_ACTION_GO_X_DISTANCE,
     MOVEMENT_ACTION_GO_Y_DISTANCE,
     MOVEMENT_ACTION_ROTATE,
-    MOVEMENT_ACTION_GO_FORWARD_UNTIL_SIDE_TAPE,
+    MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE,
+    MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE,
+    MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE,
+    // Require a positive maximum sweep in degrees.
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE,
-    MOVEMENT_ACTION_GO_BACKWARD_UNTIL_LOCATOR,
+    MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
+    MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
+    MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
     MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP,
-    MOVEMENT_ACTION_FRONT_TAPE_FOLLOW_UNTIL_GAP,
-    MOVEMENT_ACTION_GO_LEFT_DISTANCE,
-    MOVEMENT_ACTION_GO_RIGHT_DISTANCE,
-    MOVEMENT_ACTION_GO_FORWARD,
+    MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_GAP,
+    MOVEMENT_ACTION_GO_PY_DISTANCE,
+    MOVEMENT_ACTION_GO_MY_DISTANCE,
+    MOVEMENT_ACTION_GO_PX_DISTANCE,
     MOVEMENT_ACTION_GENERAL_MOTION,
+    MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON,
     MOVEMENT_ACTION_MAX,
 } MovementAction;
 
 typedef struct {
     MovementAction action;
     float action_value;
+    // Translation speed in m/s, or angular speed in rad/s for rotation.
+    float speed;
     bool locator_contact_detected;
     float dx_body_m;
     float dy_body_m;
@@ -51,6 +61,14 @@ esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
     float action_value);
+
+// Prepares an action with an optional movement speed. Translation and tape
+// actions use m/s; rotation actions use rad/s. Zero selects the default.
+esp_err_t movement_action_controller_init_with_speed(
+    MovementActionController *controller,
+    MovementAction action,
+    float action_value,
+    float speed_mps);
 
 // Prepares a body-relative translation and rotation action.
 esp_err_t movement_action_controller_init_general_motion(

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <Arduino.h>
 #include "esp_timer.h"
+#include "control/motion/stall_escalation.h"
 #include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/math_utils.h>
@@ -15,6 +16,8 @@ constexpr float kHeadTol = 0.0349066f;    // rad: final heading tolerance (2°)
 constexpr float kMotionOmegaRadS = 0.6f;
 constexpr float kApproachRampDistanceM = 0.03f;
 constexpr float kMinRampSpeedMps = 0.1f;
+constexpr float kMinPrecisionTranslateSpeedMps = 0.05f;
+constexpr float kShortMoveNudgeS = 0.05f;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
@@ -130,18 +133,25 @@ esp_err_t precision_move(
             wrap(start.heading_rad + target->delta_heading_rad),
         };
     }
+    // Translation and rotation are executed as separate phases. Hold the
+    // heading that was active at translation start; any requested heading
+    // change is applied afterward by FinalRotate.
+    const float translation_heading = wrap(
+        goal.heading_rad - target->delta_heading_rad);
     const float cruise_speed = std::hypot(
         target->body_velocity.vx, target->body_velocity.vy);
     const float translation_distance = std::hypot(dx, dy);
 
     enum class State { Translate, FinalRotate };
-    State state = translation_distance > 1.0e-4f
+    State state = translation_distance > 1.0e-6f
         ? State::Translate : State::FinalRotate;
     const int64_t t0 = esp_timer_get_time();
     FixedRateGate gate = {kCtrlPeriodUs, t0};
     Pose prev = start;                           // previous estimate
     float cumulative_distance_m = 0.0f;
     TapeStopCondition tape_stop;
+    float translate_elapsed_s = 0.0f;
+    StallEscalation stall = {};
 
     auto stop = [&]() {
         drivetrain_stop(context->drivetrain);
@@ -166,9 +176,14 @@ esp_err_t precision_move(
         }
         const esp_err_t pose_err = robot_sequence_controller_update(
             context->sequence_controller, static_cast<uint32_t>(now / 1000));
-        if (pose_err != ESP_OK) {
+        if (pose_err != ESP_OK || !context->sequence_controller->running) {
             stop();
-            return pose_err;
+            return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
+        }
+        if (target->external_stop_requested != nullptr &&
+            *target->external_stop_requested) {
+            stop();
+            return ESP_OK;
         }
 
         const Pose cur = pose_tracker_get_pose(pose_tracker);
@@ -178,8 +193,9 @@ esp_err_t precision_move(
             return ESP_ERR_INVALID_STATE;
         }
 
-        cumulative_distance_m += std::hypot(cur.x_m - prev.x_m,
-                                            cur.y_m - prev.y_m);
+        const float step_distance_m = std::hypot(cur.x_m - prev.x_m,
+                                                 cur.y_m - prev.y_m);
+        cumulative_distance_m += step_distance_m;
         prev = cur;
 
         if (target->tape_stop_enabled) {
@@ -208,14 +224,26 @@ esp_err_t precision_move(
 
         switch (state) {
         case State::Translate: {
+            const bool short_translation =
+                translation_distance <= kPosTol;
+            const bool short_move_nudge_active =
+                short_translation && translate_elapsed_s < kShortMoveNudgeS;
             if (distance_error <= kPosTol) {
-                if (target->tape_stop_enabled &&
+                if (!short_move_nudge_active &&
+                    std::fabs(target->delta_heading_rad) > kHeadTol) {
+                    state = State::FinalRotate;
+                    break;
+                }
+                if (!short_move_nudge_active &&
+                    target->tape_stop_enabled &&
                     !tape_stop_condition_triggered(&tape_stop)) {
                     stop();
                     return ESP_ERR_TIMEOUT;
                 }
-                state = State::FinalRotate;
-                break;
+                if (!short_move_nudge_active) {
+                    state = State::FinalRotate;
+                    break;
+                }
             }
 
             float command_speed = cruise_speed;
@@ -241,6 +269,22 @@ esp_err_t precision_move(
                 cmd.vx *= scale;
                 cmd.vy *= scale;
             }
+            if (command_norm > 0.0f &&
+                (distance_error > kPosTol || short_move_nudge_active) &&
+                command_norm < kMinPrecisionTranslateSpeedMps) {
+                const float min_speed = std::fmin(
+                    kMinPrecisionTranslateSpeedMps, command_speed);
+                const float scale = min_speed / command_norm;
+                cmd.vx *= scale;
+                cmd.vy *= scale;
+            }
+            const float heading_error = wrap(
+                translation_heading - cur.heading_rad);
+            cmd.omega = clamp(
+                heading_error * kHeadingGain,
+                -kMotionOmegaRadS,
+                kMotionOmegaRadS);
+            translate_elapsed_s += dt;
 
             break;
         }
@@ -250,14 +294,23 @@ esp_err_t precision_move(
             if (std::fabs(heading_error) > kHeadTol) {
                 // Rotate alone. Mixing translation correction into this
                 // command can saturate the wheel targets.
+                const float requested_omega =
+                    std::fabs(target->body_velocity.omega);
+                const float rotate_limit = requested_omega > 0.0f
+                    ? requested_omega : kMotionOmegaRadS;
                 cmd.omega = clamp(
                     heading_error * kHeadingGain,
-                    -kMotionOmegaRadS, kMotionOmegaRadS);
+                    -rotate_limit, rotate_limit);
                 break;
             }
 
             if (target->tape_stop_enabled &&
                 !tape_stop_condition_triggered(&tape_stop)) {
+                stop();
+                return ESP_ERR_TIMEOUT;
+            }
+            if (target->external_stop_requested != nullptr &&
+                !*target->external_stop_requested) {
                 stop();
                 return ESP_ERR_TIMEOUT;
             }
@@ -271,18 +324,34 @@ esp_err_t precision_move(
                 break;
             }
 
-            const Pose corrected_goal = {
-                goal.x_m, goal.y_m, goal.heading_rad};
-            const esp_err_t snap_error = pose_tracker_set_pose(
-                pose_tracker, &corrected_goal);
-            if (snap_error != ESP_OK) {
-                stop();
-                return snap_error;
+            // Ordinary precision moves commit their nominal endpoint so
+            // small tracking errors do not compound across a sequence. Tape
+            // and external-stop actions return above before this point when
+            // their measured stop point should be preserved.
+            const bool preserve_measured_endpoint =
+                target->tape_stop_enabled ||
+                target->external_stop_requested != nullptr;
+            if (!preserve_measured_endpoint) {
+                const Pose corrected_goal = {
+                    goal.x_m, goal.y_m, goal.heading_rad};
+                const esp_err_t snap_error = pose_tracker_set_pose(
+                    pose_tracker, &corrected_goal);
+                if (snap_error != ESP_OK) {
+                    stop();
+                    return snap_error;
+                }
             }
             stop();
             return ESP_OK;
         }
         }
+
+        const float scale = stall_escalation_update(
+            &stall, std::hypot(cmd.vx, cmd.vy), step_distance_m, dt);
+        const DrivetrainConfig *drivetrain_config = context->drivetrain->config;
+        stall_escalation_apply_scale(&cmd.vx, &cmd.vy, scale,
+                                     drivetrain_config->max_vx_mps,
+                                     drivetrain_config->max_vy_mps);
 
         const esp_err_t command_err = drivetrain_set_advanced_body_velocity(
             context->drivetrain, cmd.vx, cmd.vy, cmd.omega);
@@ -343,9 +412,9 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
 
         const esp_err_t pose_err = robot_sequence_controller_update(
             context->sequence_controller, static_cast<uint32_t>(now / 1000));
-        if (pose_err != ESP_OK) {
+        if (pose_err != ESP_OK || !context->sequence_controller->running) {
             stop();
-            return pose_err;
+            return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
         }
         if (tape_sensor_driver_read_all(context->sensors) != ESP_OK) {
             stop();

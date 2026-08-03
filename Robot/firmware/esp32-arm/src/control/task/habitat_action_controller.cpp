@@ -52,7 +52,7 @@ void send_status(
 }
 
 float requested_distance_mm(float command_value) {
-    return fabsf(command_value) * kCommandDistanceUnitMm;
+    return command_value * kCommandDistanceUnitMm;
 }
 
 bool habitat_is_busy(const HabitatActionController *controller) {
@@ -93,7 +93,9 @@ void start_habitat_action(
     float distance_mm = 0.0f;
     const char *start_message = nullptr;
 
-    // Decide what to do for this command
+    // Axis commands use both packet parameters:
+    // opcode selects Habitat X or Z; value is signed travel in 100 mm units.
+    // Negative moves up/left, while positive moves down/right.
     switch (command.opcode) {
         case CMD_HABITAT_HOME:
             controller->action_is_timed = true;
@@ -105,36 +107,20 @@ void start_habitat_action(
                 "# Habitat accepting current X/Z positions as home";
             break;
 
-        case CMD_HABITAT_Z_UP:
-            controller->active_stepper = controller->habitat_z_stepper;
-            distance_mm = -requested_distance_mm(command.value);
-            stepper_move_distanceMM(
-                controller->active_stepper, distance_mm);
-            start_message = "# Habitat Z moving up";
-            break;
-
-        case CMD_HABITAT_Z_DOWN:
+        case CMD_HABITAT_Z:
             controller->active_stepper = controller->habitat_z_stepper;
             distance_mm = requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Habitat Z moving down";
+            start_message = "# Habitat Z moving";
             break;
 
-        case CMD_HABITAT_X_LEFT:
-            controller->active_stepper = controller->habitat_x_stepper;
-            distance_mm = -requested_distance_mm(command.value);
-            stepper_move_distanceMM(
-                controller->active_stepper, distance_mm);
-            start_message = "# Habitat X moving left";
-            break;
-
-        case CMD_HABITAT_X_RIGHT:
+        case CMD_HABITAT_X:
             controller->active_stepper = controller->habitat_x_stepper;
             distance_mm = requested_distance_mm(command.value);
             stepper_move_distanceMM(
                 controller->active_stepper, distance_mm);
-            start_message = "# Habitat X moving right";
+            start_message = "# Habitat X moving";
             break;
 
         case CMD_HABITAT_OPEN_CLAWS:
@@ -185,6 +171,26 @@ void start_habitat_action(
                     : "# Closing right Habitat claw";
             break;
 
+        case CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_left_servo,
+                HABITAT_LEFT_CLAW_SEMI_CLOSED_ANGLE);
+            start_message = "# Semi-closing left Habitat claw";
+            break;
+
+        case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_right_servo,
+                HABITAT_RIGHT_CLAW_SEMI_CLOSED_ANGLE);
+            start_message = "# Semi-closing right Habitat claw";
+            break;
+
         default:
             return;
     }
@@ -215,8 +221,10 @@ void habitat_action_controller_init(
 }
 
 bool habitat_action_controller_accepts(CommandOpcode command) {
-    return command >= CMD_HABITAT_HOME &&
-        command <= CMD_HABITAT_CLOSE_RIGHT_CLAW;
+    return (command >= CMD_HABITAT_HOME &&
+            command <= CMD_HABITAT_CLOSE_RIGHT_CLAW) ||
+        command == CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW ||
+        command == CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW;
 }
 
 bool habitat_action_controller_is_busy(

@@ -45,14 +45,10 @@ ActionStatusDetail arm_action_status_detail(CommandOpcode command) {
             return STATUS_DETAIL_TOWER_LOCATOR_RETRACTED;
         case CMD_HABITAT_HOME:
             return STATUS_DETAIL_HABITAT_HOME;
-        case CMD_HABITAT_Z_UP:
-            return STATUS_DETAIL_HABITAT_Z_RAISED;
-        case CMD_HABITAT_Z_DOWN:
-            return STATUS_DETAIL_HABITAT_Z_LOWERED;
-        case CMD_HABITAT_X_LEFT:
-            return STATUS_DETAIL_HABITAT_X_LEFT;
-        case CMD_HABITAT_X_RIGHT:
-            return STATUS_DETAIL_HABITAT_X_RIGHT;
+        case CMD_HABITAT_Z:
+            return STATUS_DETAIL_HABITAT_Z_MOVED;
+        case CMD_HABITAT_X:
+            return STATUS_DETAIL_HABITAT_X_MOVED;
         case CMD_HABITAT_OPEN_CLAWS:
             return STATUS_DETAIL_HABITAT_CLAWS_OPEN;
         case CMD_HABITAT_CLOSE_CLAWS:
@@ -65,6 +61,10 @@ ActionStatusDetail arm_action_status_detail(CommandOpcode command) {
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN;
         case CMD_HABITAT_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
         default:
             return STATUS_DETAIL_NONE;
     }

@@ -30,6 +30,7 @@ typedef struct {
     bool waiting_for_arm_ready;
     bool locator_contact_pending;
     bool updating_movement;
+    uint8_t last_pi_request_id;
 } RobotSequenceController;
 
 // Initializes the sequence; call robot_sequence_controller_start() after

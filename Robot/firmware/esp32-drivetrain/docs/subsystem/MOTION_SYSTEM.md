@@ -38,7 +38,7 @@ center on a strip or gap. All three sensors are required.
 
 ### align_on_tape()
 
-After a `follow_tape()` `LATERAL_ONE` or `LATERAL_TWO` stop, the guide sensor
+After a `follow_tape()` `RISE_ONE` or `RISE_TWO` stop, the guide sensor
 is on the feature but the body can still be skewed. `align_on_tape()` pivots
 about the guide sensor (`travel_dir`) while correcting from a different
 sensor (`feedback_dir`) until that sensor is centered:
@@ -50,7 +50,7 @@ align_on_tape(&align_ctx, /*travel_dir=*/Direction::PY,
 ```
 
 `on_gap` must match the preceding stop: `false` after `LATERAL_ONE` and `true`
-after `LATERAL_TWO`. The feedback error is EMA-filtered before PID and the
+after `RISE_TWO`. The feedback error is EMA-filtered before PID and the
 output omega is EMA-smoothed, matching `follow_tape()` steering.
 
 ## Sequence integration

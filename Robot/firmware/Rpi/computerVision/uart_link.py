@@ -63,26 +63,32 @@ CMD_FLASH  = 4
 CMD_DONE   = 5
 CMD_RESUME = 6   # continue an interrupted sweep/drive routine (reactive detector)
 CMD_TOWER_HOME = 7
-CMD_TOWER_Z_UP = 8
-CMD_TOWER_Z_DOWN = 9
-CMD_TOWER_X_LEFT = 10
-CMD_TOWER_X_RIGHT = 11
-CMD_TOWER_ROTATE_VERTICAL = 12
-CMD_TOWER_ROTATE_HORIZONTAL = 13
-CMD_TOWER_OPEN_CLAW = 14
-CMD_TOWER_CLOSE_CLAW = 15
-CMD_HABITAT_HOME = 16
-CMD_HABITAT_Z_UP = 17
-CMD_HABITAT_Z_DOWN = 18
-CMD_HABITAT_X_LEFT = 19
-CMD_HABITAT_X_RIGHT = 20
-CMD_HABITAT_OPEN_CLAWS = 21
-CMD_HABITAT_CLOSE_CLAWS = 22
-CMD_HABITAT_OPEN_LEFT_CLAW = 23
-CMD_HABITAT_CLOSE_LEFT_CLAW = 24
-CMD_HABITAT_OPEN_RIGHT_CLAW = 25
-CMD_HABITAT_CLOSE_RIGHT_CLAW = 26
-CMD_PI_SCAN_TELETUBBIES = 27
+CMD_TOWER_Z = 8
+CMD_TOWER_X = 9
+CMD_TOWER_ROTATE_VERTICAL = 10
+CMD_TOWER_ROTATE_HORIZONTAL = 11
+CMD_TOWER_OPEN_ALL_CLAWS = 12
+CMD_TOWER_CLOSE_ALL_CLAWS = 13
+CMD_TOWER_OPEN_LEFT_CLAW = 14
+CMD_TOWER_CLOSE_LEFT_CLAW = 15
+CMD_TOWER_OPEN_MIDDLE_CLAW = 16
+CMD_TOWER_CLOSE_MIDDLE_CLAW = 17
+CMD_TOWER_OPEN_RIGHT_CLAW = 18
+CMD_TOWER_CLOSE_RIGHT_CLAW = 19
+CMD_TOWER_EXTEND_LOCATOR = 20
+CMD_TOWER_RETRACT_LOCATOR = 21
+CMD_HABITAT_HOME = 22
+CMD_HABITAT_Z = 23
+CMD_HABITAT_X = 24
+CMD_HABITAT_OPEN_CLAWS = 25
+CMD_HABITAT_CLOSE_CLAWS = 26
+CMD_HABITAT_OPEN_LEFT_CLAW = 27
+CMD_HABITAT_CLOSE_LEFT_CLAW = 28
+CMD_HABITAT_OPEN_RIGHT_CLAW = 29
+CMD_HABITAT_CLOSE_RIGHT_CLAW = 30
+CMD_PI_SCAN_TELETUBBIES = 31
+CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW = 32
+CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW = 33
 
 # PiAction and PiResultCode, from pi_action_packet.h
 PI_ACTION_SCAN_TELETUBBIES = 0
@@ -130,6 +136,10 @@ STATUS_DETAIL_HABITAT_LEFT_CLAW_OPEN = 17
 STATUS_DETAIL_HABITAT_LEFT_CLAW_CLOSED = 18
 STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN = 19
 STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED = 20
+STATUS_DETAIL_HABITAT_Z_MOVED = 33
+STATUS_DETAIL_HABITAT_X_MOVED = 34
+STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED = 35
+STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED = 36
 
 
 def encode_command(opcode, value=0.0):
@@ -261,9 +271,18 @@ class RobotLink:
         # `port`: "COM5" on Windows, "/dev/ttyUSB0" or "/dev/serial0" on the Pi.
         # `baud`: MUST equal UartLinkConfig.baud_rate on the ESP side.
         # timeout=0 -> non-blocking reads/writes, so the vision loop never stalls.
-        self.ser = serial.Serial(port, baud, timeout=0)
+        try:
+            self.ser = serial.Serial(port, baud, timeout=0)
+        except Exception as e:
+            # A raw pyserial traceback doesn't say WHICH port/baud failed --
+            # print that first so a wrong SERIAL_PORT or an unplugged USB
+            # adapter is obvious at a glance instead of a wall of Python.
+            print(f"[uart_link] FAILED to open {port} @ {baud} baud: {e}")
+            raise
+        print(f"[uart_link] opened {port} @ {baud} baud")
         self.parser = PacketParser()
         self.rx_chunk = rx_chunk
+        self._link_down = False   # edge-triggered so a persistent drop logs once, not every call
 
     # --- sending ---
     def send_command(self, opcode, value=0.0):
@@ -285,8 +304,13 @@ class RobotLink:
             self.ser.write(frame)
             self.ser.flush()  # block until bytes are actually clocked out,
                               # not just queued in the OS write buffer
+            if self._link_down:
+                print("[uart_link] write recovered")
+                self._link_down = False
         except OSError as e:
-            print(f"[uart_link] write failed: {e}")
+            if not self._link_down:
+                print(f"[uart_link] write failed, link appears down: {e}")
+                self._link_down = True
 
     def stop(self):          self.send_command(CMD_STOP)
     def turn(self, error):   self.send_command(CMD_TURN, error)
@@ -296,17 +320,17 @@ class RobotLink:
     def done(self):          self.send_command(CMD_DONE)
     def resume(self):        self.send_command(CMD_RESUME)
     def tower_z_up(self, distance_mm=100):
-        self.send_command(CMD_TOWER_Z_UP, distance_mm / 100.0)
+        self.send_command(CMD_TOWER_Z, distance_mm / 100.0)
     def tower_z_down(self, distance_mm=100):
-        self.send_command(CMD_TOWER_Z_DOWN, distance_mm / 100.0)
+        self.send_command(CMD_TOWER_Z, -distance_mm / 100.0)
     def tower_rotate_vertical(self):
         self.send_command(CMD_TOWER_ROTATE_VERTICAL)
     def tower_rotate_horizontal(self):
         self.send_command(CMD_TOWER_ROTATE_HORIZONTAL)
     def tower_open_claw(self):
-        self.send_command(CMD_TOWER_OPEN_CLAW)
+        self.send_command(CMD_TOWER_OPEN_ALL_CLAWS)
     def tower_close_claw(self):
-        self.send_command(CMD_TOWER_CLOSE_CLAW)
+        self.send_command(CMD_TOWER_CLOSE_ALL_CLAWS)
 
     # --- receiving ---
     def poll(self):
@@ -318,8 +342,13 @@ class RobotLink:
         try:
             data = self.ser.read(self.rx_chunk)
         except OSError as e:
-            print(f"[uart_link] read failed: {e}")
+            if not self._link_down:
+                print(f"[uart_link] read failed, link appears down: {e}")
+                self._link_down = True
             return []
+        if self._link_down:
+            print("[uart_link] read recovered")
+            self._link_down = False
 
         packets = []
         for b in data:

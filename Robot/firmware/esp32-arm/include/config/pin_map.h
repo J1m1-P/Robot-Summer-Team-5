@@ -12,7 +12,7 @@
 
 // Locating Motor
 #define PIN_LOC_EN          13      // Power on the locating motor
-#define PIN_LOC_SWITCH      14      // Active-low microswitch on locating motor
+#define PIN_LOC_SWITCH      14      // Normally closed to ground; pressed reads HIGH
 
 // Stepper Motor Driver
 #define PIN_STEP1           16      // PWM (not really) for Stepper Motor1
@@ -26,12 +26,15 @@
 
 // Communication
 
+// Robot start switch
+#define PIN_START_SWITCH     46      // Active low; released state is pulled high
+
 // Time of Flight (I2C)
 #define PIN_I2C_SDA         7
 #define PIN_I2C_SCL         8
-// Temporary bench wiring. GPIO45/46 are ESP32-S3 strapping pins and will be
-// replaced by externally controlled lines in the final hardware.
-#define PIN_TOF_LEFT_XSHUT  46
+// GPIO46 was reassigned to the start switch. The left sensor remains
+// disconnected until its XSHUT line is assigned a new GPIO.
+#define PIN_TOF_LEFT_XSHUT  GPIO_NUM_NC
 #define PIN_TOF_RIGHT_XSHUT 45
 
 // Optical Sensors (SPI)

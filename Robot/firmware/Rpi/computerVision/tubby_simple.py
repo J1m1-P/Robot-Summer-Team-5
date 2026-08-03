@@ -91,17 +91,30 @@ FLASH_ON_TIME = 0.5      # ADJUST: seconds the flash stays on per pulse
 if GPIO is not None:
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(FLASH_PIN, GPIO.OUT, initial=GPIO.LOW)
+    print(f"[startup] flash ready on GPIO{FLASH_PIN}")
+else:
+    print("[startup] no RPi.GPIO -- dev machine, flashes will just log")
 
 # ── serial link to the ESP32 ──────────────────────────────────────────────────
 SERIAL_PORT = "/dev/serial0"  # ADJUST: "COM5"/"/dev/ttyUSB0"/etc.; None = dev mode, no link
 SERIAL_BAUD = 115200          # ADJUST: must match PI_UART_LINK_CONFIG on the ESP
-link = RobotLink(SERIAL_PORT, SERIAL_BAUD) if SERIAL_PORT else None
+if SERIAL_PORT:
+    link = RobotLink(SERIAL_PORT, SERIAL_BAUD)
+else:
+    link = None
+    print("[startup] SERIAL_PORT is None -- dev mode, reports print to console only")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # YOLO DETECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-model = YOLO(MODEL_PATH)
+print(f"[startup] loading model from {MODEL_PATH} ...")
+try:
+    model = YOLO(MODEL_PATH)
+except Exception as e:
+    print(f"[startup] FAILED to load model from {MODEL_PATH}: {e}")
+    raise
+print(f"[startup] model loaded, classes={list(model.names.values())}")
 YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"}
 
 # PiReportPacket.target_id is a single wire byte — map each identity to a stable
@@ -120,15 +133,21 @@ def yolo_detect_all(frame, frame_w, exclude=None):
     -1 (left) .. +1 (right). `exclude` drops identities already in `visited`.
     """
     exclude = exclude or set()
+
+    # Run the model once on this frame; bail early if it found nothing at all.
     results = model(frame, conf=DETECT_CONF, imgsz=IMGSZ, verbose=False)
     boxes = results[0].boxes
     if len(boxes) == 0:
         return []
 
+    # Pull the raw box data out of the torch tensors as plain numpy arrays.
     xyxy = boxes.xyxy.cpu().numpy()
     cls  = boxes.cls.cpu().numpy().astype(int)
     conf = boxes.conf.cpu().numpy()
 
+    # Build one (identity, box, horizontal_error) tuple per kept detection,
+    # walking boxes highest-confidence first and skipping already-flashed
+    # identities so a re-scan never re-reports something we're done with.
     dets = []
     for i in conf.argsort()[::-1]:           # highest confidence first
         identity = YOLO_NAME_MAP[model.names[cls[i]]]
@@ -136,7 +155,7 @@ def yolo_detect_all(frame, frame_w, exclude=None):
             continue
         x1, y1, x2, y2 = xyxy[i]
         x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
-        error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)
+        error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)   # -1 left .. +1 right
         dets.append((identity, (x, y, w, h), error))
     return dets
 
@@ -198,6 +217,8 @@ def handle_scan_request_simple(request_id, parameter):
     `parameter` is decoded but unused (reserved by the wire format for future
     per-scan tuning).
     """
+    # CHUNK 1 — sample a short burst of frames and tally how many of them
+    # each identity showed up in (once per frame, not once per detection).
     seen_counts = Counter()
     frames_read = 0
     for _ in range(SCAN_BURST_FRAMES):
@@ -211,13 +232,16 @@ def handle_scan_request_simple(request_id, parameter):
             seen_counts[identity] += 1
         _report_state("SCANNING", pick_target(dets))
 
+    # CHUNK 2 — the camera itself never produced a usable frame this burst.
     if frames_read == 0:
         print(f"[SCAN #{request_id}] camera unavailable")
         send_report(request_id, PI_RESULT_CAMERA_FAULT)
         return
 
+    # CHUNK 3 — decide the winner. An identity only counts once it showed up
+    # in SCAN_MIN_VOTES separate frames, filtering out single-frame noise.
     # Only one teletubby is ever in frame at a time, so at most one identity
-    # can reach SCAN_MIN_VOTES.
+    # can reach that threshold.
     solid = [identity for identity, n in seen_counts.items() if n >= SCAN_MIN_VOTES]
     if not solid:
         print(f"[SCAN #{request_id}] no unflashed detection (visited={visited})")
@@ -227,11 +251,15 @@ def handle_scan_request_simple(request_id, parameter):
     winner = solid[0]
     confidence_percent = round(100 * seen_counts[winner] / SCAN_BURST_FRAMES)
 
+    # CHUNK 4 — winner locked in: flash it and mark it done for good, so a
+    # later scan (of the OTHER teletubby) never re-flashes this one.
     for _ in range(FLASH_COUNT):
         flash_once()
     visited.add(winner)
     print(f"[SCAN #{request_id}] flashed {winner} conf={confidence_percent}%")
 
+    # CHUNK 5 — tell the ESP whether that was the last target or not, so it
+    # knows whether to send another scan request later or move on.
     if len(visited) >= TARGETS_TO_FIND:
         # Nothing left to search for — the ESP moves on to Tower pickup.
         result = PI_RESULT_ALL_FOUND
@@ -283,8 +311,14 @@ def _configure_camera(capture):
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
 
 
+print(f"[startup] opening camera index {CAMERA_INDEX} ...")
 cap = cv2.VideoCapture(CAMERA_INDEX)
 _configure_camera(cap)
+if cap.isOpened():
+    print(f"[startup] camera ready ({CAMERA_WIDTH}x{CAMERA_HEIGHT})")
+else:
+    print(f"[startup] WARNING: camera index {CAMERA_INDEX} did not open -- "
+          f"check it's connected; control_loop will keep retrying")
 
 # ── readiness beacon ────────────────────────────────────────────────────────
 # Camera's open and the model (loaded above, before this point) is warm, so
@@ -348,6 +382,9 @@ def control_loop():
 
     try:
         while True:
+            # CHUNK 1 — everything UART-related: nudge the readiness beacon
+            # if the ESP hasn't acknowledged it yet, then answer any scan
+            # requests that arrived since the last time round the loop.
             if link is not None:
                 if _ready_pending:
                     now = time.time()
@@ -357,7 +394,7 @@ def control_loop():
 
                 for msg_type, payload in link.poll():
                     if msg_type != PACKET_TYPE_PI_REQUEST:
-                        continue
+                        continue    # only scan requests arrive on this link
                     try:
                         request_id, action, parameter = decode_pi_request(payload)
                     except ValueError:
@@ -368,6 +405,9 @@ def control_loop():
                     if action == PI_ACTION_SCAN_TELETUBBIES:
                         handle_scan_request_simple(request_id, parameter)
 
+            # CHUNK 2 — one idle-loop camera read. A failed read just counts
+            # against the retry budget; MAX_FAILURES in a row triggers a
+            # reopen attempt, and a failed reopen gives up for good.
             ok, frame = cap.read()
             if not ok:
                 consecutive_failures += 1
@@ -385,6 +425,9 @@ def control_loop():
                 continue
             consecutive_failures = 0
 
+            # CHUNK 3 — read succeeded and no scan was requested this tick:
+            # genuinely idle. Optionally bank the frame for training data,
+            # log the state, and loop again.
             _maybe_collect_image(frame)
             _report_state("IDLE")
             time.sleep(0.03)
@@ -396,7 +439,7 @@ if __name__ == '__main__':
     try:
         control_loop()
     except KeyboardInterrupt:
-        pass
+        pass    # Ctrl+C on the bench -- still fall through to GPIO cleanup below
     finally:
         if GPIO is not None:
             GPIO.cleanup()
