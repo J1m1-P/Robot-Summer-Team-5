@@ -63,7 +63,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     
     // Search checkpoint 1: tape follow, stop, and ask the Pi to scan.
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.55f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.55f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     // {ROBOT_STEP_SCAN_ROTATION, {.movement = MOVEMENT_ACTION_ROTATE}, 0.0f},
 
@@ -87,9 +87,9 @@ static const RobotSequenceStep kRobotSequence[] = {
 
     /* Movement to tower pickup*/
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 120.0f, 2.0f}, // rotate until side tape
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.2f}, // tape follow to pickup
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.07f, 0.2f},  // forward/backward adjustment
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.035f, 0.2f},   // left/right adjustment
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.3f}, // tape follow to pickup
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f, 0.3f},  // forward/backward adjustment
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},   // left/right adjustment
 
     /* Picking up tower pieces*/ 
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.40f},                 // lower claw
@@ -103,10 +103,10 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.35f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.065f, 0.2f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
-    {ROBOT_STEP_DELAY, {0}, 1.0f},
+    // {ROBOT_STEP_DELAY, {0}, 1.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE}, 0.12f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.2f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.05f, 0.2f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 0.05f, 0.2f},
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 1.6f},
