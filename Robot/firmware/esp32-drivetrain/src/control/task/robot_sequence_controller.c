@@ -11,6 +11,16 @@
 #include <robot_common/pi_action_packet.h>
 #include <robot_common/status_packet.h>
 
+#ifndef ROBOT_SEQUENCE_DIAGNOSTICS
+#define ROBOT_SEQUENCE_DIAGNOSTICS 0
+#endif
+
+#if ROBOT_SEQUENCE_DIAGNOSTICS
+#define SEQUENCE_DIAGNOSTIC_LOG(...) printf(__VA_ARGS__)
+#else
+#define SEQUENCE_DIAGNOSTIC_LOG(...) do { } while (0)
+#endif
+
 static const uint32_t kActionTimeoutMs = 15000;
 
 // Replace this conversion after measuring camera steering on the robot.
@@ -117,7 +127,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_X}, -0.68f},                 // move X again
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.35f},                 // lower claw
     {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_RIGHT_CLAW}, 0.0f},     // drop right piece
-    
+
     // Go back to main tape and put tower arm and locator in safe idle position
 
     /*------------------------ Habitat Code Below ------------------------*/
@@ -363,7 +373,37 @@ static void handle_sequence_frame(
     } else if (status_packet_is(frame)) {
         StatusPacket status = {0};
         if (status_packet_decode(frame, &status) != ESP_OK) return;
+
+        const RobotSequenceStep *active_step =
+            &kRobotSequence[controller->current_step];
+        const bool expecting_arm_completion =
+            !controller->waiting_for_arm_ready &&
+            active_step->type == ROBOT_STEP_ARM;
+        const uint8_t expected_detail = expecting_arm_completion
+            ? (uint8_t)arm_action_status_detail(active_step->action.arm)
+            : (uint8_t)STATUS_DETAIL_NONE;
+        const bool log_status = controller->waiting_for_arm_ready ||
+            expecting_arm_completion || status.code == STATUS_FAULT ||
+            status.code == STATUS_LOCATOR_CONTACT;
+        if (log_status) {
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Arm status: current_step=%u code=%u detail=%u "
+                "waiting_ready=%u expected_detail=%u\n",
+                (unsigned long)now_ms,
+                (unsigned)controller->current_step,
+                (unsigned)status.code,
+                (unsigned)status.detail,
+                controller->waiting_for_arm_ready ? 1U : 0U,
+                (unsigned)expected_detail);
+        }
+
         if (status.code == STATUS_FAULT) {
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Arm status FAULT: step=%u code=%u detail=%u\n",
+                (unsigned long)now_ms,
+                (unsigned)controller->current_step,
+                (unsigned)status.code,
+                (unsigned)status.detail);
             enter_fault(controller, "arm reported a fault", ESP_FAIL);
             return;
         }
@@ -375,9 +415,16 @@ static void handle_sequence_frame(
             return;
         }
 
+        if (status.code != STATUS_ACTION_COMPLETE) return;
+
         if (controller->waiting_for_arm_ready) {
-            if (status.code != STATUS_ACTION_COMPLETE ||
-                status.detail != STATUS_DETAIL_NONE) {
+            if (status.detail != STATUS_DETAIL_NONE) {
+                SEQUENCE_DIAGNOSTIC_LOG(
+                    "# t=%lu Ignored startup completion: detail=%u "
+                    "expected=%u\n",
+                    (unsigned long)now_ms,
+                    (unsigned)status.detail,
+                    (unsigned)STATUS_DETAIL_NONE);
                 return;
             }
 
@@ -392,18 +439,32 @@ static void handle_sequence_frame(
                     "failed to start first robot step",
                     start_error);
             } else {
-                printf("# Arm ready; robot sequence started\n");
+                SEQUENCE_DIAGNOSTIC_LOG(
+                    "# t=%lu Arm ready; robot sequence started at step=%u\n",
+                    (unsigned long)now_ms,
+                    (unsigned)controller->current_step);
             }
             return;
         }
 
-        if (status.code != STATUS_ACTION_COMPLETE) return;
-
         const RobotSequenceStep *step =
             &kRobotSequence[controller->current_step];
+        const uint8_t step_expected_detail = step->type == ROBOT_STEP_ARM
+            ? (uint8_t)arm_action_status_detail(step->action.arm)
+            : (uint8_t)STATUS_DETAIL_NONE;
         step_complete = step->type == ROBOT_STEP_ARM &&
             status.detail ==
-                (uint8_t)arm_action_status_detail(step->action.arm);
+                step_expected_detail;
+        if (step->type == ROBOT_STEP_ARM) {
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Arm completion %s: step=%u received_detail=%u "
+                "expected_detail=%u\n",
+                (unsigned long)now_ms,
+                step_complete ? "accepted" : "ignored",
+                (unsigned)controller->current_step,
+                (unsigned)status.detail,
+                (unsigned)step_expected_detail);
+        }
     } else {
         return;
     }
@@ -473,6 +534,23 @@ static esp_err_t start_robot_step(
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Sequence step start: index=%u type=%u action=%u "
+        "value=%.3f speed=%.3f deadline_in_ms=%u\n",
+        (unsigned long)now_ms,
+        (unsigned)step_index,
+        (unsigned)step->type,
+        step->type == ROBOT_STEP_MOVEMENT
+            ? (unsigned)step->action.movement
+            : (unsigned)step->action.arm,
+        step->action_value,
+        step->action_speed_mps,
+        step_is_delay(step->type)
+            ? (unsigned)(step->action_value * 1000.0f)
+            : (unsigned)kActionTimeoutMs);
+
+    controller->step_started_ms = now_ms;
+
     if (step_is_delay(step->type)) {
         if (!isfinite(step->action_value) || step->action_value < 0.0f ||
             step->action_value > (float)UINT32_MAX / 1000.0f) {
@@ -481,8 +559,9 @@ static esp_err_t start_robot_step(
         controller->step_deadline_ms = now_ms +
             (uint32_t)(step->action_value * 1000.0f);
         controller->running = true;
-        printf(
-            "# Calibration delay started: %.1f seconds\n",
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Calibration delay started: %.1f seconds\n",
+            (unsigned long)now_ms,
             step->action_value);
         return ESP_OK;
     }
@@ -509,6 +588,12 @@ static esp_err_t start_robot_step(
         if (step->action.arm == CMD_TOWER_EXTEND_LOCATOR) {
             controller->locator_contact_pending = false;
         }
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Arm command send: step=%u opcode=%u value=%.3f\n",
+            (unsigned long)now_ms,
+            (unsigned)step_index,
+            (unsigned)step->action.arm,
+            step->action_value);
         error = send_arm_command(
             controller, step->action.arm, step->action_value);
     }
@@ -522,12 +607,26 @@ static esp_err_t start_robot_step(
 static void advance_sequence(
     RobotSequenceController *controller,
     uint32_t now_ms) {
+    const size_t completed_step = controller->current_step;
+    const uint32_t elapsed_ms = now_ms - controller->step_started_ms;
     ++controller->current_step;
     if (controller->current_step >= kRobotSequenceLength) {
         controller->running = false;
-        printf("# Robot sequence complete\n");
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Robot sequence complete: final_step=%u elapsed_ms=%u\n",
+            (unsigned long)now_ms,
+            (unsigned)completed_step,
+            (unsigned)elapsed_ms);
         return;
     }
+
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Sequence advance: completed_step=%u elapsed_ms=%u "
+        "next_step=%u\n",
+        (unsigned long)now_ms,
+        (unsigned)completed_step,
+        (unsigned)elapsed_ms,
+        (unsigned)controller->current_step);
 
     const esp_err_t error =
         start_robot_step(controller, controller->current_step, now_ms);
@@ -607,17 +706,38 @@ esp_err_t robot_sequence_controller_update(
         const bool succeeded = movement_action_controller_update(
             &controller->movement_action_controller);
         controller->updating_movement = false;
+        const uint32_t completion_ms = millis();
 
         if (succeeded) {
-            advance_sequence(controller, now_ms);
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Movement complete: step=%u action=%u elapsed_ms=%u\n",
+                (unsigned long)completion_ms,
+                (unsigned)controller->current_step,
+                (unsigned)step->action.movement,
+                (unsigned)(completion_ms - controller->step_started_ms));
+            advance_sequence(controller, completion_ms);
         } else if (controller->running) {
             // false is always a terminal failure (no repeats)
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Movement failed: step=%u action=%u elapsed_ms=%u\n",
+                (unsigned long)completion_ms,
+                (unsigned)controller->current_step,
+                (unsigned)step->action.movement,
+                (unsigned)(completion_ms - controller->step_started_ms));
             enter_fault(controller, "robot step failed", ESP_FAIL);
         }
         return ESP_OK;
     }
 
     if (deadline_reached(now_ms, controller->step_deadline_ms)) {
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Sequence step timeout: index=%u type=%u elapsed_ms=%u "
+            "deadline_ms=%lu\n",
+            (unsigned long)now_ms,
+            (unsigned)controller->current_step,
+            (unsigned)step->type,
+            (unsigned)(now_ms - controller->step_started_ms),
+            (unsigned long)controller->step_deadline_ms);
         enter_fault(controller, "robot step timed out", ESP_ERR_TIMEOUT);
     }
     return ESP_OK;

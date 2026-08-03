@@ -1,7 +1,12 @@
 /* Implements tape-guided and ordinary drivetrain actions. */
 #include "control/task/movement_action_controller.h"
 
+#ifndef ROBOT_MOTION_DIAGNOSTICS
+#define ROBOT_MOTION_DIAGNOSTICS 0
+#endif
+
 #include <cmath>
+#include <cstdio>
 #include <stddef.h>
 
 #include "control/line_following/line_follower.hpp"
@@ -154,6 +159,10 @@ bool precision_action(
     const bool *external_stop_requested = nullptr) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->sequence_controller == nullptr) {
+#if ROBOT_MOTION_DIAGNOSTICS
+        std::printf(
+            "# precision action rejected: missing precision context\n");
+#endif
         return false;
     }
     const float vx_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVxMps;
@@ -193,9 +202,19 @@ bool precision_action(
         target.world_goal_enabled = true;
         target.world_goal = planned_goal;
     }
-    const bool success =
-        precision_move(g_precision_move_ctx, &target, kPrecisionTimeoutS) ==
-        ESP_OK;
+    const esp_err_t move_error = precision_move(
+        g_precision_move_ctx, &target, kPrecisionTimeoutS);
+    const bool success = move_error == ESP_OK;
+#if ROBOT_MOTION_DIAGNOSTICS
+    std::printf(
+        "# precision action result: success=%u error=%d dx=%.3f dy=%.3f "
+        "dtheta=%.3f\n",
+        success ? 1U : 0U,
+        (int)move_error,
+        dx_body,
+        dy_body,
+        dhead_rad);
+#endif
     if (success &&
         (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
