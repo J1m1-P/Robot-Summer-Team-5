@@ -64,9 +64,7 @@ void setup() {
     // Must be called first, prevents weird motor behavior at start up
     drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
 
-    // The active-low switch grounds GPIO9 when closed. When open, the
-    // disconnected input is held HIGH by the internal pull-up.
-    pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
+    movement_action_controller_init_solar_panel_switch();
 
     Serial.begin(115200);
     Serial.println("# Starting drivetrain firmware");

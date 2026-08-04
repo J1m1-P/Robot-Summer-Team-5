@@ -53,6 +53,35 @@ LineFollowerContext *g_line_follower_ctx = nullptr;
 PrecisionMoveContext *g_precision_move_ctx = nullptr;
 Pose g_planned_pose = {};
 bool g_planned_pose_valid = false;
+volatile bool g_solar_panel_contact_pending = false;
+volatile bool g_solar_panel_contact_armed = false;
+
+// One-shot interrupt: the first contact edge disarms the switch so mechanical
+// bounce cannot repeatedly raise the pending flag. The control loop consumes
+// the flag; the ISR never touches a MovementActionController directly.
+void IRAM_ATTR solar_panel_switch_interrupt() {
+    if (!g_solar_panel_contact_armed) return;
+    g_solar_panel_contact_armed = false;
+    g_solar_panel_contact_pending = true;
+}
+
+void disarm_solar_panel_contact() {
+    noInterrupts();
+    g_solar_panel_contact_armed = false;
+    g_solar_panel_contact_pending = false;
+    interrupts();
+}
+
+void arm_solar_panel_contact(MovementActionController *controller) {
+    // Latch a switch that is already closed before motion begins.
+    const bool contact_active =
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+    noInterrupts();
+    g_solar_panel_contact_pending = false;
+    g_solar_panel_contact_armed = !contact_active;
+    interrupts();
+    controller->solar_panel_contact_detected = contact_active;
+}
 
 float wrap_angle(float angle) {
     while (angle > static_cast<float>(M_PI)) angle -= 2.0f * static_cast<float>(M_PI);
@@ -87,7 +116,7 @@ bool follow_tape_action(
     TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO) {
     const TapeFollowMode follow_mode =
         direction == Direction::PX || direction == Direction::MX
-            ? TapeFollowMode::SINGLE_SENSOR
+            ? TapeFollowMode::FRONT_BACK_ALIGNED
             : TapeFollowMode::SINGLE_SENSOR;
     if (!follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
@@ -146,6 +175,15 @@ extern "C" void movement_action_controller_set_precision_move_context(
     g_precision_move_ctx = ctx;
 }
 
+extern "C" void movement_action_controller_init_solar_panel_switch(void) {
+    pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
+    disarm_solar_panel_contact();
+    attachInterrupt(
+        digitalPinToInterrupt(PIN_SOLAR_PANEL_MICROSWITCH),
+        solar_panel_switch_interrupt,
+        FALLING);
+}
+
 extern "C" void movement_action_controller_notify_locator_contact(
     MovementActionController *controller) {
     if (controller != nullptr &&
@@ -156,11 +194,25 @@ extern "C" void movement_action_controller_notify_locator_contact(
 
 extern "C" void movement_action_controller_poll_solar_panel_contact(
     MovementActionController *controller) {
-    if (controller != nullptr &&
-        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL &&
-        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == HIGH) {
-        controller->solar_panel_contact_detected = true;
+    if (controller == nullptr ||
+        controller->action != MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL ||
+        controller->solar_panel_contact_detected) {
+        return;
     }
+
+    // The level check is a fallback if the falling-edge interrupt was missed.
+    const bool contact_active =
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+    noInterrupts();
+    if (contact_active) {
+        g_solar_panel_contact_armed = false;
+        g_solar_panel_contact_pending = true;
+    }
+    const bool contact_pending = g_solar_panel_contact_pending;
+    g_solar_panel_contact_pending = false;
+    interrupts();
+
+    controller->solar_panel_contact_detected = contact_pending;
 }
 
 extern "C" void movement_action_controller_begin_sequence(void) {
@@ -285,6 +337,11 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
     controller->action = action;
     controller->action_value = action_value;
     controller->speed = speed;
+    if (action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL) {
+        arm_solar_panel_contact(controller);
+    } else {
+        disarm_solar_panel_contact();
+    }
     return ESP_OK;
 }
 
@@ -302,6 +359,7 @@ extern "C" esp_err_t movement_action_controller_init_general_motion(
     controller->dx_body_m = dx_body_m;
     controller->dy_body_m = dy_body_m;
     controller->delta_heading_rad = delta_heading_rad;
+    disarm_solar_panel_contact();
     return ESP_OK;
 }
 
@@ -535,10 +593,14 @@ extern "C" bool movement_action_controller_update(
                 0.0f, &controller->locator_contact_detected);
 
         case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
-            return precision_action(
+        {
+            const bool success = precision_action(
                 0.0f, controller->action_value, 0.0f, nullptr,
                 speed_or_default(controller->speed, kLocatorApproachSpeedMps),
                 0.0f, &controller->solar_panel_contact_detected);
+            disarm_solar_panel_contact();
+            return success;
+        }
 
         default:
             return false;

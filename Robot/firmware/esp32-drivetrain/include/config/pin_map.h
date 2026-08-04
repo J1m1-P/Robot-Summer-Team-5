@@ -30,7 +30,7 @@
 #define PIN_ENC4_B              18  // Pin for Encoder 4 channel B
 
 // Solar Panel Microswitch
-#define PIN_SOLAR_PANEL_MICROSWITCH 9  // Active LOW: closed to ground; open is disconnected
+#define PIN_SOLAR_PANEL_MICROSWITCH 9  // Active LOW: contact closes to ground
 
 // Communication Pins
 // GPIO9 was reassigned to the solar-panel switch. Sensor I2C remains

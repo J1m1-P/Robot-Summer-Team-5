@@ -254,8 +254,6 @@ esp_err_t precision_move(
     float translate_elapsed_s = 0.0f;
     float settled_s = 0.0f;
     bool endpoint_correction_applied = false;
-    StallEscalation stall = {};
-
     float endpoint_nudge_phase_s = 0.0f;
 #if ROBOT_MOTION_DIAGNOSTICS
     MotionDiagnosticSnapshot diagnostic = {};
