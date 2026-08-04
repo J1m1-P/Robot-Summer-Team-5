@@ -10,6 +10,7 @@
 #define HIGH 0x1
 #define INPUT_PULLUP 0x5
 #define FALLING 0x2
+#define RISING 0x1
 
 using InterruptHandler = void (*)();
 

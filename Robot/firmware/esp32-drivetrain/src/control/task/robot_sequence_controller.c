@@ -58,52 +58,52 @@ static const RobotSequenceStep kRobotSequence[] = {
     /* Tape follow straight to rotate step. Remove when PI works*/
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.6f},
 
-    // ----------------------------- Teletubbies / Rock Path -----------------------------
-    // Search rock 1
-    //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.3f},
-    {ROBOT_STEP_DELAY, {0}, 3.0f},
-    //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // // ----------------------------- Teletubbies / Rock Path -----------------------------
+    // // Search rock 1
+    // //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.3f},
+    // {ROBOT_STEP_DELAY, {0}, 3.0f},
+    // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
  
-    // Search rock 2
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.14f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 1.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.04f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.4f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
-    {ROBOT_STEP_DELAY, {0}, 3.0f},
+    // // Search rock 2
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.14f, 0.3f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 1.2f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.04f, 0.3f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.4f},
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
+    // {ROBOT_STEP_DELAY, {0}, 3.0f},
    
-    // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
 
-    // Search rock 3
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.13f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -90.0f, 1.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.01f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.08f, 0.3f},
-    {ROBOT_STEP_DELAY, {0}, 3.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
-    // {ROBOT_STEP_DELAY, {0}, 1.5f},
-    // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // // Search rock 3
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.13f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -90.0f, 1.2f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.01f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.08f, 0.3f},
+    // {ROBOT_STEP_DELAY, {0}, 3.0f},
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
+    // // {ROBOT_STEP_DELAY, {0}, 1.5f},
+    // // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
 
-    // // Search rock 4
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.19f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.13f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 1.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
-    //{ROBOT_STEP_DELAY, {0}, 3.0f},
-    // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    // // Continue to tape follow
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 3.15f, 0.4f},
+    // // // Search rock 4
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.19f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.13f, 0.3f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 1.0f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
+    // //{ROBOT_STEP_DELAY, {0}, 3.0f},
+    // // //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // // // Continue to tape follow
+    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 3.15f, 0.4f},
 
 
-    // Search rock 5
+    // // Search rock 5
 
-    // Search rock 6
+    // // Search rock 6
 
 
     // ----------------------------- Tower Code -----------------------------
@@ -293,18 +293,18 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
      
-    // /*------------------------ Solar Panel Code Below ------------------------*/
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.25f, 0.4f},           // move back to solar panel
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                   // rotate so hook is aligned
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.2f},                                         // move claw to position in Z (individual testing)
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.9f},                                         // move claw to position in X (individual testing)
-    // // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                           // move claw to position in Z
-    // // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                            // move claw to position in X
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.25f},           // move in front of solar panel
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL}, 1.0f, 0.2f},   // move left up to 1 m or until the solar-panel switch is pressed
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.4f, 0.25f},            // pull solar panel cover away
+    /*------------------------ Solar Panel Code Below ------------------------*/
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.25f, 0.4f},           // move back to solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                   // rotate so hook is aligned
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.15f},                                         // move claw to position in Z (individual testing)
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.9f},                                         // move claw to position in X (individual testing)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                           // move claw to position in Z
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                            // move claw to position in X
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.25f},           // move in front of solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL}, 1.0f, 0.2f},   // move left up to 1 m or until the solar-panel switch is pressed
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.4f, 0.25f},            // pull solar panel cover away
 };
 
 static const size_t kRobotSequenceLength =
@@ -413,7 +413,8 @@ static void handle_sequence_frame(
             : (uint8_t)STATUS_DETAIL_NONE;
         const bool log_status = controller->waiting_for_arm_ready ||
             expecting_arm_completion || status.code == STATUS_FAULT ||
-            status.code == STATUS_LOCATOR_CONTACT;
+            status.code == STATUS_LOCATOR_CONTACT ||
+            status.code == STATUS_SOLAR_PANEL_CONTACT;
         if (log_status) {
         SEQUENCE_DIAGNOSTIC_LOG(
             "# t=%lu Arm status: current_step=%u code=%u detail=%u "
@@ -440,6 +441,12 @@ static void handle_sequence_frame(
         if (status.code == STATUS_LOCATOR_CONTACT) {
             controller->locator_contact_pending = true;
             movement_action_controller_notify_locator_contact(
+                &controller->movement_action_controller);
+            return;
+        }
+
+        if (status.code == STATUS_SOLAR_PANEL_CONTACT) {
+            movement_action_controller_notify_solar_panel_contact(
                 &controller->movement_action_controller);
             return;
         }

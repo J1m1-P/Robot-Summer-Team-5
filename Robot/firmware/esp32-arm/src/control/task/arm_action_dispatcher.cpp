@@ -12,6 +12,8 @@ namespace {
 
 constexpr uint32_t kReadyRepeatPeriodMs = 20;
 constexpr uint32_t kSolarPanelContactRepeatPeriodMs = 20;
+constexpr bool kSolarPanelSwitchAssigned =
+    PIN_SOLAR_PANEL_MICROSWITCH != GPIO_NUM_NC;
 
 // Helper function to send Status Packet to drivetrain through UART
 void send_status(
@@ -32,7 +34,8 @@ void send_status(
 bool report_solar_panel_contact(
     ArmActionDispatcher *dispatcher,
     uint32_t now_ms) {
-    if (digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) != HIGH ||
+    if (!kSolarPanelSwitchAssigned ||
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) != HIGH ||
         now_ms - dispatcher->last_solar_panel_contact_status_ms <
             kSolarPanelContactRepeatPeriodMs) {
         return false;
@@ -154,7 +157,9 @@ void arm_action_dispatcher_init(
     dispatcher->pi_controller = pi_controller;
     dispatcher->metal_detector_controller = metal_detector_controller;
     dispatcher->readiness_pending = true;
-    pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
+    if (kSolarPanelSwitchAssigned) {
+        pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
+    }
 }
 
 // Called during loop() to service UART, readiness, and both controllers.

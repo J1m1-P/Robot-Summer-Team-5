@@ -73,9 +73,10 @@ void disarm_solar_panel_contact() {
 }
 
 void arm_solar_panel_contact(MovementActionController *controller) {
-    // Latch a switch that is already closed before motion begins.
+    // The normally-closed switch grounds the input while released. Pressing
+    // it opens the circuit, so INPUT_PULLUP makes contact read HIGH.
     const bool contact_active =
-        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == HIGH;
     noInterrupts();
     g_solar_panel_contact_pending = false;
     g_solar_panel_contact_armed = !contact_active;
@@ -181,7 +182,7 @@ extern "C" void movement_action_controller_init_solar_panel_switch(void) {
     attachInterrupt(
         digitalPinToInterrupt(PIN_SOLAR_PANEL_MICROSWITCH),
         solar_panel_switch_interrupt,
-        FALLING);
+        RISING);
 }
 
 extern "C" void movement_action_controller_notify_locator_contact(
@@ -189,6 +190,14 @@ extern "C" void movement_action_controller_notify_locator_contact(
     if (controller != nullptr &&
         controller->action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR) {
         controller->locator_contact_detected = true;
+    }
+}
+
+extern "C" void movement_action_controller_notify_solar_panel_contact(
+    MovementActionController *controller) {
+    if (controller != nullptr &&
+        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL) {
+        controller->solar_panel_contact_detected = true;
     }
 }
 
@@ -200,9 +209,9 @@ extern "C" void movement_action_controller_poll_solar_panel_contact(
         return;
     }
 
-    // The level check is a fallback if the falling-edge interrupt was missed.
+    // The level check is a fallback if the rising-edge interrupt was missed.
     const bool contact_active =
-        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == HIGH;
     noInterrupts();
     if (contact_active) {
         g_solar_panel_contact_armed = false;

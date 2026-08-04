@@ -97,16 +97,22 @@ void movement_action_controller_set_line_follower_context(
 void movement_action_controller_set_precision_move_context(
     PrecisionMoveContext *ctx);
 
-// Configures the local active-low solar-panel microswitch and its one-shot
-// falling-edge interrupt. Call once during setup before starting the sequence.
+// Configures the local normally-closed solar-panel microswitch. The released
+// switch grounds the input; pressing it opens the circuit and reads HIGH via
+// INPUT_PULLUP. Call once during setup before starting the sequence.
 void movement_action_controller_init_solar_panel_switch(void);
 
 // Called when the arm ESP reports that the locator microswitch was pressed.
 void movement_action_controller_notify_locator_contact(
     MovementActionController *controller);
 
-// Polling fallback that latches the drivetrain's local active-low solar-panel
-// microswitch if its interrupt edge was missed.
+// Called when the arm ESP reports that its solar-panel microswitch was pressed.
+// The local drivetrain switch remains the primary contact source.
+void movement_action_controller_notify_solar_panel_contact(
+    MovementActionController *controller);
+
+// Polling fallback that latches the drivetrain's local active-high contact
+// level if its rising interrupt edge was missed.
 void movement_action_controller_poll_solar_panel_contact(
     MovementActionController *controller);
 
