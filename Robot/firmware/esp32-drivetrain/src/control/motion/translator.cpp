@@ -18,6 +18,7 @@ constexpr float kApproachRampDistanceM = 0.03f;
 constexpr float kMinRampSpeedMps = 0.1f;
 constexpr float kMinPrecisionTranslateSpeedMps = 0.05f;
 constexpr float kShortMoveNudgeS = 0.05f;
+constexpr float kSettleS = 0.15f;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
@@ -142,7 +143,7 @@ esp_err_t precision_move(
         target->body_velocity.vx, target->body_velocity.vy);
     const float translation_distance = std::hypot(dx, dy);
 
-    enum class State { Translate, FinalRotate };
+    enum class State { Translate, FinalRotate, Settle };
     State state = translation_distance > 1.0e-6f
         ? State::Translate : State::FinalRotate;
     const int64_t t0 = esp_timer_get_time();
@@ -151,6 +152,8 @@ esp_err_t precision_move(
     float cumulative_distance_m = 0.0f;
     TapeStopCondition tape_stop;
     float translate_elapsed_s = 0.0f;
+    float settled_s = 0.0f;
+    bool endpoint_correction_applied = false;
     StallEscalation stall = {};
 
     auto stop = [&]() {
@@ -324,22 +327,39 @@ esp_err_t precision_move(
                 break;
             }
 
-            // Ordinary precision moves commit their nominal endpoint so
-            // small tracking errors do not compound across a sequence. Tape
-            // and external-stop actions return above before this point when
-            // their measured stop point should be preserved.
-            const bool preserve_measured_endpoint =
-                target->tape_stop_enabled ||
-                target->external_stop_requested != nullptr;
-            if (!preserve_measured_endpoint) {
-                const Pose corrected_goal = {
-                    goal.x_m, goal.y_m, goal.heading_rad};
-                const esp_err_t snap_error = pose_tracker_set_pose(
-                    pose_tracker, &corrected_goal);
-                if (snap_error != ESP_OK) {
-                    stop();
-                    return snap_error;
-                }
+            // Observe coast-induced drift before accepting the endpoint.
+            stop();
+            settled_s = endpoint_correction_applied ? kSettleS : 0.0f;
+            state = State::Settle;
+            continue;
+        }
+        case State::Settle: {
+            // Let passive motion finish before deciding whether correction
+            // is needed. Chasing drift immediately causes repeated reversals.
+            if (settled_s < kSettleS) {
+                settled_s += dt;
+                continue;
+            }
+
+            const float heading_error = wrap(
+                goal.heading_rad - cur.heading_rad);
+            if (!endpoint_correction_applied &&
+                (distance_error > kPosTol ||
+                 std::fabs(heading_error) > kHeadTol)) {
+                endpoint_correction_applied = true;
+                state = State::FinalRotate;
+                continue;
+            }
+
+            // Commit the nominal endpoint only after the measured pose has
+            // settled and any required correction has been applied once.
+            const Pose corrected_goal = {
+                goal.x_m, goal.y_m, goal.heading_rad};
+            const esp_err_t snap_error = pose_tracker_set_pose(
+                pose_tracker, &corrected_goal);
+            if (snap_error != ESP_OK) {
+                stop();
+                return snap_error;
             }
             stop();
             return ESP_OK;

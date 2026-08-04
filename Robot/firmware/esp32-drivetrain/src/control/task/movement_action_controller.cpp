@@ -83,11 +83,24 @@ bool follow_tape_action(
         direction == Direction::PX || direction == Direction::MX
             ? TapeFollowMode::SINGLE_SENSOR
             : TapeFollowMode::SINGLE_SENSOR;
-    const bool success = follow_tape(
+    if (!follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
-        follow_mode, marker_sensor);
-    if (success) sync_planned_pose();
-    return success;
+        follow_mode, marker_sensor)) {
+        return false;
+    }
+
+    // Hold the detected endpoint while post-stop drift settles, just as an
+    // ordinary precision movement does before it returns.
+    if (g_precision_move_ctx != nullptr) {
+        const PrecisionMoveTarget settle_target = {};
+        if (precision_move(
+                g_precision_move_ctx, &settle_target,
+                kPrecisionTimeoutS) != ESP_OK) {
+            return false;
+        }
+    }
+    sync_planned_pose();
+    return true;
 }
 
 bool action_requires_nonnegative_distance(MovementAction action) {
