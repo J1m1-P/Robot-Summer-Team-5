@@ -62,6 +62,10 @@ typedef enum {
     CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
     CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
 
+    // Metal Detector
+    CMD_METAL_SET_BASELINE,
+    CMD_METAL_READ,
+
     CMD_MAX
 } CommandOpcode;
 

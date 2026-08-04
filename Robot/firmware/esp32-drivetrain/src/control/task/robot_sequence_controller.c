@@ -479,9 +479,24 @@ static void handle_sequence_frame(
         const uint8_t step_expected_detail = step->type == ROBOT_STEP_ARM
             ? (uint8_t)arm_action_status_detail(step->action.arm)
             : (uint8_t)STATUS_DETAIL_NONE;
-        step_complete = step->type == ROBOT_STEP_ARM &&
-            status.detail ==
-                step_expected_detail;
+        const bool metal_read_complete =
+            step->type == ROBOT_STEP_ARM &&
+            step->action.arm == CMD_METAL_READ &&
+            status.code == STATUS_ACTION_COMPLETE &&
+            (status.detail == STATUS_DETAIL_METAL_DETECTED ||
+             status.detail == STATUS_DETAIL_METAL_NOT_DETECTED);
+        const bool metal_baseline_complete =
+            step->type == ROBOT_STEP_ARM &&
+            step->action.arm == CMD_METAL_SET_BASELINE &&
+            status.code == STATUS_ACTION_COMPLETE &&
+            status.detail == step_expected_detail;
+        const bool fixed_detail_complete =
+            step->type == ROBOT_STEP_ARM &&
+            step->action.arm != CMD_METAL_READ &&
+            step->action.arm != CMD_METAL_SET_BASELINE &&
+            status.detail == step_expected_detail;
+        step_complete = metal_read_complete || metal_baseline_complete ||
+            fixed_detail_complete;
         if (step->type == ROBOT_STEP_ARM) {
             SEQUENCE_DIAGNOSTIC_LOG(
                 "# t=%lu Arm completion %s: step=%u received_detail=%u "

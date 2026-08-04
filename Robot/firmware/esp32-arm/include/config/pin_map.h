@@ -8,9 +8,13 @@
 #define PIN_SERVO_TOWER_LEFT_PWM        4
 #define PIN_SERVO_TOWER_MIDDLE_PWM      5
 #define PIN_SERVO_TOWER_RIGHT_PWM       6
+#define PIN_SERVO_ROCK_LIFT_PWM         7
+#define PIN_SERVO_ROCK_CLAW_PWM         8
 
 // Solar Panel Microswitch
-#define PIN_SOLAR_PANEL_MICROSWITCH 45  // Normally closed to ground; pressed reads HIGH
+// TODO: unassigned -- pick a free GPIO and confirm against the actual wiring
+// before use.
+#define PIN_SOLAR_PANEL_MICROSWITCH GPIO_NUM_NC  // Normally closed to ground; pressed reads HIGH
 
 // Locating Motor
 #define PIN_LOC_EN          13      // Power on the locating motor
@@ -32,10 +36,11 @@
 #define PIN_START_SWITCH     46      // Active low; released state is pulled high
 
 // Time of Flight (I2C)
-#define PIN_I2C_SDA         7
-#define PIN_I2C_SCL         8
-// GPIO45/46 were reassigned to switches. Both outer sensors remain
-// disconnected until their XSHUT lines are assigned new GPIOs.
+#define PIN_I2C_SDA         GPIO_NUM_NC
+#define PIN_I2C_SCL         GPIO_NUM_NC
+// GPIO45/46 were reassigned to the metal detector and start switch. Both
+// outer sensors remain disconnected until their XSHUT lines are assigned
+// new GPIOs.
 #define PIN_TOF_LEFT_XSHUT  GPIO_NUM_NC
 #define PIN_TOF_RIGHT_XSHUT GPIO_NUM_NC
 
@@ -52,3 +57,6 @@
 // UART to PI
 #define PIN_PI_UART_RX          39
 #define PIN_PI_UART_TX          38
+
+// Metal Detector
+#define PIN_METAL_DETECTOR      45  // Pulse input from metal detector oscillator
