@@ -73,9 +73,13 @@ typedef enum {
     STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED,
     STATUS_DETAIL_METAL_DETECTED,
+    // Appended to preserve every existing detail value on the wire.
+    STATUS_DETAIL_METAL_BASELINE_SET,
+    STATUS_DETAIL_METAL_NOT_DETECTED,
 } ActionStatusDetail;
 
-// Maps any arm command to its command-specific completion detail.
+// Maps fixed-result arm commands to their completion detail. Metal reads use
+// a dynamic DETECTED/NOT_DETECTED detail and therefore map to NONE here.
 ActionStatusDetail arm_action_status_detail(CommandOpcode command);
 
 // Represents one decoded status: a code plus an optional detail byte.

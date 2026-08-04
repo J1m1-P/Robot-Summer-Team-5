@@ -117,8 +117,7 @@ esp_err_t metal_detector_driver_start(MetalDetectorDriver *detector) {
     if (err != ESP_OK) return err;
 
     detector->enabled = true;
-    detector->next_sample_time_us =
-        esp_timer_get_time() + (int64_t)detector->config->sample_period_ms * 1000;
+    detector->sampling = false;
 
     return ESP_OK;
 }
@@ -131,52 +130,121 @@ esp_err_t metal_detector_driver_stop(MetalDetectorDriver *detector) {
     if (err != ESP_OK) return err;
 
     detector->enabled = false;
+    detector->sampling = false;
 
     return ESP_OK;
 }
 
-// Sets the pulse count that subsequent reads are compared against.
-void metal_detector_driver_set_comparison_count(MetalDetectorDriver *detector, int16_t comparison_count) {
-    if (detector == NULL) return;
+// Starts a fresh window. Pausing around clear prevents an old partial window
+// from leaking into a command-triggered measurement.
+esp_err_t metal_detector_driver_begin_sample(MetalDetectorDriver *detector) {
+    if (detector == NULL || !detector->initialized || !detector->enabled) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (detector->sampling) return ESP_ERR_INVALID_STATE;
 
-    detector->comparison_count = comparison_count;
+    esp_err_t err = pcnt_counter_pause(detector->config->pcnt_unit);
+    if (err != ESP_OK) return err;
+
+    err = pcnt_counter_clear(detector->config->pcnt_unit);
+    if (err != ESP_OK) {
+        (void)pcnt_counter_resume(detector->config->pcnt_unit);
+        return err;
+    }
+
+    err = pcnt_counter_resume(detector->config->pcnt_unit);
+    if (err != ESP_OK) {
+        detector->enabled = false;
+        return err;
+    }
+
+    detector->sample_start_time_us = esp_timer_get_time();
+    detector->sampling = true;
+    return ESP_OK;
 }
 
-// Samples the counter once its window elapses and compares it to
-// comparison_count; returns the cached result if the window hasn't closed.
-bool metal_detector_driver_read(MetalDetectorDriver *detector) {
-    if (detector == NULL || !detector->initialized || !detector->enabled) return false;
+// Finishes one window and compares normalized frequency against the baseline.
+esp_err_t metal_detector_driver_poll_sample(
+    MetalDetectorDriver *detector,
+    MetalDetectorSample *sample_out) {
 
-    int64_t now = esp_timer_get_time();
-    if (now < detector->next_sample_time_us) return detector->detected;
+    if (detector == NULL || sample_out == NULL) return ESP_ERR_INVALID_ARG;
+    if (!detector->initialized || !detector->enabled || !detector->sampling) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    int64_t period_us = (int64_t)detector->config->sample_period_ms * 1000;
-    detector->next_sample_time_us = (now - detector->next_sample_time_us >= period_us)
-        ? now + period_us
-        : detector->next_sample_time_us + period_us;
+    const int64_t now = esp_timer_get_time();
+    const int64_t period_us =
+        (int64_t)detector->config->sample_period_ms * 1000;
+    if (now - detector->sample_start_time_us < period_us) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
+    esp_err_t err = pcnt_counter_pause(detector->config->pcnt_unit);
+    if (err != ESP_OK) return err;
 
     int16_t raw_count = 0;
-    if (pcnt_get_counter_value(detector->config->pcnt_unit, &raw_count) != ESP_OK) {
-        return detector->detected;
+    err = pcnt_get_counter_value(detector->config->pcnt_unit, &raw_count);
+    const esp_err_t resume_err =
+        pcnt_counter_resume(detector->config->pcnt_unit);
+    if (resume_err != ESP_OK) detector->enabled = false;
+    detector->sampling = false;
+
+    if (err != ESP_OK) return err;
+    if (resume_err != ESP_OK) return resume_err;
+    if (raw_count <= 0) return ESP_ERR_INVALID_RESPONSE;
+
+    const uint32_t window_us = (uint32_t)(now - detector->sample_start_time_us);
+    const float frequency_hz =
+        (float)raw_count * 1000000.0f / (float)window_us;
+
+    MetalDetectorSample sample = {
+        .count = raw_count,
+        .window_us = window_us,
+        .frequency_hz = frequency_hz,
+        .baseline_frequency_hz = detector->baseline_frequency_hz,
+        .delta_fraction = 0.0f,
+        .baseline_valid = detector->baseline_valid,
+        .detected = false,
+    };
+
+    if (detector->baseline_valid) {
+        sample.delta_fraction =
+            fabsf(frequency_hz - detector->baseline_frequency_hz) /
+            detector->baseline_frequency_hz;
+        sample.detected =
+            sample.delta_fraction > detector->config->detect_threshold;
     }
-    if (pcnt_counter_clear(detector->config->pcnt_unit) != ESP_OK) {
-        return detector->detected;
-    }
 
-    detector->count = raw_count;
-
-    float delta = (float)raw_count - (float)detector->comparison_count;
-    float threshold = fabsf((float)detector->comparison_count) * detector->config->detect_threshold;
-    detector->detected = fabsf(delta) > threshold;
-
-    return detector->detected;
+    detector->latest_sample = sample;
+    *sample_out = sample;
+    return ESP_OK;
 }
 
-// Returns the most recently sampled raw pulse count.
-int16_t metal_detector_driver_get_count(const MetalDetectorDriver *detector) {
-    if (detector == NULL || !detector->initialized) return 0;
+// Captures a completed, live sample as the no-metal reference.
+esp_err_t metal_detector_driver_set_baseline(
+    MetalDetectorDriver *detector,
+    const MetalDetectorSample *sample) {
 
-    return detector->count;
+    if (detector == NULL || sample == NULL) return ESP_ERR_INVALID_ARG;
+    if (!detector->initialized || !detector->enabled || detector->sampling) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (sample->count <= 0 || !isfinite(sample->frequency_hz) ||
+        sample->frequency_hz <= 0.0f) return ESP_ERR_INVALID_RESPONSE;
+
+    detector->baseline_frequency_hz = sample->frequency_hz;
+    detector->baseline_valid = true;
+    detector->latest_sample = *sample;
+    detector->latest_sample.baseline_frequency_hz = sample->frequency_hz;
+    detector->latest_sample.delta_fraction = 0.0f;
+    detector->latest_sample.baseline_valid = true;
+    detector->latest_sample.detected = false;
+    return ESP_OK;
+}
+
+bool metal_detector_driver_has_baseline(const MetalDetectorDriver *detector) {
+    return detector != NULL && detector->initialized && detector->baseline_valid;
 }
 
 // Reports whether the detector hardware counter is running.

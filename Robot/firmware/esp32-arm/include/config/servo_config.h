@@ -47,3 +47,5 @@ static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 89,
 static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 55, 100, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 
+static const ServoConfig rockLiftServoConfig {PIN_SERVO_ROCK_LIFT_PWM, 50, 90, "down", "up", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig rockClawServoConfig {PIN_SERVO_ROCK_CLAW_PWM, 50, 90, "down", "up", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};

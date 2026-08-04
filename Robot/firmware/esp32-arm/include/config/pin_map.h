@@ -8,6 +8,8 @@
 #define PIN_SERVO_TOWER_LEFT_PWM        4
 #define PIN_SERVO_TOWER_MIDDLE_PWM      5
 #define PIN_SERVO_TOWER_RIGHT_PWM       6
+#define PIN_SERVO_ROCK_LIFT_PWM         7
+#define PIN_SERVO_ROCK_CLAW_PWM         8
 
 // Solar Panel Microswitch
 // TODO: unassigned -- pick a free GPIO and confirm against the actual wiring
@@ -34,8 +36,8 @@
 #define PIN_START_SWITCH     46      // Active low; released state is pulled high
 
 // Time of Flight (I2C)
-#define PIN_I2C_SDA         7
-#define PIN_I2C_SCL         8
+#define PIN_I2C_SDA         GPIO_NUM_NC
+#define PIN_I2C_SCL         GPIO_NUM_NC
 // GPIO45/46 were reassigned to the metal detector and start switch. Both
 // outer sensors remain disconnected until their XSHUT lines are assigned
 // new GPIOs.

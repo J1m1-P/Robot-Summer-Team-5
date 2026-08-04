@@ -4,8 +4,8 @@
 
 /*
  * Legacy PCNT counter is signed 16-bit. Keep high_limit comfortably above
- * the max pulse count expected in one sample window so a runaway signal
- * saturates instead of wrapping negative; low_limit stays at 0 since only
+ * the maximum count expected in one sample window: PCNT resets at this limit,
+ * so reaching it aliases the result. low_limit stays at 0 because only
  * falling edges are counted.
  */
 #define METAL_DETECTOR_PCNT_HIGH_LIMIT 30000
@@ -20,8 +20,8 @@
 // Sample window: also sets frequency resolution (1 / window = 10 Hz here).
 #define METAL_DETECTOR_SAMPLE_PERIOD_MS 100U
 
-// Detection fires when a read deviates from the sampled baseline by more
-// than this fraction of the baseline.
+// Detection fires when normalized frequency deviates from the sampled
+// baseline by more than this fraction.
 #define METAL_DETECTOR_DETECT_THRESHOLD 0.015f
 
 const MetalDetectorConfig METAL_DETECTOR_CONFIG = {
