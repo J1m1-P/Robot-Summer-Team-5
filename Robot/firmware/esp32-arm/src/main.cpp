@@ -102,24 +102,6 @@ void setup() {
     if (metal_detector_error == ESP_OK) {
         metal_detector_error = metal_detector_driver_start(&metal_detector);
     }
-    if (metal_detector_error == ESP_OK) {
-        // Capture one complete, live no-metal reference for early reads.
-        metal_detector_error =
-            metal_detector_driver_begin_sample(&metal_detector);
-    }
-    if (metal_detector_error == ESP_OK) {
-        MetalDetectorSample startup_sample = {};
-        do {
-            delay(1);
-            metal_detector_error = metal_detector_driver_poll_sample(
-                &metal_detector, &startup_sample);
-        } while (metal_detector_error == ESP_ERR_NOT_FINISHED);
-
-        if (metal_detector_error == ESP_OK) {
-            metal_detector_error = metal_detector_driver_set_baseline(
-                &metal_detector, &startup_sample);
-        }
-    }
     if (metal_detector_error != ESP_OK) {
         if (metal_detector_driver_is_enabled(&metal_detector)) {
             (void)metal_detector_driver_stop(&metal_detector);
