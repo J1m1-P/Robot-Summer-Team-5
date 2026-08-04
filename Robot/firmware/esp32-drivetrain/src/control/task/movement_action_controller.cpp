@@ -1,11 +1,17 @@
 /* Implements tape-guided and ordinary drivetrain actions. */
 #include "control/task/movement_action_controller.h"
 
+#ifndef ROBOT_MOTION_DIAGNOSTICS
+#define ROBOT_MOTION_DIAGNOSTICS 0
+#endif
+
 #include <cmath>
+#include <cstdio>
 #include <stddef.h>
 
 #include "control/line_following/line_follower.hpp"
 #include <Arduino.h>
+#include "config/pin_map.h"
 #include "control/motion/translator.hpp"
 
 namespace {
@@ -111,7 +117,6 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
-        case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
             return true;
         default:
             return false;
@@ -122,6 +127,11 @@ bool action_requires_positive_sweep(MovementAction action) {
     return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
            action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE ||
            action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE;
+}
+
+bool action_requires_positive_distance(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR ||
+           action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL;
 }
 
 }  // namespace
@@ -141,6 +151,15 @@ extern "C" void movement_action_controller_notify_locator_contact(
     if (controller != nullptr &&
         controller->action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR) {
         controller->locator_contact_detected = true;
+    }
+}
+
+extern "C" void movement_action_controller_poll_solar_panel_contact(
+    MovementActionController *controller) {
+    if (controller != nullptr &&
+        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL &&
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == HIGH) {
+        controller->solar_panel_contact_detected = true;
     }
 }
 
@@ -167,6 +186,10 @@ bool precision_action(
     const bool *external_stop_requested = nullptr) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->sequence_controller == nullptr) {
+#if ROBOT_MOTION_DIAGNOSTICS
+        std::printf(
+            "# precision action rejected: missing precision context\n");
+#endif
         return false;
     }
     const float vx_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVxMps;
@@ -206,9 +229,19 @@ bool precision_action(
         target.world_goal_enabled = true;
         target.world_goal = planned_goal;
     }
-    const bool success =
-        precision_move(g_precision_move_ctx, &target, kPrecisionTimeoutS) ==
-        ESP_OK;
+    const esp_err_t move_error = precision_move(
+        g_precision_move_ctx, &target, kPrecisionTimeoutS);
+    const bool success = move_error == ESP_OK;
+#if ROBOT_MOTION_DIAGNOSTICS
+    std::printf(
+        "# precision action result: success=%u error=%d dx=%.3f dy=%.3f "
+        "dtheta=%.3f\n",
+        success ? 1U : 0U,
+        (int)move_error,
+        dx_body,
+        dy_body,
+        dhead_rad);
+#endif
     if (success &&
         (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
@@ -242,6 +275,7 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
         !std::isfinite(action_value) ||
         !std::isfinite(speed) || speed < 0.0f ||
         (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
+        (action_requires_positive_distance(action) && action_value <= 0.0f) ||
         (action_requires_positive_sweep(action) && action_value <= 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -277,7 +311,8 @@ extern "C" bool movement_action_controller_update(
 
     // Movement actions use three controller parameters:
     // action selects the maneuver; action_value is its distance in metres or
-    // rotation in degrees (zero when sensor feedback determines the stop).
+    // rotation in degrees. Contact-driven moves use it as a positive safety
+    // bound and still finish only when their microswitch is pressed.
     // speed is optional in m/s, or rad/s for rotation; zero uses the default.
     switch (controller->action) {
         case MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE:
@@ -498,6 +533,12 @@ extern "C" bool movement_action_controller_update(
                 -controller->action_value, 0.0f, 0.0f, nullptr,
                 speed_or_default(controller->speed, kLocatorApproachSpeedMps),
                 0.0f, &controller->locator_contact_detected);
+
+        case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
+            return precision_action(
+                0.0f, controller->action_value, 0.0f, nullptr,
+                speed_or_default(controller->speed, kLocatorApproachSpeedMps),
+                0.0f, &controller->solar_panel_contact_detected);
 
         default:
             return false;

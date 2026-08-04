@@ -19,6 +19,7 @@ struct ArmActionDispatcher {
     uint32_t last_ready_status_ms;
     bool pi_ready_announce_pending;
     uint32_t last_pi_ready_status_ms;
+    uint32_t last_solar_panel_contact_status_ms;
 };
 
 // Connects the shared UART to all arm-side action controllers.

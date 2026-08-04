@@ -47,6 +47,3 @@ static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 89,
 static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 55, 100, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 
-// Needs calibration: 
-static const ServoConfig solarPanelServoConfig {PIN_SERVO_SOLAR_PANEL_PWM, 44, 46, "retract", "extend", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-

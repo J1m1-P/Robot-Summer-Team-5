@@ -35,6 +35,7 @@ typedef enum {
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
     MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
     MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
+    MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
     MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_GAP,
     MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_GAP,
     MOVEMENT_ACTION_GO_PY_DISTANCE,
@@ -51,6 +52,7 @@ typedef struct {
     // Translation speed in m/s, or angular speed in rad/s for rotation.
     float speed;
     bool locator_contact_detected;
+    bool solar_panel_contact_detected;
     float dx_body_m;
     float dy_body_m;
     float delta_heading_rad;
@@ -63,7 +65,8 @@ esp_err_t movement_action_controller_init(
     float action_value);
 
 // Prepares an action with an optional movement speed. Translation and tape
-// actions use m/s; rotation actions use rad/s. Zero selects the default.
+// actions use m/s; rotation actions use rad/s. Zero speed selects the default.
+// Microswitch-driven moves require a positive maximum distance.
 esp_err_t movement_action_controller_init_with_speed(
     MovementActionController *controller,
     MovementAction action,
@@ -96,6 +99,10 @@ void movement_action_controller_set_precision_move_context(
 
 // Called when the arm ESP reports that the locator microswitch was pressed.
 void movement_action_controller_notify_locator_contact(
+    MovementActionController *controller);
+
+// Polls and latches the drivetrain's local solar-panel microswitch.
+void movement_action_controller_poll_solar_panel_contact(
     MovementActionController *controller);
 
 // Anchors subsequent precision actions to one world-frame sequence origin.

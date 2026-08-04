@@ -449,6 +449,24 @@ void test_movement_action_rejects_invalid_values() {
         ESP_OK,
         movement_action_controller_init(
             &controller, MOVEMENT_ACTION_ROTATE, -90.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            -0.1f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
+            0.0f));
 }
 
 void test_locator_contact_notifies_only_locator_approach() {
@@ -458,7 +476,7 @@ void test_locator_contact_notifies_only_locator_approach() {
         movement_action_controller_init(
             &controller,
             MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
-            0.0f));
+            1.0f));
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
 
     movement_action_controller_notify_locator_contact(&controller);

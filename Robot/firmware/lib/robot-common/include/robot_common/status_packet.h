@@ -29,6 +29,7 @@ typedef enum {
     STATUS_LOCATOR_CONTACT, // the extended Tower locator microswitch was pressed
     STATUS_PI_READY,        // relayed from the arm: the Pi's camera/model finished
                              // initializing and is ready to answer scan requests
+    STATUS_SOLAR_PANEL_CONTACT, // the solar-panel microswitch was pressed
     STATUS_MAX
 } StatusCode;
 

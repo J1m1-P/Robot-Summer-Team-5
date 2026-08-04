@@ -9,8 +9,8 @@
 
 namespace {
 
-constexpr uint32_t kClawServoSettleMs = 750;
-constexpr uint32_t kHomeSettleMs = 1000;
+constexpr uint32_t kClawServoSettleMs = 100;
+constexpr uint32_t kHomeSettleMs = 100;
 
 constexpr float kCommandDistanceUnitMm = 100.0f;
 

@@ -11,7 +11,21 @@
 #include <robot_common/pi_action_packet.h>
 #include <robot_common/status_packet.h>
 
+#ifndef ROBOT_SEQUENCE_DIAGNOSTICS
+#define ROBOT_SEQUENCE_DIAGNOSTICS 0
+#endif
+
+#if ROBOT_SEQUENCE_DIAGNOSTICS
+#define SEQUENCE_DIAGNOSTIC_LOG(...) printf(__VA_ARGS__)
+#else
+#define SEQUENCE_DIAGNOSTIC_LOG(...) do { } while (0)
+#endif
+
 static const uint32_t kActionTimeoutMs = 15000;
+
+// Replace this conversion after measuring camera steering on the robot.
+#define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
+#define WIGGLE_DISTANCE 10.0f
 
 typedef enum {
     ROBOT_STEP_MOVEMENT = 0,
@@ -33,17 +47,18 @@ typedef struct {
 static const RobotSequenceStep kRobotSequence[] = {
     /* Arm Homing Sequence. Use homing blocks and 
     position habitat claws just before the start line */
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f}, // retract locator
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},  // open tower claws
-    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f}, // horizontal tower position
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f}, // open habitat claws
-    //{ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.3}   // defend wheels from rocks
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.4f}, // remove when new homers arrive
+
+    // ----------------------------- Start Up Code -----------------------------
+
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},         // retract locator
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_ALL_CLAWS}, 0.0f},          // open tower claws
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},       // horizontal tower position
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_CLAWS}, 0.0f},            // open habitat claws
 
     /* Tape follow straight to rotate step. Remove when PI works*/
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 4.9f, 0.6f},
 
-    // Teletubbies / Rock Path
+    // ----------------------------- Teletubbies / Rock Path -----------------------------
     // Search rock 1
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.2f},
@@ -52,7 +67,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_DELAY, {0}, 3.5f},
     //{ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
  
-    // Search rock 2s
+    // Search rock 2
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.125f, 0.2f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 1.2f},
@@ -77,13 +92,21 @@ static const RobotSequenceStep kRobotSequence[] = {
     // // Continue to tape follow
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 3.15f, 0.4f},
 
-    /* Movement to tower pickup*/
-    //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 120.0f, 2.0f}, // rotate until side tape
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.2f}, // tape follow to pickup
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.07f, 0.2f},  // forward/backward adjustment
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.035f, 0.2f},   // left/right adjustment
 
-    // /* Picking up tower pieces*/ 
+    // Search rock 5
+
+    // Search rock 6
+
+
+    // ----------------------------- Tower Code -----------------------------
+
+    // // Move to the tower pieces
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 120.0f, 2.0f}, // rotate until side tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.3f}, // tape follow to pickup
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.065f, 0.3f},  // forward/backward adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},   // left/right adjustment
+
+    // // Pick up the tower pieces 
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.40f},                 // lower claw
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},     // close claws
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.40f},                  
@@ -95,19 +118,21 @@ static const RobotSequenceStep kRobotSequence[] = {
     // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.35f},
     // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.065f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
-    // {ROBOT_STEP_DELAY, {0}, 1.0f},
+    // // {ROBOT_STEP_DELAY, {0}, 1.0f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE}, 0.12f, 0.4f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f},
+
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    // {ROBOT_STEP_DELAY, {0}, 1.2f},
+
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 0.05f, 0.2f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
-    // {ROBOT_STEP_DELAY, {0}, 1.6f},
+    // // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_EXTEND_LOCATOR}, 0.0f},
+    // // {ROBOT_STEP_DELAY, {0}, 1.6f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR}, 1.0f, 0.09f},
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_RETRACT_LOCATOR}, 0.0f},
 
-
-
-    // /*Placing the tower pieces*/
+    // // Placing the tower pieces
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.3f},                  // lower claw
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_MIDDLE_CLAW}, 0.0f},    // drop middle piece
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 1.0f},                   // raise claw
@@ -120,10 +145,11 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.35f},                 // lower claw
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_OPEN_RIGHT_CLAW}, 0.0f},     // drop right piece
     
+
     // Go back to main tape and put tower arm and locator in safe idle position
 
-    /*------------------------ Habitat Code Below ------------------------*/
-    
+    // ----------------------------- Habitat Code -----------------------------
+
     // // TODO: do arm actions while driving to save time
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -1.0f},                  // idle Z position
     // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_HORIZONTAL}, 0.0f},   // idle rotation
@@ -140,109 +166,118 @@ static const RobotSequenceStep kRobotSequence[] = {
     // Move to habitat tape to home
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 1.0f, 0.4f},
     */
+
+    /* Wiggle 1 */
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, WIGGLE_DISTANCE/2},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -WIGGLE_DISTANCE},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, WIGGLE_DISTANCE/2},
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -WIGGLE_DISTANCE/2},
+
+    // /* Drive from tower base to habitat pickup */
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.7f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE}, 120.0f, 1.0f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.35f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.4f},                 // Go back to main tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE}, 120.0f, 1.5f},         // Rotate to front tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.5f},               // Follow fast distance
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Follow to habitat pickup
     
-    // // Go off the tape and go for the habitats 1 and 2
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 7.0f, 0.3f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.19f, 0.2f}, 
+    // /* Go off the tape and go for the habitats 1 and 2 */ 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 4.0f, 0.3f},            // Angular adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.19f, 0.3f},   // Move sideways to the habitats
 
-    // // Pick up the habitats 1 and 2
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                 // lower claw
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.04f, 0.05f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                 // raise claw
+    // /* Pick up the habitats 1 and 2 */
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                                   // lower claw
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.04f, 0.1f},    // Move forward to habitats
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},                           // Pick up habitats
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                                    // Raise habitats
 
-    // // Move to the habitat base from 1 and 2
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.15f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE}, 0.0f, 0.25f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.03f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f}, 
+    // /* Move to the habitat base from 1 and 2 */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.15f, 0.4f},                       // Back off from habitats 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                               // Turn so back is towards main tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE}, 0.0f, 0.4f},                 // Back off to main tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},                       // Deliberately overshoot main tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},                 // Approach main tape from other side
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f},     // Follow main tape to habitat base
 
-    // // PLACEDOWN Sequence 1
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -1.0f, 1.0f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.3f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    // /* Placedown of Habitat 1 */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -1.0f, 1.0f},           // Angular adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.03f, 0.2f},    // Forward/Backward adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.3f},    // Sideways adjustment
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                        // Drop left habitat
+    // {ROBOT_STEP_DELAY, {0}, 0.5f},
 
-    // // // PLACEDOWN Sequence 2
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},    
-    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.01f, 0.15f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.25},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.095f, 0.35f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    // /* Placedown of Habitat 2 */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},   // Back off
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},                                      // Move claw right to push position
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.015f, 0.2f},   // Move forward
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f},                  // Semi close claw
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.25},                                    // Push habitat 1
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.095f, 0.35f},  // Move to place habitat 2
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},                       // Drop habitat 2
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                        // Open claws
 
-    // // Turn the two habitats
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.75},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.75},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.085f, 0.15f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.7},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.7},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.4f},
+    // /* Turn the two habitats */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},   // Back off
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.75},                                     // Move claw to other side step 1
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.75},                                     // Move claw to other side step 2
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.085f, 0.25f}, // Move right to push position
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f},  // Move forward
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f},                  // Semi close claw
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.7},                                     // Push habitats 1 and 2 step 1
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.7},                                     // Push habitats 1 and 2 step 2
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                        // Open claw
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},   // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.4f},   // Move sideaways away from habitat
 
-    // // Rehome the two steppers
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.55},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.33},
+    // /* Rehome the two steppers */
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.55},                                     // Rehome X
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.33},                                     // Rehome Z
 
-    // // Go for habitats again
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE}, 170.0f, 1.5f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.1f, 0.35f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.1f},
+    // /* Go back on main tape and move to habitat pickup */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE}, 170.0f, 1.5f},          // Rotate back onto main tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.1f, 0.4f},               // Follow fast on tape
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Slow down for final approach
 
-    // // Go off the tape and go for the habitats 3 and 4
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 9.5f, 0.3f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, -0.19f, 0.2f}, 
+    // /* Go off the tape for the habitats 3 and 4*/
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 10.0f, 0.3f},            // Angular Adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, -0.19f, 0.3f},   // Move sideways to habitats
 
-    // // Pick up the habitats 3 and 4
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                 // lower claw
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.06f, 0.05f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                 // raise claw
+    // /* Pick up the habitats */
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                                   // lower claw
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.07f, 0.05f},   // Move forward
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},                           // Close claws
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                                    // raise claw
 
-    // // Move to the habitat base from 3 and 4
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.15f, 0.2f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 1.0},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f}, 
+    // /* Move to the habitat base with habitats 3 and 4 */
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.15f, 0.4f},                       // Back up from habitats
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                               // Rotate
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},                 // Go back to main tape
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 1.0},                                                          // Position habitats
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f}, // Move in front of habitat base
 
     // // PLACEDOWN Sequence 3
-    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -2.0f, 1.0f}, 
-    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.005f, 0.15f}, 
-    // // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.12f, 0.17f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -2.0f, 0.5f},               // Angular adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.015f, 0.2f},      // Forward/backward adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.2f},     // Sideways adjustment (if needed)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Drop habitat 3
+    // {ROBOT_STEP_DELAY, {0}, 0.5f},
 
     // // PLACEDOWN Sequence 4
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.17f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.35},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.03f, 0.2f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.25},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f}, 
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.095f, 0.35f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.005f, 0.2f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},       // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.3f},       // Move sideways to habitat push position
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.35},                                        // Move claw sidways
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f},        // Move back forwards
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f},                      // Semi close left claw
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.25},                                        // Push habitat 3
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f},       // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.1f, 0.3f},      // Move sideways
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.01f, 0.2f},       // Move forwards
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},                           // Drop habitat 4
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Open claws
 
 
-    // PLACEDOWN Sequence 4
+    // // PLACEDOWN Sequence 4
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},    
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.5},    
@@ -250,12 +285,18 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
      
-    /*------------------------ Solar Panel Code Below ------------------------*/
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.40f, 0.3f},   // move back to solar panel
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},    // rotate so spikes are aligned
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                   // move claw to position in Y
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.16f},                                   // move claw to position in X
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.5f, 0.25f},   // move and remove cover
+    // /*------------------------ Solar Panel Code Below ------------------------*/
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.25f, 0.4f},           // move back to solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                   // rotate so hook is aligned
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.2f},                                         // move claw to position in Z (individual testing)
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.9f},                                         // move claw to position in X (individual testing)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                           // move claw to position in Z
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                            // move claw to position in X
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.25f},           // move in front of solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL}, 1.0f, 0.2f},   // move left up to 1 m or until the solar-panel switch is pressed
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.4f, 0.25f},            // pull solar panel cover away
 };
 
 static const size_t kRobotSequenceLength =
@@ -353,7 +394,37 @@ static void handle_sequence_frame(
     } else if (status_packet_is(frame)) {
         StatusPacket status = {0};
         if (status_packet_decode(frame, &status) != ESP_OK) return;
+
+        const RobotSequenceStep *active_step =
+            &kRobotSequence[controller->current_step];
+        const bool expecting_arm_completion =
+            !controller->waiting_for_arm_ready &&
+            active_step->type == ROBOT_STEP_ARM;
+        const uint8_t expected_detail = expecting_arm_completion
+            ? (uint8_t)arm_action_status_detail(active_step->action.arm)
+            : (uint8_t)STATUS_DETAIL_NONE;
+        const bool log_status = controller->waiting_for_arm_ready ||
+            expecting_arm_completion || status.code == STATUS_FAULT ||
+            status.code == STATUS_LOCATOR_CONTACT;
+        if (log_status) {
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Arm status: current_step=%u code=%u detail=%u "
+                "waiting_ready=%u expected_detail=%u\n",
+                (unsigned long)now_ms,
+                (unsigned)controller->current_step,
+                (unsigned)status.code,
+                (unsigned)status.detail,
+                controller->waiting_for_arm_ready ? 1U : 0U,
+                (unsigned)expected_detail);
+        }
+
         if (status.code == STATUS_FAULT) {
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Arm status FAULT: step=%u code=%u detail=%u\n",
+                (unsigned long)now_ms,
+                (unsigned)controller->current_step,
+                (unsigned)status.code,
+                (unsigned)status.detail);
             enter_fault(controller, "arm reported a fault", ESP_FAIL);
             return;
         }
@@ -366,8 +437,13 @@ static void handle_sequence_frame(
         }
 
         if (controller->waiting_for_arm_ready) {
-            if (status.code != STATUS_ACTION_COMPLETE ||
-                status.detail != STATUS_DETAIL_NONE) {
+            if (status.detail != STATUS_DETAIL_NONE) {
+                SEQUENCE_DIAGNOSTIC_LOG(
+                    "# t=%lu Ignored startup completion: detail=%u "
+                    "expected=%u\n",
+                    (unsigned long)now_ms,
+                    (unsigned)status.detail,
+                    (unsigned)STATUS_DETAIL_NONE);
                 return;
             }
 
@@ -382,18 +458,32 @@ static void handle_sequence_frame(
                     "failed to start first robot step",
                     start_error);
             } else {
-                printf("# Arm ready; robot sequence started\n");
+                SEQUENCE_DIAGNOSTIC_LOG(
+                    "# t=%lu Arm ready; robot sequence started at step=%u\n",
+                    (unsigned long)now_ms,
+                    (unsigned)controller->current_step);
             }
             return;
         }
 
-        if (status.code != STATUS_ACTION_COMPLETE) return;
-
         const RobotSequenceStep *step =
             &kRobotSequence[controller->current_step];
+        const uint8_t step_expected_detail = step->type == ROBOT_STEP_ARM
+            ? (uint8_t)arm_action_status_detail(step->action.arm)
+            : (uint8_t)STATUS_DETAIL_NONE;
         step_complete = step->type == ROBOT_STEP_ARM &&
             status.detail ==
-                (uint8_t)arm_action_status_detail(step->action.arm);
+                step_expected_detail;
+        if (step->type == ROBOT_STEP_ARM) {
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Arm completion %s: step=%u received_detail=%u "
+                "expected_detail=%u\n",
+                (unsigned long)now_ms,
+                step_complete ? "accepted" : "ignored",
+                (unsigned)controller->current_step,
+                (unsigned)status.detail,
+                (unsigned)step_expected_detail);
+        }
     } else {
         return;
     }
@@ -463,6 +553,23 @@ static esp_err_t start_robot_step(
     const RobotSequenceStep *step = &kRobotSequence[step_index];
     esp_err_t error = ESP_OK;
 
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Sequence step start: index=%u type=%u action=%u "
+        "value=%.3f speed=%.3f deadline_in_ms=%u\n",
+        (unsigned long)now_ms,
+        (unsigned)step_index,
+        (unsigned)step->type,
+        step->type == ROBOT_STEP_MOVEMENT
+            ? (unsigned)step->action.movement
+            : (unsigned)step->action.arm,
+        step->action_value,
+        step->action_speed_mps,
+        step_is_delay(step->type)
+            ? (unsigned)(step->action_value * 1000.0f)
+            : (unsigned)kActionTimeoutMs);
+
+    controller->step_started_ms = now_ms;
+
     if (step_is_delay(step->type)) {
         if (!isfinite(step->action_value) || step->action_value < 0.0f ||
             step->action_value > (float)UINT32_MAX / 1000.0f) {
@@ -471,8 +578,9 @@ static esp_err_t start_robot_step(
         controller->step_deadline_ms = now_ms +
             (uint32_t)(step->action_value * 1000.0f);
         controller->running = true;
-        printf(
-            "# Calibration delay started: %.1f seconds\n",
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Calibration delay started: %.1f seconds\n",
+            (unsigned long)now_ms,
             step->action_value);
         return ESP_OK;
     }
@@ -495,6 +603,12 @@ static esp_err_t start_robot_step(
         if (step->action.arm == CMD_TOWER_EXTEND_LOCATOR) {
             controller->locator_contact_pending = false;
         }
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Arm command send: step=%u opcode=%u value=%.3f\n",
+            (unsigned long)now_ms,
+            (unsigned)step_index,
+            (unsigned)step->action.arm,
+            step->action_value);
         error = send_arm_command(
             controller, step->action.arm, step->action_value);
     }
@@ -508,12 +622,26 @@ static esp_err_t start_robot_step(
 static void advance_sequence(
     RobotSequenceController *controller,
     uint32_t now_ms) {
+    const size_t completed_step = controller->current_step;
+    const uint32_t elapsed_ms = now_ms - controller->step_started_ms;
     ++controller->current_step;
     if (controller->current_step >= kRobotSequenceLength) {
         controller->running = false;
-        printf("# Robot sequence complete\n");
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Robot sequence complete: final_step=%u elapsed_ms=%u\n",
+            (unsigned long)now_ms,
+            (unsigned)completed_step,
+            (unsigned)elapsed_ms);
         return;
     }
+
+    SEQUENCE_DIAGNOSTIC_LOG(
+        "# t=%lu Sequence advance: completed_step=%u elapsed_ms=%u "
+        "next_step=%u\n",
+        (unsigned long)now_ms,
+        (unsigned)completed_step,
+        (unsigned)elapsed_ms,
+        (unsigned)controller->current_step);
 
     const esp_err_t error =
         start_robot_step(controller, controller->current_step, now_ms);
@@ -571,6 +699,11 @@ esp_err_t robot_sequence_controller_update(
     const esp_err_t service_error = service_inputs(controller, now_ms);
     if (service_error != ESP_OK) return service_error;
 
+    // Blocking precision moves re-enter this update every 5 ms, so polling
+    // here makes the local microswitch part of the same control cycle.
+    movement_action_controller_poll_solar_panel_contact(
+        &controller->movement_action_controller);
+
     // A blocking movement calls this function from its own control loop.
     // That nested call services inputs above, then stops here.
     if (!controller->running ||
@@ -593,17 +726,38 @@ esp_err_t robot_sequence_controller_update(
         const bool succeeded = movement_action_controller_update(
             &controller->movement_action_controller);
         controller->updating_movement = false;
+        const uint32_t completion_ms = millis();
 
         if (succeeded) {
-            advance_sequence(controller, now_ms);
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Movement complete: step=%u action=%u elapsed_ms=%u\n",
+                (unsigned long)completion_ms,
+                (unsigned)controller->current_step,
+                (unsigned)step->action.movement,
+                (unsigned)(completion_ms - controller->step_started_ms));
+            advance_sequence(controller, completion_ms);
         } else if (controller->running) {
             // false is always a terminal failure (no repeats)
+            SEQUENCE_DIAGNOSTIC_LOG(
+                "# t=%lu Movement failed: step=%u action=%u elapsed_ms=%u\n",
+                (unsigned long)completion_ms,
+                (unsigned)controller->current_step,
+                (unsigned)step->action.movement,
+                (unsigned)(completion_ms - controller->step_started_ms));
             enter_fault(controller, "robot step failed", ESP_FAIL);
         }
         return ESP_OK;
     }
 
     if (deadline_reached(now_ms, controller->step_deadline_ms)) {
+        SEQUENCE_DIAGNOSTIC_LOG(
+            "# t=%lu Sequence step timeout: index=%u type=%u elapsed_ms=%u "
+            "deadline_ms=%lu\n",
+            (unsigned long)now_ms,
+            (unsigned)controller->current_step,
+            (unsigned)step->type,
+            (unsigned)(now_ms - controller->step_started_ms),
+            (unsigned long)controller->step_deadline_ms);
         enter_fault(controller, "robot step timed out", ESP_ERR_TIMEOUT);
     }
     return ESP_OK;
