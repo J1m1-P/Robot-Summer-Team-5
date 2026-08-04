@@ -25,12 +25,12 @@ typedef struct {
     Pmw3610OdometryLink *odometry_link;
     MovementActionController movement_action_controller;
     size_t current_step;
+    uint32_t step_started_ms;
     uint32_t step_deadline_ms;
     bool running;
     bool waiting_for_arm_ready;
     bool locator_contact_pending;
     bool updating_movement;
-    float scan_rotation_degrees;
     uint8_t last_pi_request_id;
 } RobotSequenceController;
 

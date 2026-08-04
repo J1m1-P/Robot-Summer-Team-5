@@ -14,12 +14,15 @@ auto-install it on first export. On the Pi you'll also need ncnn present for
 inference (see the note at the bottom).
 """
 
+import glob
+from pathlib import Path
+
 import numpy as np
 from ultralytics import YOLO
 
 
 # ── Inputs / knobs ────────────────────────────────────────────────────────────
-PT_MODEL = r"E:\runs\detect\train-9\weights\best.pt"
+PT_MODEL = r"E:\runs\exp-5.pt"
 
 # DECISION 1 — input size. This is your biggest FPS lever on the Pi.
 #   640: full accuracy, ~2-5 FPS on Pi 4. Start here.
@@ -27,7 +30,7 @@ PT_MODEL = r"E:\runs\detect\train-9\weights\best.pt"
 # Whatever you pick here, detector_final must run inference at the SAME size
 # (pass imgsz=... in yolo_confirm's model() call), or you lose the speed / the
 # boxes shift.
-IMGSZ = 320   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
+IMGSZ = 640   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
 
 # DECISION 2 — fp16. Near-free accuracy, faster. Keep True.
 # Do NOT switch to int8 export unless FPS forces it: int8 needs a calibration set
@@ -35,25 +38,52 @@ IMGSZ = 320   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
 HALF = True
 
 # The folder export() produces (printed when it runs). It sits next to best.pt.
-NCNN_DIR = r"E:\runs\detect\train-9\weights\best_ncnn_model"
+NCNN_DIR = r"E:\runs\exp-5_ncnn_model"
+
+# Confidence sanity_check() runs both models at -- matches the 0.5 default
+# used elsewhere in this codebase (tubby_detector.py's DETECT_CONF), so the
+# comparison reflects real match-time conditions.
+SANITY_CHECK_CONF = 0.5
 
 # ── LINK YOUR TEST IMAGES HERE ────────────────────────────────────────────────
 # JPEGs that contain tubbies — include at least one with dipsy AND laa_laa in
-# frame, since that's the call fp16 is most likely to disturb. Put the files
-# anywhere and paste their full paths here (grab frames from your test video, or
-# snap photos). These are what the .pt and NCNN models get compared on.
-import glob
-TEST_IMAGES = glob.glob(r"E:\ENPH253\TeletubbyImages\Labeled3\valid\images")
+# frame, since that's the call fp16 is most likely to disturb. Point this at
+# a folder of such images (grab frames from your test video, or snap photos).
+# These are what the .pt and NCNN models get compared on.
+TEST_IMAGES_DIR = r"E:\ENPH253\TeletubbyImages\Labeled3\valid\images"
+TEST_IMAGES = glob.glob(str(Path(TEST_IMAGES_DIR) / "*.jpg"))
 
 
 def export():
     """Load the .pt weights and emit best_ncnn_model/ next to them."""
     model = YOLO(PT_MODEL)
-    # TODO: run the export. Ultralytics prints the output folder path — note it.
     model.export(format="ncnn", imgsz=IMGSZ, half=HALF)
     # The result is a directory (e.g. E:\runs\...\weights\best_ncnn_model\),
-    # NOT a single file — copy the whole folder to the Pi.
-    
+    # NOT a single file — copy the whole folder to the Pi. Ultralytics prints
+    # the exact output path when this runs — it should match NCNN_DIR above.
+
+
+def iou(box_a, box_b):
+    """
+    Intersection-over-Union of two boxes given as (x1, y1, x2, y2) corners.
+    It's the overlap area divided by the combined area: 0.0 = no overlap,
+    1.0 = identical. Used to check the pt model's box and the ncnn model's
+    box describe the SAME object, not two different detections.
+    """
+    inter_x1 = max(box_a[0], box_b[0])
+    inter_y1 = max(box_a[1], box_b[1])
+    inter_x2 = min(box_a[2], box_b[2])
+    inter_y2 = min(box_a[3], box_b[3])
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_h = max(0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - intersection
+    if union == 0:
+        return 0.0
+    return intersection / union
 
 
 def sanity_check(ncnn_dir, image_paths):
@@ -67,12 +97,16 @@ def sanity_check(ncnn_dir, image_paths):
     mismatches) means the NCNN model is safe to swap in.
     """
     import cv2
-    # Reuse the detector's own IoU + the confidence it actually runs at, so this
-    # test mirrors real CONFIRM conditions rather than some arbitrary settings.
-    from Robot.firmware.Rpi.Extra.teletubby_detector_with_HSV import iou, CONFIRM_CONF
+
+    if not image_paths:
+        print(f"[sanity_check] no test images found under {TEST_IMAGES_DIR} "
+              f"-- point TEST_IMAGES_DIR at a real folder of tubby photos first")
+        return
 
     IOU_SAME_OBJECT = 0.8   # below this, the two boxes point at different things
 
+    print(f"[sanity_check] comparing {PT_MODEL} vs {ncnn_dir} "
+          f"on {len(image_paths)} image(s)")
     pt   = YOLO(PT_MODEL)   # original fp32 weights — the "ground truth" here
     ncnn = YOLO(ncnn_dir)   # the exported fp16 NCNN model we're vetting
     names = pt.names        # class-index -> short name (e.g. {0:'DP', 1:'LL', ...})
@@ -85,8 +119,8 @@ def sanity_check(ncnn_dir, image_paths):
             continue
 
         # Run both models under identical, real-world settings.
-        rp = pt(frame,   conf=CONFIRM_CONF, imgsz=IMGSZ, verbose=False)[0]
-        rn = ncnn(frame, conf=CONFIRM_CONF, imgsz=IMGSZ, verbose=False)[0]
+        rp = pt(frame,   conf=SANITY_CHECK_CONF, imgsz=IMGSZ, verbose=False)[0]
+        rn = ncnn(frame, conf=SANITY_CHECK_CONF, imgsz=IMGSZ, verbose=False)[0]
 
         pt_boxes   = rp.boxes.xyxy.cpu().numpy()
         pt_cls     = rp.boxes.cls.cpu().numpy().astype(int)
@@ -129,7 +163,7 @@ def sanity_check(ncnn_dir, image_paths):
 if __name__ == "__main__":
     # Step 1: export. Run once, note the printed best_ncnn_model path (should
     # match NCNN_DIR above — fix NCNN_DIR if your weights live elsewhere).
-    #export()
+    # export()
 
     # Step 2: once export has produced the folder and you've filled in
     # TEST_IMAGES, comment out export() above and uncomment this to vet it:

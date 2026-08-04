@@ -19,7 +19,8 @@ struct PrecisionMoveTarget {
     DrivetrainBodyVelocity body_velocity;  // cruise/feed-forward velocity
     bool tape_stop_enabled = false;
     TapeStopSpec tape_stop_spec = {};
-    // Optional level-triggered completion condition serviced with UART/pose.
+    // Optional level-triggered completion condition serviced by the control
+    // loop alongside communication, pose, and local hardware inputs.
     const bool *external_stop_requested = nullptr;
     bool world_goal_enabled = false;
     Pose world_goal = {};

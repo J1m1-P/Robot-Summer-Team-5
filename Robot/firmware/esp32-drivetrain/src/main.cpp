@@ -7,6 +7,7 @@
 
 #include "config/communication/uart_link_config.h"
 #include "config/drivetrain/drivetrain_config.h"
+#include "config/pin_map.h"
 #include "config/tape_following/tape_following_config.h"
 #include "control/drivetrain/drivetrain.h"
 #include "control/line_following/line_follower.hpp"
@@ -62,6 +63,8 @@ esp_err_t initialize_pose_tracking() {
 void setup() {
     // Must be called first, prevents weird motor behavior at start up
     drivetrain_hold_safe_outputs(&DRIVETRAIN_CONFIG);
+
+    movement_action_controller_init_solar_panel_switch();
 
     Serial.begin(115200);
     Serial.println("# Starting drivetrain firmware");

@@ -1,0 +1,29 @@
+[Unit]
+Description=Teletubby YOLO detector
+# Don't start until the base system + devices are up. The camera (/dev/video0)
+# is a USB device that may enumerate a beat after boot, so we also sleep below.
+After=multi-user.target
+Wants=multi-user.target
+
+[Service]
+Type=simple
+User=admin5
+Group=admin5
+WorkingDirectory=/home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision
+
+# Give the USB webcam + ESP32 UART a moment to enumerate before we grab them.
+ExecStartPre=/bin/sleep 8
+
+# Use the venv's python directly (no need to "source activate").
+ExecStart=/home/admin5/robotSummer/ComputerVision/venv/bin/python /home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision/tubby_simple.py
+
+# If the detector crashes (camera hiccup, etc.), bring it back automatically.
+Restart=on-failure
+RestartSec=5
+
+# Send the script's stdout/stderr to the journal so you can read logs later.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

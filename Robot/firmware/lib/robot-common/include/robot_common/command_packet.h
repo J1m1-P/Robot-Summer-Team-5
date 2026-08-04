@@ -57,6 +57,11 @@ typedef enum {
     // Raspberry Pi Tasks
     CMD_PI_SCAN_TELETUBBIES,
 
+    // Additional Habitat Tasks
+    // Appended to preserve the existing command values on the wire.
+    CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
+    CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
+
     CMD_MAX
 } CommandOpcode;
 

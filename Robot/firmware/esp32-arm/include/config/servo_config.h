@@ -27,13 +27,23 @@ constexpr uint16_t SERVO_FREQUENCY_HZ = 50;
 constexpr uint16_t SERVO_MIN_PULSE_WIDTH_US = 500;
 constexpr uint16_t SERVO_MAX_PULSE_WIDTH_US = 2500;
 
-static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 127, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatLeftServoConfig {PIN_SERVO_HABITAT_LEFT_PWM, 35, 134, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+static const ServoConfig habitatRightServoConfig {PIN_SERVO_HABITAT_RIGHT_PWM, 35, 135, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
+
+constexpr uint8_t servo_position_tenth_closed(const ServoConfig &config) {
+    return static_cast<uint8_t>(
+        (9U * static_cast<uint16_t>(config.anglePositionA) +
+         static_cast<uint16_t>(config.anglePositionB)) /
+        10U);
+}
+
+constexpr uint8_t HABITAT_LEFT_CLAW_SEMI_CLOSED_ANGLE =
+    servo_position_tenth_closed(habitatLeftServoConfig);
+constexpr uint8_t HABITAT_RIGHT_CLAW_SEMI_CLOSED_ANGLE =
+    servo_position_tenth_closed(habitatRightServoConfig);
+
 static const ServoConfig towerRotateServoConfig {PIN_SERVO_TOWER_ROTATE_PWM, 46, 120, "horizontal", "vertical", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerLeftServoConfig {PIN_SERVO_TOWER_LEFT_PWM, 50, 89, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerMiddleServoConfig {PIN_SERVO_TOWER_MIDDLE_PWM, 50, 91, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 static const ServoConfig towerRightServoConfig {PIN_SERVO_TOWER_RIGHT_PWM, 55, 100, "open", "close", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
-
-// Needs calibration: 
-static const ServoConfig solarPanelServoConfig {PIN_SERVO_SOLAR_PANEL_PWM, 44, 46, "retract", "extend", SERVO_MIN_PULSE_WIDTH_US, SERVO_MAX_PULSE_WIDTH_US, SERVO_FREQUENCY_HZ};
 

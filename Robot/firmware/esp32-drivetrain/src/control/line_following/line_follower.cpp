@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "esp_timer.h"
+#include "control/motion/stall_escalation.h"
 #include "control/pid/bounded_pid.h"
 #include <robot_common/fixed_rate_gate.h>
 #include <robot_common/math_utils.h>
@@ -166,6 +167,7 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     float search_start_heading_rad = 0.0f;
     float smoothed_omega = 0.0f;
     Pose previous_pose = pose_tracker_get_pose(controller->pose_tracker);
+    StallEscalation stall = {};
 
     while (true) {
         const int64_t now_us = esp_timer_get_time();
@@ -188,8 +190,10 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         }
         const Pose current_pose =
             pose_tracker_get_pose(controller->pose_tracker);
-        cumulative_distance_m += std::hypot(current_pose.x_m - previous_pose.x_m,
-                                            current_pose.y_m - previous_pose.y_m);
+        const float step_distance_m = std::hypot(
+            current_pose.x_m - previous_pose.x_m,
+            current_pose.y_m - previous_pose.y_m);
+        cumulative_distance_m += step_distance_m;
         previous_pose = current_pose;
 
         // This stop condition applies to the sensor module used to follow
@@ -298,6 +302,13 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         }
         smoothed_omega = kOmegaEmaAlpha * omega + (1.0f - kOmegaEmaAlpha) * smoothed_omega;
         omega = smoothed_omega;
+
+        const float scale = stall_escalation_update(
+            &stall, std::hypot(vx, vy), step_distance_m, dt_s);
+        const DrivetrainConfig *drivetrain_config = ctx->drivetrain->config;
+        stall_escalation_apply_scale(&vx, &vy, scale,
+                                     drivetrain_config->max_vx_mps,
+                                     drivetrain_config->max_vy_mps);
 
         // use corrected velocity with calibration
         const esp_err_t command_error = drivetrain_set_advanced_body_velocity(

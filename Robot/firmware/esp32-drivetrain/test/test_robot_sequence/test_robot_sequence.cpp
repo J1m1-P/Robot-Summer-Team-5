@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include <unity.h>
+#include <Arduino.h>
 
 extern "C" {
 #include "control/task/robot_sequence_controller.h"
@@ -11,6 +12,8 @@ extern "C" {
 }
 
 #include "control/line_following/line_follower.hpp"
+#include "control/motion/translator.hpp"
+#include "config/pin_map.h"
 
 namespace {
 
@@ -24,6 +27,16 @@ TapeFollowMode last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
 TapeMarkerSensor last_marker_sensor = TapeMarkerSensor::AUTO;
 bool service_during_follow = false;
 uint32_t fake_millis = 0;
+int solar_panel_switch_level = HIGH;
+uint8_t configured_switch_pin = UINT8_MAX;
+uint8_t configured_switch_mode = 0;
+int attached_interrupt = -1;
+int attached_interrupt_mode = -1;
+InterruptHandler attached_interrupt_handler = nullptr;
+size_t precision_move_calls = 0;
+PrecisionMoveTarget last_precision_target = {};
+float last_precision_timeout_s = 0.0f;
+bool precision_move_requires_external_stop = false;
 
 }  // namespace
 
@@ -117,6 +130,26 @@ extern "C" uint32_t millis(void) {
     return fake_millis;
 }
 
+void pinMode(uint8_t pin, uint8_t mode) {
+    configured_switch_pin = pin;
+    configured_switch_mode = mode;
+}
+
+int digitalRead(uint8_t) { return solar_panel_switch_level; }
+
+int digitalPinToInterrupt(uint8_t pin) { return pin; }
+
+void attachInterrupt(
+    int interrupt, InterruptHandler handler, int mode) {
+    attached_interrupt = interrupt;
+    attached_interrupt_handler = handler;
+    attached_interrupt_mode = mode;
+}
+
+void noInterrupts() {}
+
+void interrupts() {}
+
 extern "C" const char *esp_err_to_name(esp_err_t) {
     return "test-error";
 }
@@ -168,6 +201,24 @@ extern "C" esp_err_t pose_tracker_update(
     const DrivetrainWheelCounts *,
     const OdometryPacket *) {
     ++pose_update_count;
+    return ESP_OK;
+}
+
+extern "C" Pose pose_tracker_get_pose(const PoseTracker *) { return {}; }
+
+esp_err_t precision_move(
+    const PrecisionMoveContext *,
+    const PrecisionMoveTarget *target,
+    float timeout_s) {
+    ++precision_move_calls;
+    last_precision_target = *target;
+    last_precision_timeout_s = timeout_s;
+    if (precision_move_requires_external_stop) {
+        return target->external_stop_requested != nullptr &&
+                *target->external_stop_requested
+            ? ESP_OK
+            : ESP_ERR_TIMEOUT;
+    }
     return ESP_OK;
 }
 
@@ -263,6 +314,10 @@ extern "C" ActionStatusDetail arm_action_status_detail(
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN;
         case CMD_HABITAT_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
         default:
             return STATUS_DETAIL_NONE;
     }
@@ -286,7 +341,18 @@ void setUp() {
     last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
     last_marker_sensor = TapeMarkerSensor::AUTO;
     service_during_follow = false;
+    solar_panel_switch_level = HIGH;
+    configured_switch_pin = UINT8_MAX;
+    configured_switch_mode = 0;
+    attached_interrupt = -1;
+    attached_interrupt_mode = -1;
+    attached_interrupt_handler = nullptr;
+    precision_move_calls = 0;
+    last_precision_target = {};
+    last_precision_timeout_s = 0.0f;
+    precision_move_requires_external_stop = false;
     movement_action_controller_set_line_follower_context(nullptr);
+    movement_action_controller_set_precision_move_context(nullptr);
 }
 
 void tearDown() {}
@@ -410,11 +476,59 @@ void test_movement_action_rejects_invalid_values() {
     TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_ARG,
         movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
+            180.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE,
+            180.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
             &controller, MOVEMENT_ACTION_MAX, 1.0f));
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
             &controller, MOVEMENT_ACTION_ROTATE, -90.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            -0.1f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
+            0.0f));
 }
 
 void test_locator_contact_notifies_only_locator_approach() {
@@ -424,7 +538,7 @@ void test_locator_contact_notifies_only_locator_approach() {
         movement_action_controller_init(
             &controller,
             MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
-            0.0f));
+            1.0f));
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
 
     movement_action_controller_notify_locator_contact(&controller);
@@ -438,6 +552,107 @@ void test_locator_contact_notifies_only_locator_approach() {
             90.0f));
     movement_action_controller_notify_locator_contact(&controller);
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
+}
+
+void test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback() {
+    movement_action_controller_init_solar_panel_switch();
+    TEST_ASSERT_EQUAL_UINT8(PIN_SOLAR_PANEL_MICROSWITCH, configured_switch_pin);
+    TEST_ASSERT_EQUAL_UINT8(INPUT_PULLUP, configured_switch_mode);
+    TEST_ASSERT_EQUAL(PIN_SOLAR_PANEL_MICROSWITCH, attached_interrupt);
+    TEST_ASSERT_EQUAL(FALLING, attached_interrupt_mode);
+    TEST_ASSERT_NOT_NULL(attached_interrupt_handler);
+
+    MovementActionController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f));
+    TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
+
+    // HIGH is the inactive pull-up level and must not stop the movement.
+    movement_action_controller_poll_solar_panel_contact(&controller);
+    TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
+
+    // A LOW level is contact, even if the edge interrupt was missed.
+    solar_panel_switch_level = LOW;
+    movement_action_controller_poll_solar_panel_contact(&controller);
+    TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
+
+    // An already-closed switch must also latch before motion begins.
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f));
+    TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
+
+    // Reinitialize released, then verify the one-shot falling-edge path.
+    solar_panel_switch_level = HIGH;
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f));
+    attached_interrupt_handler();
+    movement_action_controller_poll_solar_panel_contact(&controller);
+    TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
+
+    // Contact must not leak into unrelated movement actions.
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_ROTATE, 90.0f));
+    solar_panel_switch_level = LOW;
+    movement_action_controller_poll_solar_panel_contact(&controller);
+    TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
+}
+
+void test_solar_panel_movement_uses_py_bound_and_requires_contact() {
+    RobotSequenceController sequence_controller = {};
+    PrecisionMoveContext precision_context = {
+        .sequence_controller = &sequence_controller,
+    };
+    movement_action_controller_set_precision_move_context(&precision_context);
+    movement_action_controller_init_solar_panel_switch();
+    precision_move_requires_external_stop = true;
+
+    MovementActionController controller = {};
+    solar_panel_switch_level = HIGH;
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init_with_speed(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f,
+            0.2f));
+
+    // Reaching the 1 m safety bound without LOW contact is a failure.
+    TEST_ASSERT_FALSE(movement_action_controller_update(&controller));
+    TEST_ASSERT_EQUAL_UINT32(1, precision_move_calls);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, last_precision_target.dx_body_m);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, last_precision_target.dy_body_m);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.001f, 0.2f, last_precision_target.body_velocity.vy);
+    TEST_ASSERT_EQUAL_PTR(
+        &controller.solar_panel_contact_detected,
+        last_precision_target.external_stop_requested);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 15.0f, last_precision_timeout_s);
+
+    // An active-low contact makes the same bounded +Y move succeed.
+    solar_panel_switch_level = LOW;
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init_with_speed(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f,
+            0.2f));
+    TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+    TEST_ASSERT_EQUAL_UINT32(2, precision_move_calls);
 }
 
 void test_tape_distance_actions_route_to_matching_sensor_direction() {
@@ -493,6 +708,8 @@ void test_habitat_actions_have_unique_completion_details() {
         CMD_HABITAT_CLOSE_LEFT_CLAW,
         CMD_HABITAT_OPEN_RIGHT_CLAW,
         CMD_HABITAT_CLOSE_RIGHT_CLAW,
+        CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
+        CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
     };
 
     for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);
@@ -517,6 +734,8 @@ int main(int, char **) {
     RUN_TEST(test_blocking_movement_services_inputs_without_recursive_step_update);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_locator_contact_notifies_only_locator_approach);
+    RUN_TEST(test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback);
+    RUN_TEST(test_solar_panel_movement_uses_py_bound_and_requires_contact);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();

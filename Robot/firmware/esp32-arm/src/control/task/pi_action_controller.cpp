@@ -2,11 +2,14 @@
 #include "control/task/pi_action_controller.h"
 
 #include <Arduino.h>
+#include "driver/uart.h"
 
 namespace {
 
 // Bounds one Pi request so a missing response cannot stall the sequence.
-constexpr uint32_t kResponseTimeoutMs = 15000;
+// Expire before the drivetrain's 15 s action deadline so the timeout report
+// has time to cross the arm UART instead of racing the drivetrain fault.
+constexpr uint32_t kResponseTimeoutMs = 14000;
 
 // Signed subtraction keeps deadline checks valid across millis() wraparound.
 bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
@@ -59,6 +62,11 @@ bool pi_action_controller_is_busy(const PiActionController *controller) {
     return controller->action_active;
 }
 
+// True once the Pi's ready beacon has been seen on pi_uart.
+bool pi_action_controller_is_ready(const PiActionController *controller) {
+    return controller->pi_ready;
+}
+
 // Starts one scan request and records the response deadline.
 void pi_action_controller_start(
     PiActionController *controller,
@@ -84,6 +92,11 @@ void pi_action_controller_start(
 
     controller->action_active = true;
     controller->response_deadline_ms = now_ms + kResponseTimeoutMs;
+    // TEMPORARY (bench debugging): timestamp the send so the arm's own
+    // console alone can show the full request->reply gap, even when only
+    // one monitor can be watched at a time.
+    Serial.printf("# Pi request %u sent at %lu ms\n",
+                  controller->request_id, static_cast<unsigned long>(now_ms));
 }
 
 bool pi_action_controller_update(
@@ -94,16 +107,30 @@ bool pi_action_controller_update(
     // This controller is the only reader of the dedicated Pi UART.
     const esp_err_t update_error = uart_link_update(controller->pi_uart);
 
-    if (update_error != ESP_OK && controller->action_active) {
-        Serial.printf(
-            "# Pi UART update failed (%s)\n",
-            esp_err_to_name(update_error));
-        finish_with_error(controller, PI_RESULT_LINK_ERROR);
-        report_sent = true;
-    } else if (controller->action_active) {
-        // Consume at most one complete report per update.
+    if (update_error != ESP_OK) {
+        if (controller->action_active) {
+            Serial.printf(
+                "# Pi UART update failed (%s)\n",
+                esp_err_to_name(update_error));
+            finish_with_error(controller, PI_RESULT_LINK_ERROR);
+            report_sent = true;
+        }
+    } else {
+        // Drain every queued packet, not just one -- the ready beacon can
+        // arrive whether or not a request is active, and it shouldn't be
+        // left stranded in the queue behind (or ahead of) a report.
         PacketFrame frame = {};
-        if (uart_link_take_packet(controller->pi_uart, &frame) == ESP_OK) {
+        while (uart_link_take_packet(controller->pi_uart, &frame) == ESP_OK) {
+            if (pi_ready_packet_is(&frame)) {
+                if (!controller->pi_ready) {
+                    Serial.println("# Pi camera/model ready");
+                }
+                controller->pi_ready = true;
+                continue;
+            }
+
+            if (!controller->action_active) continue;
+
             PiReportPacket report = {};
 
             // Only the report for the active request can finish this action.
@@ -111,6 +138,20 @@ bool pi_action_controller_update(
                 report.request_id == controller->request_id) {
                 finish_action(controller, report);
                 report_sent = true;
+            } else {
+                // Diagnostic: this packet passed the outer frame's checksum
+                // but didn't decode into the report we're waiting for --
+                // dump the raw bytes so we can tell a corrupted-but-real
+                // report (an XOR checksum lets an even number of bit flips
+                // cancel out) apart from something structurally unrelated.
+                Serial.printf(
+                    "# Pi packet mismatch at %lu ms: type=%u len=%u payload=[",
+                    static_cast<unsigned long>(now_ms), frame.message_type,
+                    frame.payload_len);
+                for (uint8_t i = 0U; i < frame.payload_len; ++i) {
+                    Serial.printf("%02X ", frame.payload[i]);
+                }
+                Serial.println("]");
             }
         }
     }
@@ -118,7 +159,31 @@ bool pi_action_controller_update(
     // Convert a missing Pi response into a timeout report for drivetrain.
     if (controller->action_active &&
         deadline_reached(now_ms, controller->response_deadline_ms)) {
-        Serial.println("# Pi action timed out");
+        // Distinguishes two very different failure shapes on pi_uart: bytes
+        // that arrived but failed to parse/checksum (link is noisy) versus
+        // counters that never moved at all (nothing usable arrived --
+        // points at a broken/disconnected wire instead).
+        //
+        // TEMPORARY (bench debugging): also reports how many bytes the
+        // driver's software ring buffer is holding for pi_uart right now --
+        // 0 here means the bytes are still stuck in the hardware FIFO
+        // (an ESP-IDF/interrupt-side issue); nonzero means they're already
+        // visible to uart_read_bytes() and something in our own drain loop
+        // (uart_link_update()/parser) is failing to consume them.
+        size_t buffered_len = 0U;
+        uart_get_buffered_data_len(
+            controller->pi_uart->config->uart_num, &buffered_len);
+        Serial.printf(
+            "# Pi action timed out at %lu ms (pi_uart: received=%lu "
+            "checksum_errors=%lu parse_errors=%lu overwritten=%lu "
+            "buffered_now=%lu)\n",
+            static_cast<unsigned long>(now_ms),
+            static_cast<unsigned long>(controller->pi_uart->packets_received),
+            static_cast<unsigned long>(controller->pi_uart->checksum_errors),
+            static_cast<unsigned long>(controller->pi_uart->parse_errors),
+            static_cast<unsigned long>(
+                controller->pi_uart->packets_overwritten),
+            static_cast<unsigned long>(buffered_len));
         finish_with_error(controller, PI_RESULT_TIMEOUT);
         report_sent = true;
     }

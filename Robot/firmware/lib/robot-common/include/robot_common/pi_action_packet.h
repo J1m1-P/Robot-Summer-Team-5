@@ -31,6 +31,15 @@ typedef enum {
     PI_RESULT_CAMERA_FAULT,
     PI_RESULT_LINK_ERROR,
     PI_RESULT_INVALID_REQUEST,
+    // Not a detection: horizontal_error is a commanded correction rotation
+    // (e.g. undoing an earlier alignment turn to re-expose a second target),
+    // not a fresh measurement. Apply it like PI_RESULT_OK's rotation, but
+    // don't count it against the alignment attempt budget.
+    PI_RESULT_REPOSITION,
+    // Every target has been flashed. Not a detection -- there is nothing
+    // left to search for, so the drivetrain should skip later vision scans
+    // while still completing the planned route.
+    PI_RESULT_ALL_FOUND,
     PI_RESULT_MAX
 } PiResultCode;
 
@@ -67,6 +76,9 @@ bool pi_report_packet_is(const PacketFrame *frame);
 esp_err_t pi_report_packet_decode(
     const PacketFrame *frame,
     PiReportPacket *packet_out);
+
+// Identifies the Pi's unsolicited "camera/model ready" beacon (empty payload).
+bool pi_ready_packet_is(const PacketFrame *frame);
 
 #ifdef __cplusplus
 }

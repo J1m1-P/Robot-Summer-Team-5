@@ -9,8 +9,8 @@
 
 namespace {
 
-constexpr uint32_t kClawServoSettleMs = 750;
-constexpr uint32_t kHomeSettleMs = 1000;
+constexpr uint32_t kClawServoSettleMs = 100;
+constexpr uint32_t kHomeSettleMs = 100;
 
 constexpr float kCommandDistanceUnitMm = 100.0f;
 
@@ -171,6 +171,26 @@ void start_habitat_action(
                     : "# Closing right Habitat claw";
             break;
 
+        case CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_left_servo,
+                HABITAT_LEFT_CLAW_SEMI_CLOSED_ANGLE);
+            start_message = "# Semi-closing left Habitat claw";
+            break;
+
+        case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_right_servo,
+                HABITAT_RIGHT_CLAW_SEMI_CLOSED_ANGLE);
+            start_message = "# Semi-closing right Habitat claw";
+            break;
+
         default:
             return;
     }
@@ -201,8 +221,10 @@ void habitat_action_controller_init(
 }
 
 bool habitat_action_controller_accepts(CommandOpcode command) {
-    return command >= CMD_HABITAT_HOME &&
-        command <= CMD_HABITAT_CLOSE_RIGHT_CLAW;
+    return (command >= CMD_HABITAT_HOME &&
+            command <= CMD_HABITAT_CLOSE_RIGHT_CLAW) ||
+        command == CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW ||
+        command == CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW;
 }
 
 bool habitat_action_controller_is_busy(

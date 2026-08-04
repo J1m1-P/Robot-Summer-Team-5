@@ -11,6 +11,7 @@ struct PiActionController {
     UartLink *pi_uart;
     UartLink *drivetrain_uart;
     bool action_active;
+    bool pi_ready;
     uint8_t request_id;
     uint32_t response_deadline_ms;
 };
@@ -26,6 +27,9 @@ bool pi_action_controller_accepts(CommandOpcode command);
 
 // Returns true while the controller is waiting for the Pi's report.
 bool pi_action_controller_is_busy(const PiActionController *controller);
+
+// Returns true once the Pi has announced its camera/model are ready.
+bool pi_action_controller_is_ready(const PiActionController *controller);
 
 // Sends one decoded Pi command and begins waiting for its matching report.
 void pi_action_controller_start(

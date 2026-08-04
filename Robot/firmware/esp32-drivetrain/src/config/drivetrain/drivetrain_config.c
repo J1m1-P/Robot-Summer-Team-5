@@ -61,11 +61,9 @@ const DrivetrainConfig DRIVETRAIN_CONFIG = {
          * slew rate" convention for the unlimited case. This was capping
          * endpoint-settle's corrective pulses (~50ms) at ~0.1 duty when the
          * feedforward for their 0.08-0.12 m/s target wanted ~0.25-0.29 --
-         * likely well under breakaway duty, which is why the pulse couldn't
-         * reliably overcome static friction. */
+         * likely well under what's needed to overcome static friction,
+         * which is why the pulse couldn't reliably break the wheel free. */
         .duty_slew_per_s = 1000.0f,
-        // Empirical startup assist for low-speed commands from rest.
-        .breakaway_duty = 0.30f,
     },
     .max_duty = 0.95f,
     .max_vx_mps = 0.7f,

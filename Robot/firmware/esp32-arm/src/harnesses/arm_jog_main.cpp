@@ -13,7 +13,7 @@
 
 namespace {
 
-constexpr size_t kServoCount = 7;
+constexpr size_t kServoCount = 6;
 constexpr size_t kStepperCount = 4;
 constexpr unsigned long kStepperTelemetryPeriodMs = 250;
 constexpr unsigned long kServoTelemetryPeriodMs = 1000;
@@ -153,7 +153,6 @@ const ServoConfig *const kServoConfigs[kServoCount] = {
     &towerLeftServoConfig,
     &towerMiddleServoConfig,
     &towerRightServoConfig,
-    &solarPanelServoConfig,
 };
 
 const StepperConfig *const kStepperConfigs[kStepperCount] = {

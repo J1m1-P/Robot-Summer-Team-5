@@ -30,7 +30,8 @@ PACKET_TYPE_COMMAND  = 2
 PACKET_TYPE_STATUS   = 3
 PACKET_TYPE_PI_REQUEST = 4
 PACKET_TYPE_PI_REPORT  = 5
-PACKET_TYPE_MAX        = 6
+PACKET_TYPE_PI_READY   = 6   # Pi -> ESP, unsolicited, empty payload: camera/model ready
+PACKET_TYPE_MAX        = 7
 
 PACKET_MAX_PAYLOAD_SIZE = 64
 
@@ -51,11 +52,12 @@ def encode_frame(msg_type, payload=b""):
 
 
 # ─────────────────────────────────────────────
-# COMMAND PAYLOAD — mirrors robot_common/command_packet.h's CommandOpcode.
+# COMMAND PAYLOAD — PROPOSAL. Must match the ESP firmware's decode. Coordinate!
 # ─────────────────────────────────────────────
 CMD_STOP   = 0
-CMD_TURN   = 1   # value = steering error (-1..+1), used only during ALIGN
-CMD_SCAN   = 2   # start the initial scan sweep (angle TBD; value unused)
+CMD_TURN   = 1   # value = steering error (-1..+1). A PIVOT IN PLACE — used by the
+                 #   stop-and-pivot ALIGN in detector_reactive.py.
+CMD_SCAN90 = 2   # start the initial 90° sweep (value unused)
 CMD_FOLLOW = 3   # drive / tape-follow the course (value unused)
 CMD_FLASH  = 4
 CMD_DONE   = 5
@@ -85,6 +87,8 @@ CMD_HABITAT_CLOSE_LEFT_CLAW = 28
 CMD_HABITAT_OPEN_RIGHT_CLAW = 29
 CMD_HABITAT_CLOSE_RIGHT_CLAW = 30
 CMD_PI_SCAN_TELETUBBIES = 31
+CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW = 32
+CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW = 33
 
 # PiAction and PiResultCode, from pi_action_packet.h
 PI_ACTION_SCAN_TELETUBBIES = 0
@@ -95,6 +99,11 @@ PI_RESULT_TIMEOUT = 2
 PI_RESULT_CAMERA_FAULT = 3
 PI_RESULT_LINK_ERROR = 4
 PI_RESULT_INVALID_REQUEST = 5
+PI_RESULT_REPOSITION = 6   # not a detection: horizontal_error is a commanded
+                           # correction rotation (see pi_action_packet.h)
+PI_RESULT_ALL_FOUND = 7    # not a detection: every target has been flashed,
+                           # nothing left to search for (see pi_action_packet.h)
+PI_RESULT_MAX = 8
 
 # ─────────────────────────────────────────────
 # STATUS PAYLOAD — mirrors robot_common/status_packet.h's StatusCode.
@@ -129,6 +138,8 @@ STATUS_DETAIL_HABITAT_RIGHT_CLAW_OPEN = 19
 STATUS_DETAIL_HABITAT_RIGHT_CLAW_CLOSED = 20
 STATUS_DETAIL_HABITAT_Z_MOVED = 33
 STATUS_DETAIL_HABITAT_X_MOVED = 34
+STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED = 35
+STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED = 36
 
 
 def encode_command(opcode, value=0.0):
@@ -159,7 +170,7 @@ def encode_pi_report(request_id, action, result, target_id=0,
     """Encode the report the arm ESP32 will relay to the drivetrain."""
     if action != PI_ACTION_SCAN_TELETUBBIES:
         raise ValueError("invalid Pi action")
-    if result < PI_RESULT_OK or result > PI_RESULT_INVALID_REQUEST:
+    if result < PI_RESULT_OK or result >= PI_RESULT_MAX:
         raise ValueError("invalid Pi result")
     confidence_percent = max(0, min(100, int(confidence_percent)))
     error_x1000 = int(round(max(-1.0, min(1.0, horizontal_error)) * 1000))
@@ -173,6 +184,15 @@ def encode_pi_report(request_id, action, result, target_id=0,
         confidence_percent,
     )
     return encode_frame(PACKET_TYPE_PI_REPORT, payload)
+
+
+def encode_pi_ready():
+    """
+    Encode the unsolicited PI_READY beacon (empty payload, no request_id):
+    tells the arm ESP the camera opened and the YOLO model finished loading,
+    so it's safe to start relaying scan requests.
+    """
+    return encode_frame(PACKET_TYPE_PI_READY)
 
 
 # ─────────────────────────────────────────────
@@ -251,23 +271,50 @@ class RobotLink:
         # `port`: "COM5" on Windows, "/dev/ttyUSB0" or "/dev/serial0" on the Pi.
         # `baud`: MUST equal UartLinkConfig.baud_rate on the ESP side.
         # timeout=0 -> non-blocking reads/writes, so the vision loop never stalls.
-        self.ser = serial.Serial(port, baud, timeout=0)
+        try:
+            self.ser = serial.Serial(port, baud, timeout=0)
+        except Exception as e:
+            # A raw pyserial traceback doesn't say WHICH port/baud failed --
+            # print that first so a wrong SERIAL_PORT or an unplugged USB
+            # adapter is obvious at a glance instead of a wall of Python.
+            print(f"[uart_link] FAILED to open {port} @ {baud} baud: {e}")
+            raise
+        print(f"[uart_link] opened {port} @ {baud} baud")
         self.parser = PacketParser()
         self.rx_chunk = rx_chunk
+        self._link_down = False   # edge-triggered so a persistent drop logs once, not every call
 
     # --- sending ---
     def send_command(self, opcode, value=0.0):
-        self.ser.write(encode_command(opcode, value))
+        self._write(encode_command(opcode, value))
 
     def send_pi_report(self, request_id, action, result, target_id=0,
                        horizontal_error=0.0, confidence_percent=0):
-        self.ser.write(encode_pi_report(
+        self._write(encode_pi_report(
             request_id, action, result, target_id,
             horizontal_error, confidence_percent))
 
+    def send_pi_ready(self):
+        self._write(encode_pi_ready())
+
+    def _write(self, frame):
+        # A disconnected/flaky USB-serial link should drop this one packet,
+        # not crash the caller's control loop.
+        try:
+            self.ser.write(frame)
+            self.ser.flush()  # block until bytes are actually clocked out,
+                              # not just queued in the OS write buffer
+            if self._link_down:
+                print("[uart_link] write recovered")
+                self._link_down = False
+        except OSError as e:
+            if not self._link_down:
+                print(f"[uart_link] write failed, link appears down: {e}")
+                self._link_down = True
+
     def stop(self):          self.send_command(CMD_STOP)
     def turn(self, error):   self.send_command(CMD_TURN, error)
-    def scan(self):          self.send_command(CMD_SCAN)
+    def scan90(self):        self.send_command(CMD_SCAN90)
     def follow(self):        self.send_command(CMD_FOLLOW)
     def flash(self):         self.send_command(CMD_FLASH)
     def done(self):          self.send_command(CMD_DONE)
@@ -290,9 +337,21 @@ class RobotLink:
         """
         Read whatever bytes have arrived and return a list of completed
         (msg_type, payload) packets. Non-blocking — call it once per loop.
+        Returns an empty list (rather than raising) if the link drops.
         """
+        try:
+            data = self.ser.read(self.rx_chunk)
+        except OSError as e:
+            if not self._link_down:
+                print(f"[uart_link] read failed, link appears down: {e}")
+                self._link_down = True
+            return []
+        if self._link_down:
+            print("[uart_link] read recovered")
+            self._link_down = False
+
         packets = []
-        for b in self.ser.read(self.rx_chunk):
+        for b in data:
             pkt = self.parser.feed(b)
             if pkt is not None:
                 packets.append(pkt)
@@ -302,17 +361,45 @@ class RobotLink:
         self.ser.close()
 
 
-# Self-test of the ENCODER + PARSER only (no hardware needed):  python uart_link.py
-if __name__ == "__main__":
-    for name, pkt in [("STOP", encode_command(CMD_STOP)),
-                      ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
-                      ("SCAN", encode_command(CMD_SCAN)),
-                      ("FOLLOW", encode_command(CMD_FOLLOW)),
-                      ("RESUME", encode_command(CMD_RESUME))]:
-        print(f"{name:10s}:", pkt.hex(" "))
+def _feed_all(parser, frame):
+    """Feed a whole frame through a parser and return the decoded packet."""
+    out = None
+    for b in frame:
+        out = parser.feed(b) or out
+    return out
 
-    # Round-trip: encode a packet, feed its bytes to the parser, confirm it decodes.
-    parser = PacketParser()
-    for b in encode_command(CMD_TURN, -0.5):
-        out = parser.feed(b)
-    print("round-trip decode (type, payload):", out)
+
+# Self-test of the ENCODER + PARSER only (no hardware needed): python uart_link.py
+if __name__ == "__main__":
+    for name, pkt in [
+        ("STOP", encode_command(CMD_STOP)),
+        ("TURN -0.5", encode_command(CMD_TURN, -0.5)),
+        ("PI_SCAN_TELETUBBIES", encode_command(CMD_PI_SCAN_TELETUBBIES)),
+        ("TOWER_Z_UP 0.5", encode_command(CMD_TOWER_Z_UP, 0.5)),
+        ("PI_READY", encode_pi_ready()),
+    ]:
+        print(f"{name:22s}:", pkt.hex(" "))
+
+    # COMMAND round-trip.
+    out = _feed_all(PacketParser(), encode_command(CMD_TURN, -0.5))
+    assert out is not None and out[0] == PACKET_TYPE_COMMAND
+    print("COMMAND round-trip:", out)
+
+    # PI_REQUEST round-trip (the live path: arm ESP -> Pi, decoded by
+    # decode_pi_request()).
+    request = struct.pack("<BBb", 7, PI_ACTION_SCAN_TELETUBBIES, 0)
+    out = _feed_all(PacketParser(), encode_frame(PACKET_TYPE_PI_REQUEST, request))
+    assert out is not None and out[0] == PACKET_TYPE_PI_REQUEST
+    decoded = decode_pi_request(out[1])
+    assert decoded == (7, PI_ACTION_SCAN_TELETUBBIES, 0.0), decoded
+    print("PI_REQUEST round-trip:", decoded)
+
+    # PI_REPORT round-trip (the live path: Pi -> arm ESP, built by
+    # encode_pi_report()/send_pi_report()).
+    out = _feed_all(PacketParser(), encode_pi_report(
+        7, PI_ACTION_SCAN_TELETUBBIES, PI_RESULT_OK,
+        target_id=2, horizontal_error=-0.25, confidence_percent=80))
+    assert out is not None and out[0] == PACKET_TYPE_PI_REPORT
+    print("PI_REPORT round-trip:", out)
+
+    print("uart_link self-test OK")

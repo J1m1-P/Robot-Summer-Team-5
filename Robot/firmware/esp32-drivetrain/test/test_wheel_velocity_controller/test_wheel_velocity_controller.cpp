@@ -178,34 +178,6 @@ void test_slew_limit_ramps_toward_target_over_multiple_cycles() {
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, duty);
 }
 
-void test_breakaway_assist_overcomes_static_friction_from_rest() {
-    WheelVelocityControllerConfig cfg = make_config();
-    cfg.kff = 0.1f;
-    cfg.kp = 0.0f;
-    cfg.ki = 0.0f;
-    cfg.breakaway_duty = 0.30f;
-    WheelVelocityController pi = {};
-    float duty = 0.0f;
-
-    wheel_velocity_controller_update(pi, cfg, 0.05f, 0.0f, 0.005f, duty);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.30f, duty);
-
-    // The assist is only for startup; normal control resumes on the next
-    // cycle after the controller has a nonzero previous duty.
-    wheel_velocity_controller_update(pi, cfg, 0.05f, 0.05f, 0.005f, duty);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.005f, duty);
-}
-
-void test_breakaway_assist_does_not_move_near_zero_wheel_command() {
-    WheelVelocityControllerConfig cfg = make_config();
-    cfg.breakaway_duty = 0.30f;
-    WheelVelocityController pi = {};
-    float duty = 0.0f;
-
-    wheel_velocity_controller_update(pi, cfg, 0.01f, 0.0f, 0.005f, duty);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f, duty);
-}
-
 void test_safe_stop_overrides_downward_slew_limit() {
     WheelVelocityControllerConfig cfg = make_config();
     cfg.kff = 1.0f;
@@ -271,8 +243,6 @@ int main(int argc, char **argv) {
 
     RUN_TEST(test_slew_limit_caps_first_cycle_jump_from_rest);
     RUN_TEST(test_slew_limit_ramps_toward_target_over_multiple_cycles);
-    RUN_TEST(test_breakaway_assist_overcomes_static_friction_from_rest);
-    RUN_TEST(test_breakaway_assist_does_not_move_near_zero_wheel_command);
     RUN_TEST(test_safe_stop_overrides_downward_slew_limit);
     RUN_TEST(test_default_slew_is_effectively_unlimited);
     RUN_TEST(test_rejects_invalid_controller_limits);

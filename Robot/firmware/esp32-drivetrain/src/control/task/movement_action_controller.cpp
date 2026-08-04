@@ -1,11 +1,17 @@
 /* Implements tape-guided and ordinary drivetrain actions. */
 #include "control/task/movement_action_controller.h"
 
+#ifndef ROBOT_MOTION_DIAGNOSTICS
+#define ROBOT_MOTION_DIAGNOSTICS 0
+#endif
+
 #include <cmath>
+#include <cstdio>
 #include <stddef.h>
 
 #include "control/line_following/line_follower.hpp"
 #include <Arduino.h>
+#include "config/pin_map.h"
 #include "control/motion/translator.hpp"
 
 namespace {
@@ -28,16 +34,54 @@ constexpr TapeStopSpec kSideTapeStopSpec = {
     .required_sensor_count = 1,
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
 };
-constexpr TapeStopSpec kFrontTapeStopSpec = {
+constexpr TapeStopSpec kFrontRightTapeStopSpec = {
     .sensor_mask = 1U << 0,  // front/PX sensor
     .required_sensor_count = 1,
+    // Front channels run from absolute right (0) to absolute left (3).
+    // During a CW sweep, the right detector reaches the tape first.
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_0,
+};
+constexpr TapeStopSpec kFrontLeftTapeStopSpec = {
+    .sensor_mask = 1U << 0,  // front/PX sensor
+    .required_sensor_count = 1,
+    // Front channels run from absolute right (0) to absolute left (3).
+    // During a CCW sweep, the left detector reaches the tape first.
+    .channel_mask = 1U << TAPE_SENSOR_CHANNEL_3,
 };
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 PrecisionMoveContext *g_precision_move_ctx = nullptr;
 Pose g_planned_pose = {};
 bool g_planned_pose_valid = false;
+volatile bool g_solar_panel_contact_pending = false;
+volatile bool g_solar_panel_contact_armed = false;
+
+// One-shot interrupt: the first contact edge disarms the switch so mechanical
+// bounce cannot repeatedly raise the pending flag. The control loop consumes
+// the flag; the ISR never touches a MovementActionController directly.
+void IRAM_ATTR solar_panel_switch_interrupt() {
+    if (!g_solar_panel_contact_armed) return;
+    g_solar_panel_contact_armed = false;
+    g_solar_panel_contact_pending = true;
+}
+
+void disarm_solar_panel_contact() {
+    noInterrupts();
+    g_solar_panel_contact_armed = false;
+    g_solar_panel_contact_pending = false;
+    interrupts();
+}
+
+void arm_solar_panel_contact(MovementActionController *controller) {
+    // Latch a switch that is already closed before motion begins.
+    const bool contact_active =
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+    noInterrupts();
+    g_solar_panel_contact_pending = false;
+    g_solar_panel_contact_armed = !contact_active;
+    interrupts();
+    controller->solar_panel_contact_detected = contact_active;
+}
 
 float wrap_angle(float angle) {
     while (angle > static_cast<float>(M_PI)) angle -= 2.0f * static_cast<float>(M_PI);
@@ -72,13 +116,26 @@ bool follow_tape_action(
     TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO) {
     const TapeFollowMode follow_mode =
         direction == Direction::PX || direction == Direction::MX
-            ? TapeFollowMode::SINGLE_SENSOR
+            ? TapeFollowMode::FRONT_BACK_ALIGNED
             : TapeFollowMode::SINGLE_SENSOR;
-    const bool success = follow_tape(
+    if (!follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
-        follow_mode, marker_sensor);
-    if (success) sync_planned_pose();
-    return success;
+        follow_mode, marker_sensor)) {
+        return false;
+    }
+
+    // Hold the detected endpoint while post-stop drift settles, just as an
+    // ordinary precision movement does before it returns.
+    if (g_precision_move_ctx != nullptr) {
+        const PrecisionMoveTarget settle_target = {};
+        if (precision_move(
+                g_precision_move_ctx, &settle_target,
+                kPrecisionTimeoutS) != ESP_OK) {
+            return false;
+        }
+    }
+    sync_planned_pose();
+    return true;
 }
 
 bool action_requires_nonnegative_distance(MovementAction action) {
@@ -88,13 +145,22 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_PY_TAPE_FOLLOW_DISTANCE:
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
-        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
-        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
-        case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
+        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
             return true;
         default:
             return false;
     }
+}
+
+bool action_requires_positive_sweep(MovementAction action) {
+    return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
+           action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE ||
+           action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE;
+}
+
+bool action_requires_positive_distance(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR ||
+           action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL;
 }
 
 }  // namespace
@@ -109,12 +175,44 @@ extern "C" void movement_action_controller_set_precision_move_context(
     g_precision_move_ctx = ctx;
 }
 
+extern "C" void movement_action_controller_init_solar_panel_switch(void) {
+    pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
+    disarm_solar_panel_contact();
+    attachInterrupt(
+        digitalPinToInterrupt(PIN_SOLAR_PANEL_MICROSWITCH),
+        solar_panel_switch_interrupt,
+        FALLING);
+}
+
 extern "C" void movement_action_controller_notify_locator_contact(
     MovementActionController *controller) {
     if (controller != nullptr &&
         controller->action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR) {
         controller->locator_contact_detected = true;
     }
+}
+
+extern "C" void movement_action_controller_poll_solar_panel_contact(
+    MovementActionController *controller) {
+    if (controller == nullptr ||
+        controller->action != MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL ||
+        controller->solar_panel_contact_detected) {
+        return;
+    }
+
+    // The level check is a fallback if the falling-edge interrupt was missed.
+    const bool contact_active =
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == LOW;
+    noInterrupts();
+    if (contact_active) {
+        g_solar_panel_contact_armed = false;
+        g_solar_panel_contact_pending = true;
+    }
+    const bool contact_pending = g_solar_panel_contact_pending;
+    g_solar_panel_contact_pending = false;
+    interrupts();
+
+    controller->solar_panel_contact_detected = contact_pending;
 }
 
 extern "C" void movement_action_controller_begin_sequence(void) {
@@ -140,6 +238,10 @@ bool precision_action(
     const bool *external_stop_requested = nullptr) {
     if (g_precision_move_ctx == nullptr ||
         g_precision_move_ctx->sequence_controller == nullptr) {
+#if ROBOT_MOTION_DIAGNOSTICS
+        std::printf(
+            "# precision action rejected: missing precision context\n");
+#endif
         return false;
     }
     const float vx_mps = speed_mps > 0.0f ? speed_mps : kPrecisionVxMps;
@@ -179,9 +281,19 @@ bool precision_action(
         target.world_goal_enabled = true;
         target.world_goal = planned_goal;
     }
-    const bool success =
-        precision_move(g_precision_move_ctx, &target, kPrecisionTimeoutS) ==
-        ESP_OK;
+    const esp_err_t move_error = precision_move(
+        g_precision_move_ctx, &target, kPrecisionTimeoutS);
+    const bool success = move_error == ESP_OK;
+#if ROBOT_MOTION_DIAGNOSTICS
+    std::printf(
+        "# precision action result: success=%u error=%d dx=%.3f dy=%.3f "
+        "dtheta=%.3f\n",
+        success ? 1U : 0U,
+        (int)move_error,
+        dx_body,
+        dy_body,
+        dhead_rad);
+#endif
     if (success &&
         (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
@@ -214,7 +326,9 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
         (unsigned int)action >= (unsigned int)MOVEMENT_ACTION_MAX ||
         !std::isfinite(action_value) ||
         !std::isfinite(speed) || speed < 0.0f ||
-        (action_requires_nonnegative_distance(action) && action_value < 0.0f)) {
+        (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
+        (action_requires_positive_distance(action) && action_value <= 0.0f) ||
+        (action_requires_positive_sweep(action) && action_value <= 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -223,6 +337,11 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
     controller->action = action;
     controller->action_value = action_value;
     controller->speed = speed;
+    if (action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL) {
+        arm_solar_panel_contact(controller);
+    } else {
+        disarm_solar_panel_contact();
+    }
     return ESP_OK;
 }
 
@@ -240,6 +359,7 @@ extern "C" esp_err_t movement_action_controller_init_general_motion(
     controller->dx_body_m = dx_body_m;
     controller->dy_body_m = dy_body_m;
     controller->delta_heading_rad = delta_heading_rad;
+    disarm_solar_panel_contact();
     return ESP_OK;
 }
 
@@ -249,7 +369,8 @@ extern "C" bool movement_action_controller_update(
 
     // Movement actions use three controller parameters:
     // action selects the maneuver; action_value is its distance in metres or
-    // rotation in degrees (zero when sensor feedback determines the stop).
+    // rotation in degrees. Contact-driven moves use it as a positive safety
+    // bound and still finish only when their microswitch is pressed.
     // speed is optional in m/s, or rad/s for rotation; zero uses the default.
     switch (controller->action) {
         case MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE:
@@ -292,6 +413,17 @@ extern "C" bool movement_action_controller_update(
                     speed_or_default(controller->speed, kSideTowerFollowSpeedMps),
                     StopCondition::RISE_ONE, 0.0f,
                     kTapeFollowTimeoutS);
+            }
+            return false;
+
+        case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER_FRONT:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_action(
+                    g_line_follower_ctx,
+                    Direction::PY,
+                    speed_or_default(controller->speed, kSideTowerFollowSpeedMps),
+                    StopCondition::RISE_ONE, 0.0f,
+                    kTapeFollowTimeoutS, TapeMarkerSensor::FRONT);
             }
             return false;
 
@@ -415,6 +547,15 @@ extern "C" bool movement_action_controller_update(
                     controller->action_value > 0.0f
                         ? controller->action_value : kPrecisionVxMps));
 
+        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
+            return precision_action(
+                0.0f, kTapeSeekMaxDistanceM, 0.0f,
+                &kFrontLeftTapeStopSpec,
+                speed_or_default(
+                    controller->speed,
+                    controller->action_value > 0.0f
+                        ? controller->action_value : kPrecisionVyMps));
+
         // action_value is the CW sweep bound in degrees (clamped to the
         // wrap-safe maximum).
         case MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE:
@@ -425,14 +566,24 @@ extern "C" bool movement_action_controller_update(
                 &kSideTapeStopSpec, 0.0f,
                 speed_or_default(controller->speed, kPrecisionOmegaRadS));
 
+        // action_value is the CW sweep bound in degrees (clamped to the
+        // wrap-safe maximum). The front sensor's right detector leads CW.
+        case MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE:
+            return precision_action(
+                0.0f, 0.0f,
+                -std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
+                           kTapeSeekMaxRotationRad),
+                &kFrontRightTapeStopSpec, 0.0f,
+                speed_or_default(controller->speed, kPrecisionOmegaRadS));
+
         // action_value is the CCW sweep bound in degrees. The precision
         // motion layer clamps it just inside +/-180 degrees.
-        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_PX_TAPE:
+        case MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE:
             return precision_action(
                 0.0f, 0.0f,
                 std::fmin(controller->action_value * static_cast<float>(M_PI) / 180.0f,
                           kTapeSeekMaxRotationRad),
-                &kFrontTapeStopSpec, 0.0f,
+                &kFrontLeftTapeStopSpec, 0.0f,
                 speed_or_default(controller->speed, kPrecisionOmegaRadS));
 
         case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
@@ -440,6 +591,16 @@ extern "C" bool movement_action_controller_update(
                 -controller->action_value, 0.0f, 0.0f, nullptr,
                 speed_or_default(controller->speed, kLocatorApproachSpeedMps),
                 0.0f, &controller->locator_contact_detected);
+
+        case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
+        {
+            const bool success = precision_action(
+                0.0f, controller->action_value, 0.0f, nullptr,
+                speed_or_default(controller->speed, kLocatorApproachSpeedMps),
+                0.0f, &controller->solar_panel_contact_detected);
+            disarm_solar_panel_contact();
+            return success;
+        }
 
         default:
             return false;
