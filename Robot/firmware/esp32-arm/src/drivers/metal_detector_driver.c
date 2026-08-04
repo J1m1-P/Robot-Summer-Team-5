@@ -47,7 +47,7 @@ static esp_err_t metal_detector_driver_glitch_ns_to_cycles(uint32_t glitch_filte
     return ESP_OK;
 }
 
-// Configures the pulse-counter channel to count rising edges only.
+// Configures the pulse-counter channel to count falling edges only.
 static esp_err_t metal_detector_driver_configure_channel(const MetalDetectorConfig *config) {
     pcnt_config_t pcnt_config = {
         .pulse_gpio_num = config->pulse_pin,
@@ -55,8 +55,8 @@ static esp_err_t metal_detector_driver_configure_channel(const MetalDetectorConf
         .channel = config->pcnt_channel,
         .unit = config->pcnt_unit,
 
-        .pos_mode = PCNT_COUNT_INC,
-        .neg_mode = PCNT_COUNT_DIS,
+        .pos_mode = PCNT_COUNT_DIS,
+        .neg_mode = PCNT_COUNT_INC,
 
         .lctrl_mode = PCNT_MODE_KEEP,
         .hctrl_mode = PCNT_MODE_KEEP,

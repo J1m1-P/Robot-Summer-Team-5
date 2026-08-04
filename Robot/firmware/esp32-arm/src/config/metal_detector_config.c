@@ -6,7 +6,7 @@
  * Legacy PCNT counter is signed 16-bit. Keep high_limit comfortably above
  * the max pulse count expected in one sample window so a runaway signal
  * saturates instead of wrapping negative; low_limit stays at 0 since only
- * rising edges are counted.
+ * falling edges are counted.
  */
 #define METAL_DETECTOR_PCNT_HIGH_LIMIT 30000
 #define METAL_DETECTOR_PCNT_LOW_LIMIT  0

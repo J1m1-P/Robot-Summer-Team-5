@@ -10,7 +10,9 @@
 #define PIN_SERVO_TOWER_RIGHT_PWM       6
 
 // Solar Panel Microswitch
-#define PIN_SOLAR_PANEL_MICROSWITCH 45  // Normally closed to ground; pressed reads HIGH
+// TODO: unassigned -- pick a free GPIO and confirm against the actual wiring
+// before use.
+#define PIN_SOLAR_PANEL_MICROSWITCH GPIO_NUM_NC  // Normally closed to ground; pressed reads HIGH
 
 // Locating Motor
 #define PIN_LOC_EN          13      // Power on the locating motor
@@ -34,8 +36,9 @@
 // Time of Flight (I2C)
 #define PIN_I2C_SDA         7
 #define PIN_I2C_SCL         8
-// GPIO45/46 were reassigned to switches. Both outer sensors remain
-// disconnected until their XSHUT lines are assigned new GPIOs.
+// GPIO45/46 were reassigned to the metal detector and start switch. Both
+// outer sensors remain disconnected until their XSHUT lines are assigned
+// new GPIOs.
 #define PIN_TOF_LEFT_XSHUT  GPIO_NUM_NC
 #define PIN_TOF_RIGHT_XSHUT GPIO_NUM_NC
 
