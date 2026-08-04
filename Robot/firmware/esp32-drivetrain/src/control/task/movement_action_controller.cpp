@@ -266,18 +266,25 @@ bool precision_action(
     }
     target.external_stop_requested = external_stop_requested;
     Pose planned_goal = {};
-    // Pure rotations do not need a world-position goal. Reusing the planned
-    // position after a preceding translation can introduce a small position
-    // error and incorrectly send the rotation through the translation phase.
-    if (g_planned_pose_valid &&
-        (std::fabs(dx_body) > 1.0e-6f || std::fabs(dy_body) > 1.0e-6f)) {
-        const float c = std::cos(g_planned_pose.heading_rad);
-        const float s = std::sin(g_planned_pose.heading_rad);
-        planned_goal = {
-            g_planned_pose.x_m + c * dx_body - s * dy_body,
-            g_planned_pose.y_m + s * dx_body + c * dy_body,
-            wrap_angle(g_planned_pose.heading_rad + dhead_rad),
-        };
+    const bool has_translation =
+        std::fabs(dx_body) > 1.0e-6f || std::fabs(dy_body) > 1.0e-6f;
+    if (g_planned_pose_valid) {
+        planned_goal = g_planned_pose;
+        if (has_translation) {
+            const float c = std::cos(g_planned_pose.heading_rad);
+            const float s = std::sin(g_planned_pose.heading_rad);
+            planned_goal.x_m += c * dx_body - s * dy_body;
+            planned_goal.y_m += s * dx_body + c * dy_body;
+        } else {
+            // Correct pure turns to the planned absolute heading without
+            // reviving stale planned-position error as a translation move.
+            const Pose measured_pose = pose_tracker_get_pose(
+                g_precision_move_ctx->sequence_controller->pose_tracker);
+            planned_goal.x_m = measured_pose.x_m;
+            planned_goal.y_m = measured_pose.y_m;
+        }
+        planned_goal.heading_rad = wrap_angle(
+            g_planned_pose.heading_rad + dhead_rad);
         target.world_goal_enabled = true;
         target.world_goal = planned_goal;
     }
@@ -298,8 +305,7 @@ bool precision_action(
         (tape_stop_spec != nullptr || external_stop_requested != nullptr)) {
         sync_planned_pose();
     } else if (success && g_planned_pose_valid) {
-        if (std::fabs(dx_body) > 1.0e-6f ||
-            std::fabs(dy_body) > 1.0e-6f) {
+        if (has_translation) {
             g_planned_pose = planned_goal;
         } else {
             g_planned_pose.heading_rad = wrap_angle(

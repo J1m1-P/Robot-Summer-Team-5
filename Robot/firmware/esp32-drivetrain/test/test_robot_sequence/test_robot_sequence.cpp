@@ -37,6 +37,7 @@ size_t precision_move_calls = 0;
 PrecisionMoveTarget last_precision_target = {};
 float last_precision_timeout_s = 0.0f;
 bool precision_move_requires_external_stop = false;
+Pose current_pose = {};
 
 }  // namespace
 
@@ -204,7 +205,9 @@ extern "C" esp_err_t pose_tracker_update(
     return ESP_OK;
 }
 
-extern "C" Pose pose_tracker_get_pose(const PoseTracker *) { return {}; }
+extern "C" Pose pose_tracker_get_pose(const PoseTracker *) {
+    return current_pose;
+}
 
 esp_err_t precision_move(
     const PrecisionMoveContext *,
@@ -351,6 +354,7 @@ void setUp() {
     last_precision_target = {};
     last_precision_timeout_s = 0.0f;
     precision_move_requires_external_stop = false;
+    current_pose = {};
     movement_action_controller_set_line_follower_context(nullptr);
     movement_action_controller_set_precision_move_context(nullptr);
 }
@@ -655,6 +659,47 @@ void test_solar_panel_movement_uses_py_bound_and_requires_contact() {
     TEST_ASSERT_EQUAL_UINT32(2, precision_move_calls);
 }
 
+void test_rotation_corrects_to_planned_absolute_heading_without_position_move() {
+    RobotSequenceController sequence_controller = {};
+    PoseTracker pose_tracker = {};
+    sequence_controller.pose_tracker = &pose_tracker;
+    PrecisionMoveContext precision_context = {
+        .sequence_controller = &sequence_controller,
+    };
+    movement_action_controller_set_precision_move_context(&precision_context);
+
+    current_pose = {
+        .x_m = 1.0f,
+        .y_m = 2.0f,
+        .heading_rad = 170.0f * static_cast<float>(M_PI) / 180.0f,
+    };
+    movement_action_controller_begin_sequence();
+
+    // Simulate pose drift before the command. The position target must use
+    // this measured pose, while heading remains tied to the planned pose.
+    current_pose = {
+        .x_m = 1.02f,
+        .y_m = 1.98f,
+        .heading_rad = 165.0f * static_cast<float>(M_PI) / 180.0f,
+    };
+    MovementActionController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller, MOVEMENT_ACTION_ROTATE, 30.0f));
+    TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+
+    TEST_ASSERT_TRUE(last_precision_target.world_goal_enabled);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, current_pose.x_m, last_precision_target.world_goal.x_m);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f, current_pose.y_m, last_precision_target.world_goal.y_m);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.0001f,
+        -160.0f * static_cast<float>(M_PI) / 180.0f,
+        last_precision_target.world_goal.heading_rad);
+}
+
 void test_tape_distance_actions_route_to_matching_sensor_direction() {
     LineFollowerContext context = {};
     movement_action_controller_set_line_follower_context(&context);
@@ -736,6 +781,7 @@ int main(int, char **) {
     RUN_TEST(test_locator_contact_notifies_only_locator_approach);
     RUN_TEST(test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback);
     RUN_TEST(test_solar_panel_movement_uses_py_bound_and_requires_contact);
+    RUN_TEST(test_rotation_corrects_to_planned_absolute_heading_without_position_move);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();
