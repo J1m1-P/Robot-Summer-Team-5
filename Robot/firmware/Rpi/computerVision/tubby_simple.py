@@ -1,13 +1,15 @@
 """
-Teletubby Detector — SIMPLE FLASH MODE. 
+Teletubby Detector — SIMPLE FLASH MODE.
 FLOW
   IDLE      Camera runs, no YOLO; state/detections print to the console.
-  SCANNING  Vote the one unflashed identity across SCAN_BURST_FRAMES (needs
-            SCAN_MIN_VOTES to count -- only one teletubby is ever in frame
-            at a time, so this just filters out single-frame noise, not
-            competing candidates). A solid winner is flashed immediately and
-            added to `visited`, then reports ALL_FOUND (TARGETS_TO_FIND
-            flashed) or plain OK. One report per request, then back to IDLE.
+  SCANNING  Vote presence across SCAN_BURST_FRAMES (needs SCAN_MIN_VOTES to
+            count -- only one teletubby is ever in frame at a time, so this
+            just filters out single-frame noise, not competing candidates).
+            Identity (which character it is) is ignored entirely -- every
+            detection is treated as the same one "teletubby" class. A solid
+            detection is flashed immediately and counted, then reports
+            ALL_FOUND (TARGETS_TO_FIND flashed) or plain OK. One report per
+            request, then back to IDLE.
 
 WIRE (robot_common/pi_action_packet.h) -- identical to tubby_detector.py.
   ESP->Pi PI_REQUEST: request_id, action, parameter (unused).
@@ -20,7 +22,6 @@ WIRE (robot_common/pi_action_packet.h) -- identical to tubby_detector.py.
 import os
 import sys
 import time
-from collections import Counter, defaultdict
 from pathlib import Path
 
 import cv2
@@ -105,25 +106,19 @@ except Exception as e:
     print(f"[startup] FAILED to load model from {MODEL_PATH}: {e}")
     raise
 print(f"[startup] model loaded, classes={list(model.names.values())}")
-YOLO_NAME_MAP = {"DP": "dipsy", "LL": "laa_laa", "PO": "po", "TW": "tinky_winky"}
 
-# PiReportPacket.target_id is a single wire byte — map each identity to a stable
-# small int. Nothing downstream currently interprets the value beyond logging it.
-IDENTITY_TO_TARGET_ID = {"dipsy": 0, "laa_laa": 1, "po": 2, "tinky_winky": 3}
-
-# Identities already flashed. Persists across checkpoints so a teletubby seen
-# from more than one checkpoint is only flashed once.
-visited = set()
+# Number of teletubbies flashed so far. Identity (which character) is never
+# considered -- every detection is the same one class, so this is a plain
+# count, not a set of identities seen.
+found_count = 0
 
 
-def yolo_detect_all(frame, frame_w, exclude=None):
+def yolo_detect_all(frame, frame_w):
     """
-    Run YOLO on one frame and return ALL selectable detections, highest-
-    confidence first. Each is (identity, (x, y, w, h), error), error in
-    -1 (left) .. +1 (right). `exclude` drops identities already in `visited`.
+    Run YOLO on one frame and return ALL detections, highest-confidence
+    first, as ((x, y, w, h), horizontal_error) pairs, error in
+    -1 (left) .. +1 (right). Identity is ignored -- any detected box counts.
     """
-    exclude = exclude or set()
-
     # Run the model once on this frame; bail early if it found nothing at all.
     results = model(frame, conf=DETECT_CONF, imgsz=IMGSZ, verbose=False)
     boxes = results[0].boxes
@@ -132,21 +127,16 @@ def yolo_detect_all(frame, frame_w, exclude=None):
 
     # Pull the raw box data out of the torch tensors as plain numpy arrays.
     xyxy = boxes.xyxy.cpu().numpy()
-    cls  = boxes.cls.cpu().numpy().astype(int)
     conf = boxes.conf.cpu().numpy()
 
-    # Build one (identity, box, horizontal_error) tuple per kept detection,
-    # walking boxes highest-confidence first and skipping already-flashed
-    # identities so a re-scan never re-reports something we're done with.
+    # Build one (box, horizontal_error) tuple per detection, highest
+    # confidence first.
     dets = []
     for i in conf.argsort()[::-1]:           # highest confidence first
-        identity = YOLO_NAME_MAP[model.names[cls[i]]]
-        if identity in exclude:
-            continue
         x1, y1, x2, y2 = xyxy[i]
         x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
         error = ((x + w / 2) - frame_w / 2) / (frame_w / 2)   # -1 left .. +1 right
-        dets.append((identity, (x, y, w, h), error))
+        dets.append(((x, y, w, h), error))
     return dets
 
 
@@ -154,7 +144,7 @@ def pick_target(detections):
     """Closest-to-center detection, or None if the frame has nothing."""
     if not detections:
         return None
-    return min(detections, key=lambda d: abs(d[2]))
+    return min(detections, key=lambda d: abs(d[1]))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -200,16 +190,20 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
 
 def handle_scan_request_simple(request_id, parameter):
     """
-    Sample a short burst of frames, vote on the best not-yet-flashed target
-    (same voting as tubby_detector.py's handle_scan_request), and flash it
-    immediately -- no centering check, no cross-request chase tracking, since
+    Sample a short burst of frames, check whether a teletubby was seen in
+    enough of them to count as solid (filtering single-frame noise -- only
+    one teletubby is ever in frame at a time, so this is a presence check,
+    not a contest between candidates), and flash it immediately -- no
+    centering check, no identity, no cross-request chase tracking, since
     every call either flashes on the spot or reports NOT_FOUND/CAMERA_FAULT.
     `parameter` is decoded but unused (reserved by the wire format for future
     per-scan tuning).
     """
-    # CHUNK 1 — sample a short burst of frames and tally how many of them
-    # each identity showed up in (once per frame, not once per detection).
-    seen_counts = Counter()
+    global found_count
+
+    # CHUNK 1 — sample a short burst of frames and count how many of them
+    # had at least one detection (identity doesn't matter, just presence).
+    frames_seen = 0
     frames_read = 0
     for _ in range(SCAN_BURST_FRAMES):
         ok, frame = cap.read()
@@ -217,9 +211,9 @@ def handle_scan_request_simple(request_id, parameter):
             continue
         frames_read += 1
         _maybe_collect_image(frame)
-        dets = yolo_detect_all(frame, frame.shape[1], exclude=visited)
-        for identity in {d[0] for d in dets}:      # count each identity once per frame
-            seen_counts[identity] += 1
+        dets = yolo_detect_all(frame, frame.shape[1])
+        if dets:
+            frames_seen += 1
         _report_state("SCANNING", pick_target(dets))
 
     # CHUNK 2 — the camera itself never produced a usable frame this burst.
@@ -228,29 +222,26 @@ def handle_scan_request_simple(request_id, parameter):
         send_report(request_id, PI_RESULT_CAMERA_FAULT)
         return
 
-    # CHUNK 3 — decide the winner. An identity only counts once it showed up
-    # in SCAN_MIN_VOTES separate frames, filtering out single-frame noise.
-    # Only one teletubby is ever in frame at a time, so at most one identity
-    # can reach that threshold.
-    solid = [identity for identity, n in seen_counts.items() if n >= SCAN_MIN_VOTES]
-    if not solid:
-        print(f"[SCAN #{request_id}] no unflashed detection (visited={visited})")
+    # CHUNK 3 — a detection only counts once it showed up in SCAN_MIN_VOTES
+    # separate frames, filtering out single-frame noise.
+    if frames_seen < SCAN_MIN_VOTES:
+        print(f"[SCAN #{request_id}] no detection (found so far={found_count})")
         send_report(request_id, PI_RESULT_NOT_FOUND)
         return
 
-    winner = solid[0]
-    confidence_percent = round(100 * seen_counts[winner] / SCAN_BURST_FRAMES)
+    confidence_percent = round(100 * frames_seen / SCAN_BURST_FRAMES)
 
-    # CHUNK 4 — winner locked in: flash it and mark it done for good, so a
-    # later scan (of the OTHER teletubby) never re-flashes this one.
+    # CHUNK 4 — detection locked in: flash it and count it. There's no
+    # identity to dedupe on, so this relies on the caller only requesting a
+    # scan once per physical teletubby (e.g. after repositioning).
     for _ in range(FLASH_COUNT):
         flash_once()
-    visited.add(winner)
-    print(f"[SCAN #{request_id}] flashed {winner} conf={confidence_percent}%")
+    found_count += 1
+    print(f"[SCAN #{request_id}] flashed teletubby #{found_count} conf={confidence_percent}%")
 
     # CHUNK 5 — tell the ESP whether that was the last target or not, so it
     # knows whether to send another scan request later or move on.
-    if len(visited) >= TARGETS_TO_FIND:
+    if found_count >= TARGETS_TO_FIND:
         # Nothing left to search for — the ESP moves on to Tower pickup.
         result = PI_RESULT_ALL_FOUND
         print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
@@ -259,7 +250,7 @@ def handle_scan_request_simple(request_id, parameter):
 
     send_report(
         request_id, result,
-        target_id=IDENTITY_TO_TARGET_ID[winner],
+        target_id=0,
         horizontal_error=0.0,
         confidence_percent=confidence_percent)
 
@@ -288,8 +279,8 @@ def _report_state(label, detection=None):
         print(f"[{label}]")
         _last_reported_state = label
     if detection is not None:
-        identity, _box, error = detection
-        print(f"  see {identity} err={error:+.3f}")
+        _box, error = detection
+        print(f"  see teletubby err={error:+.3f}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
