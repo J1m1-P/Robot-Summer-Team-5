@@ -33,6 +33,13 @@ constexpr float kEndpointNudgeSpeedMps = 0.10f;
 constexpr float kEndpointNudgePulseS = 0.05f;
 constexpr float kEndpointNudgeRampS = 0.005f;
 constexpr float kEndpointNudgePauseS = 0.02f;
+// Pulse peak tapers with remaining distance (full speed at the band's outer
+// edge) instead of firing at a flat speed for the whole band, so a pulse
+// can't travel further than the residual gap and overshoot it.
+constexpr float kEndpointNudgeGain =
+    kEndpointNudgeSpeedMps / kEndpointNudgeBandM;
+constexpr float kEndpointNudgeMinSpeedMps = 0.06f;  // deadband-safe floor
+constexpr int kMaxCorrectionAttempts = 3;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
 constexpr float kMaxDt = 0.02f;           // s: reject delayed cycles
@@ -253,8 +260,11 @@ esp_err_t precision_move(
     TapeStopCondition tape_stop;
     float translate_elapsed_s = 0.0f;
     float settled_s = 0.0f;
-    bool endpoint_correction_applied = false;
+    int correction_attempts = 0;
     float endpoint_nudge_phase_s = 0.0f;
+    // Requires a cycle that actually commanded zero translation before the
+    // final stop(), so a coast never starts mid-pulse with real velocity.
+    bool last_cmd_zero = false;
 #if ROBOT_MOTION_DIAGNOSTICS
     MotionDiagnosticSnapshot diagnostic = {};
 #endif
@@ -366,6 +376,11 @@ esp_err_t precision_move(
         const float error_body_x = c * error_world_x + s * error_world_y;
         const float error_body_y = -s * error_world_x + c * error_world_y;
         DrivetrainBodyVelocity cmd = {};
+        // Set only once FinalRotate's heading has settled and it's handling
+        // a position residual -- not during active rotation, where mixing in
+        // translation could saturate wheel targets (see the "rotate alone"
+        // comment below).
+        bool position_correction_phase = false;
 
         switch (state) {
         case State::Translate: {
@@ -461,17 +476,23 @@ esp_err_t precision_move(
             }
 
             if (distance_error > kPosTol) {
-                // Once heading is settled, correct any position movement
-                // caused by the turn before accepting the final pose.
-                const float direction_scale = kMinRampSpeedMps / distance_error;
-                cmd.vx = error_body_x * direction_scale;
-                cmd.vy = error_body_y * direction_scale;
+                // Once heading is settled, let the shared endpoint-nudge
+                // pulse below drive any remaining position correction,
+                // rather than a separate, uncapped-speed formula.
+                position_correction_phase = true;
+                break;
+            }
+
+            if (!last_cmd_zero) {
+                // Wait for a cycle that actually commands zero translation
+                // before coasting to a stop, so the coast starts from a
+                // known-small residual velocity rather than mid-pulse.
                 break;
             }
 
             // Observe coast-induced drift before accepting the endpoint.
             stop();
-            settled_s = endpoint_correction_applied ? kSettleS : 0.0f;
+            settled_s = 0.0f;
             state = State::Settle;
             continue;
         }
@@ -485,16 +506,17 @@ esp_err_t precision_move(
 
             const float heading_error = wrap(
                 goal.heading_rad - cur.heading_rad);
-            if (!endpoint_correction_applied &&
+            if (correction_attempts < kMaxCorrectionAttempts &&
                 (distance_error > kPosTol ||
                  std::fabs(heading_error) > kHeadTol)) {
-                endpoint_correction_applied = true;
+                ++correction_attempts;
                 state = State::FinalRotate;
                 continue;
             }
 
             // Commit the nominal endpoint only after the measured pose has
-            // settled and any required correction has been applied once.
+            // settled and stayed within tolerance (or correction attempts
+            // are exhausted).
             const Pose corrected_goal = {
                 goal.x_m, goal.y_m, goal.heading_rad};
             const esp_err_t snap_error = pose_tracker_set_pose(
@@ -508,9 +530,16 @@ esp_err_t precision_move(
         }
         }
 
+        // Translate's main cruise only hands off to the pulsed nudge for the
+        // last kEndpointNudgeBandM of a normal approach. FinalRotate's
+        // position-correction phase, however, always uses the
+        // pulsed/tapered nudge regardless of residual size (capped at
+        // kEndpointNudgeSpeedMps for larger residuals) rather than falling
+        // back to an uncapped drive.
         const bool endpoint_nudge_band =
             distance_error > kPosTol &&
-            distance_error <= kEndpointNudgeBandM;
+            (position_correction_phase ||
+             distance_error <= kEndpointNudgeBandM);
         if (!endpoint_nudge_band) {
             endpoint_nudge_phase_s = 0.0f;
         } else {
@@ -531,8 +560,13 @@ esp_err_t precision_move(
                     kEndpointNudgeRampS;
                 const float pulse_scale = clamp(
                     std::fmin(ramp_in, ramp_out), 0.0f, 1.0f);
-                const float nudge_speed =
-                    kEndpointNudgeSpeedMps * pulse_scale;
+                // Taper the peak with remaining distance (full speed at the
+                // band's outer edge, deadband-safe floor near the tolerance)
+                // so a pulse can't travel further than the residual gap.
+                const float nudge_speed = clamp(
+                    kEndpointNudgeGain * distance_error,
+                    kEndpointNudgeMinSpeedMps, kEndpointNudgeSpeedMps) *
+                    pulse_scale;
                 cmd.vx = error_body_x / error_norm * nudge_speed;
                 cmd.vy = error_body_y / error_norm * nudge_speed;
             } else {
@@ -542,6 +576,9 @@ esp_err_t precision_move(
                 cmd.vy = 0.0f;
             }
         }
+
+        last_cmd_zero =
+            std::fabs(cmd.vx) < 1.0e-6f && std::fabs(cmd.vy) < 1.0e-6f;
 
         const esp_err_t command_err = drivetrain_set_advanced_body_velocity(
             context->drivetrain, cmd.vx, cmd.vy, cmd.omega);
