@@ -20,6 +20,12 @@ constexpr float kHeadTol = 0.0349066f;    // rad: final heading tolerance (2°)
 constexpr float kMotionOmegaRadS = 0.6f;
 constexpr float kApproachRampDistanceM = 0.03f;
 constexpr float kMinRampSpeedMps = 0.1f;
+// kApproachRampDistanceM was tuned assuming a ~kMinRampSpeedMps cruise. A
+// fixed ramp distance doesn't give faster cruises enough room to decelerate
+// before crossing into the tolerance/nudge zone, so scale it with the
+// commanded cruise speed (recovers the old fixed distance at the reference
+// speed; extends it proportionally above that).
+constexpr float kApproachRampTimeS = kApproachRampDistanceM / kMinRampSpeedMps;
 constexpr float kMinPrecisionTranslateSpeedMps = 0.05f;
 constexpr float kShortMoveNudgeS = 0.05f;
 constexpr float kSettleS = 0.15f;
@@ -176,6 +182,45 @@ bool ComputeAlignError(const TapeSensor *sensor, bool on_gap, float *error_out) 
     return true;
 }
 
+// Ramped/floored/deadband-boosted approach velocity toward a body-frame
+// position error, shared by the main translate-to-goal drive and any later
+// position correction -- so a correction decelerates the same safe way an
+// ordinary approach does, rather than driving at a raw, uncapped speed.
+DrivetrainBodyVelocity ApproachVelocity(
+    float distance_error, float error_body_x, float error_body_y,
+    float speed_limit, float approach_ramp_distance_m) {
+    float command_speed = speed_limit;
+    if (distance_error < approach_ramp_distance_m) {
+        const float floor_speed = std::fmin(kMinRampSpeedMps, speed_limit);
+        const float t = clamp(
+            distance_error / approach_ramp_distance_m, 0.0f, 1.0f);
+        command_speed = floor_speed + t * (speed_limit - floor_speed);
+    }
+    // Control each body axis independently so a small cross-track error
+    // receives enough velocity to overcome drivetrain deadband.
+    const float position_gain = std::fmax(
+        kPositionGain, command_speed / approach_ramp_distance_m);
+    DrivetrainBodyVelocity cmd = {};
+    cmd.vx = clamp(error_body_x * position_gain,
+                   -command_speed, command_speed);
+    cmd.vy = clamp(error_body_y * position_gain,
+                   -command_speed, command_speed);
+    const float command_norm = std::hypot(cmd.vx, cmd.vy);
+    if (command_norm > command_speed) {
+        const float scale = command_speed / command_norm;
+        cmd.vx *= scale;
+        cmd.vy *= scale;
+    }
+    if (command_norm > 0.0f && command_norm < kMinPrecisionTranslateSpeedMps) {
+        const float min_speed = std::fmin(
+            kMinPrecisionTranslateSpeedMps, command_speed);
+        const float scale = min_speed / command_norm;
+        cmd.vx *= scale;
+        cmd.vy *= scale;
+    }
+    return cmd;
+}
+
 }  // namespace
 
 esp_err_t precision_move(
@@ -233,6 +278,8 @@ esp_err_t precision_move(
     const float cruise_speed = std::hypot(
         target->body_velocity.vx, target->body_velocity.vy);
     const float translation_distance = std::hypot(dx, dy);
+    const float approach_ramp_distance_m = std::fmax(
+        kApproachRampDistanceM, cruise_speed * kApproachRampTimeS);
 
     enum class State { Translate, FinalRotate, Settle };
     State state = translation_distance > 1.0e-6f
@@ -376,11 +423,6 @@ esp_err_t precision_move(
         const float error_body_x = c * error_world_x + s * error_world_y;
         const float error_body_y = -s * error_world_x + c * error_world_y;
         DrivetrainBodyVelocity cmd = {};
-        // Set only once FinalRotate's heading has settled and it's handling
-        // a position residual -- not during active rotation, where mixing in
-        // translation could saturate wheel targets (see the "rotate alone"
-        // comment below).
-        bool position_correction_phase = false;
 
         switch (state) {
         case State::Translate: {
@@ -406,38 +448,11 @@ esp_err_t precision_move(
                 }
             }
 
-            float command_speed = cruise_speed;
-            if (distance_error < kApproachRampDistanceM) {
-                const float floor_speed = std::fmin(
-                    kMinRampSpeedMps, cruise_speed);
-                const float t = clamp(
-                    distance_error / kApproachRampDistanceM, 0.0f, 1.0f);
-                command_speed = floor_speed +
-                    t * (cruise_speed - floor_speed);
-            }
-            // Control each body axis independently so a small cross-track
-            // error receives enough velocity to overcome drivetrain deadband.
-            const float position_gain = std::fmax(
-                kPositionGain, command_speed / kApproachRampDistanceM);
-            cmd.vx = clamp(error_body_x * position_gain,
-                           -command_speed, command_speed);
-            cmd.vy = clamp(error_body_y * position_gain,
-                           -command_speed, command_speed);
-            const float command_norm = std::hypot(cmd.vx, cmd.vy);
-            if (command_norm > command_speed) {
-                const float scale = command_speed / command_norm;
-                cmd.vx *= scale;
-                cmd.vy *= scale;
-            }
-            if (command_norm > 0.0f &&
-                (distance_error > kPosTol || short_move_nudge_active) &&
-                command_norm < kMinPrecisionTranslateSpeedMps) {
-                const float min_speed = std::fmin(
-                    kMinPrecisionTranslateSpeedMps, command_speed);
-                const float scale = min_speed / command_norm;
-                cmd.vx *= scale;
-                cmd.vy *= scale;
-            }
+            const DrivetrainBodyVelocity approach = ApproachVelocity(
+                distance_error, error_body_x, error_body_y, cruise_speed,
+                approach_ramp_distance_m);
+            cmd.vx = approach.vx;
+            cmd.vy = approach.vy;
             const float heading_error = wrap(
                 translation_heading - cur.heading_rad);
             cmd.omega = clamp(
@@ -476,10 +491,20 @@ esp_err_t precision_move(
             }
 
             if (distance_error > kPosTol) {
-                // Once heading is settled, let the shared endpoint-nudge
-                // pulse below drive any remaining position correction,
-                // rather than a separate, uncapped-speed formula.
-                position_correction_phase = true;
+                // Once heading is settled, correct any position movement
+                // caused by the turn (or drift found by Settle) using the
+                // same ramped/decelerating drive as the main approach --
+                // never a raw, uncapped speed -- so it can't overshoot the
+                // way the coast that triggered it did. cruise_speed can be
+                // zero for a pure rotation; floor it so a correction always
+                // has some speed to work with.
+                const float correction_speed_limit = std::fmax(
+                    cruise_speed, kMinRampSpeedMps);
+                const DrivetrainBodyVelocity correction = ApproachVelocity(
+                    distance_error, error_body_x, error_body_y,
+                    correction_speed_limit, approach_ramp_distance_m);
+                cmd.vx = correction.vx;
+                cmd.vy = correction.vy;
                 break;
             }
 
@@ -530,16 +555,13 @@ esp_err_t precision_move(
         }
         }
 
-        // Translate's main cruise only hands off to the pulsed nudge for the
-        // last kEndpointNudgeBandM of a normal approach. FinalRotate's
-        // position-correction phase, however, always uses the
-        // pulsed/tapered nudge regardless of residual size (capped at
-        // kEndpointNudgeSpeedMps for larger residuals) rather than falling
-        // back to an uncapped drive.
+        // Both the main approach and any later position correction drive
+        // continuously (ApproachVelocity, ramped/decelerating) until the
+        // final kEndpointNudgeBandM, where this pulsed nudge takes over
+        // regardless of which state computed the cmd above.
         const bool endpoint_nudge_band =
             distance_error > kPosTol &&
-            (position_correction_phase ||
-             distance_error <= kEndpointNudgeBandM);
+            distance_error <= kEndpointNudgeBandM;
         if (!endpoint_nudge_band) {
             endpoint_nudge_phase_s = 0.0f;
         } else {
