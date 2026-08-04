@@ -6,6 +6,7 @@
 #include <robot_common/uart_link.h>
 
 #include "control/task/habitat_action_controller.h"
+#include "control/task/metal_detector_action_controller.h"
 #include "control/task/tower_action_controller.h"
 #include "control/task/pi_action_controller.h"
 
@@ -14,6 +15,7 @@ struct ArmActionDispatcher {
     TowerActionController *tower_controller;
     HabitatActionController *habitat_controller;
     PiActionController *pi_controller;
+    MetalDetectorActionController *metal_detector_controller;
     bool readiness_pending;
     bool uart_fault_logged;
     uint32_t last_ready_status_ms;
@@ -28,7 +30,8 @@ void arm_action_dispatcher_init(
     UartLink *drivetrain_uart,
     TowerActionController *tower_controller,
     HabitatActionController *habitat_controller,
-    PiActionController *pi_controller);
+    PiActionController *pi_controller,
+    MetalDetectorActionController *metal_detector_controller);
 
 // Services one command and both controllers. Returns true while arm status
 // packets take priority over odometry on the shared UART.

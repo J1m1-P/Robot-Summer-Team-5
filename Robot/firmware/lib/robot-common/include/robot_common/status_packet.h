@@ -72,6 +72,7 @@ typedef enum {
     STATUS_DETAIL_HABITAT_X_MOVED,
     STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED,
+    STATUS_DETAIL_METAL_DETECTED,
 } ActionStatusDetail;
 
 // Maps any arm command to its command-specific completion detail.

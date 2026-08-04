@@ -88,13 +88,16 @@ void service_command(ArmActionDispatcher *dispatcher, uint32_t now_ms) {
         habitat_action_controller_accepts(command.opcode);
     const bool is_pi =
         pi_action_controller_accepts(command.opcode);
-    const bool supported = is_tower || is_habitat || is_pi;
+    const bool is_metal_detector =
+        metal_detector_action_controller_accepts(command.opcode);
+    const bool supported = is_tower || is_habitat || is_pi || is_metal_detector;
 
     // Keep remote and physical arm actions sequential.
     const bool arm_busy =
         tower_action_controller_is_busy(dispatcher->tower_controller) ||
         habitat_action_controller_is_busy(dispatcher->habitat_controller) ||
-        pi_action_controller_is_busy(dispatcher->pi_controller);
+        pi_action_controller_is_busy(dispatcher->pi_controller) ||
+        metal_detector_action_controller_is_busy(dispatcher->metal_detector_controller);
 
     // Reject unsupported commands or commands received while busy.
     if (!supported || arm_busy) {
@@ -124,6 +127,9 @@ void service_command(ArmActionDispatcher *dispatcher, uint32_t now_ms) {
     } else if (is_habitat) {
         habitat_action_controller_start(
             dispatcher->habitat_controller, &command);
+    } else if (is_metal_detector) {
+        metal_detector_action_controller_start(
+            dispatcher->metal_detector_controller, &command);
     } else {
         pi_action_controller_start(
             dispatcher->pi_controller, &command, now_ms);
@@ -138,13 +144,15 @@ void arm_action_dispatcher_init(
     UartLink *drivetrain_uart,
     TowerActionController *tower_controller,
     HabitatActionController *habitat_controller,
-    PiActionController *pi_controller) {
+    PiActionController *pi_controller,
+    MetalDetectorActionController *metal_detector_controller) {
 
     *dispatcher = {};
     dispatcher->drivetrain_uart = drivetrain_uart;
     dispatcher->tower_controller = tower_controller;
     dispatcher->habitat_controller = habitat_controller;
     dispatcher->pi_controller = pi_controller;
+    dispatcher->metal_detector_controller = metal_detector_controller;
     dispatcher->readiness_pending = true;
     pinMode(PIN_SOLAR_PANEL_MICROSWITCH, INPUT_PULLUP);
 }
@@ -204,9 +212,14 @@ bool arm_action_dispatcher_update(
     const bool reporting_pi = pi_action_controller_update(
         dispatcher->pi_controller, now_ms);
 
+    // Keep the detector's sample window paced and report any queued result.
+    const bool reporting_metal_detector = metal_detector_action_controller_update(
+        dispatcher->metal_detector_controller, now_ms);
+
     const bool reporting_solar_panel = report_solar_panel_contact(
         dispatcher, now_ms);
 
     // Reserve the shared UART while any controller reports completion.
-    return reporting_tower || reporting_habitat || reporting_pi || reporting_pi_ready || reporting_solar_panel;
+    return reporting_tower || reporting_habitat || reporting_pi ||
+        reporting_pi_ready || reporting_metal_detector || reporting_solar_panel;
 }

@@ -6,6 +6,7 @@
 #include <robot_common/uart_link.h>
 
 #include "comm/odometry_link_producer.h"
+#include "config/metal_detector_config.h"
 #include "config/pin_map.h"
 #include "config/stepper_config.h"
 // #include "config/tof_config.h"  // ToF disabled until XSHUT wiring is restored.
@@ -13,8 +14,10 @@
 // #include "control/time_of_flight/tof_manager.h"
 #include "control/task/arm_action_dispatcher.h"
 #include "control/task/habitat_action_controller.h"
+#include "control/task/metal_detector_action_controller.h"
 #include "control/task/pi_action_controller.h"
 #include "control/task/tower_action_controller.h"
+#include "drivers/metal_detector_driver.h"
 #include "drivers/stepper_driver.h"
 
 namespace {
@@ -30,6 +33,8 @@ StepperDriver habitat_z_stepper = {};
 TowerActionController tower_action_controller = {};
 HabitatActionController habitat_action_controller = {};
 PiActionController pi_action_controller = {};
+MetalDetectorDriver metal_detector = {};
+MetalDetectorActionController metal_detector_action_controller = {};
 ArmActionDispatcher arm_action_dispatcher = {};
 // bool tof_ready = false;
 
@@ -91,13 +96,38 @@ void setup() {
         &drivetrain_uart);
     Serial.println("# PI action controller initialized");
 
+    // Metal detector init
+    esp_err_t metal_detector_error =
+        metal_detector_driver_init(&metal_detector, &METAL_DETECTOR_CONFIG);
+    if (metal_detector_error == ESP_OK) {
+        metal_detector_error = metal_detector_driver_start(&metal_detector);
+    }
+    if (metal_detector_error == ESP_OK) {
+        // Prime a nonzero baseline so an early CMD_METAL_READ (before any
+        // CMD_METAL_SET_BASELINE) doesn't compare against zero.
+        delay(METAL_DETECTOR_CONFIG.sample_period_ms);
+        metal_detector_driver_read(&metal_detector);
+        metal_detector_driver_set_comparison_count(
+            &metal_detector, metal_detector_driver_get_count(&metal_detector));
+    }
+    if (metal_detector_error != ESP_OK) {
+        Serial.printf(
+            "# Metal detector unavailable (%s); arm commands remain enabled\n",
+            esp_err_to_name(metal_detector_error));
+    }
+    metal_detector_action_controller_init(
+        &metal_detector_action_controller,
+        &drivetrain_uart,
+        &metal_detector);
+    Serial.println("# Metal detector action controller initialized");
 
     arm_action_dispatcher_init(
         &arm_action_dispatcher,
         &drivetrain_uart,
         &tower_action_controller,
         &habitat_action_controller,
-        &pi_action_controller);
+        &pi_action_controller,
+        &metal_detector_action_controller);
     Serial.println("# Arm action dispatcher initialized");
 
     // ToF disabled until the XSHUT wiring is restored.

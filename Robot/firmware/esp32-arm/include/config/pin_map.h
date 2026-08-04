@@ -52,3 +52,6 @@
 // UART to PI
 #define PIN_PI_UART_RX          39
 #define PIN_PI_UART_TX          38
+
+// Metal Detector
+#define PIN_METAL_DETECTOR      45  // Pulse input from metal detector oscillator
