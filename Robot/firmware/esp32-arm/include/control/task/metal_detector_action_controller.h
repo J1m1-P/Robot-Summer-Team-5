@@ -11,11 +11,21 @@
 
 enum MetalDetectorActionStage : uint8_t {
     METAL_ACTION_IDLE = 0,
+
+    // Baseline path.
     METAL_ACTION_WAITING_FOR_SEMI_LOWER,
     METAL_ACTION_WAITING_FOR_CLAW_OPEN,
     METAL_ACTION_SAMPLING_BASELINE,
+
+    // Rock centering and sampling path.
     METAL_ACTION_WAITING_FOR_LOWER,
+    METAL_ACTION_WAITING_FOR_CENTERING_CLAW_CLOSE,
     METAL_ACTION_SAMPLING_ROCK,
+
+    // No-metal and read-fault recovery begins by releasing at ground level.
+    METAL_ACTION_WAITING_FOR_GROUND_RELEASE,
+
+    // Continue no-metal/read-fault recovery with an empty claw.
     METAL_ACTION_WAITING_FOR_CLEARANCE,
     METAL_ACTION_WAITING_FOR_CLAW_CLOSE,
     METAL_ACTION_WAITING_FOR_FULL_LIFT,
@@ -44,7 +54,7 @@ bool metal_detector_action_controller_accepts(CommandOpcode command);
 bool metal_detector_action_controller_is_busy(
     const MetalDetectorActionController *controller);
 
-// Starts the preparation or rock-sampling half of the workflow.
+// Starts the baseline or rock-sampling workflow for one accepted command.
 void metal_detector_action_controller_start(
     MetalDetectorActionController *controller,
     const CommandPacket *command);

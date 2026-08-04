@@ -14,9 +14,29 @@ constexpr uint32_t kClawSettleMs = 100;
 ServoDriver rock_lift_servo = {};
 ServoDriver rock_claw_servo = {};
 
-// Handles millis() rollover while waiting for a servo to settle.
-bool deadline_reached(uint32_t now_ms, uint32_t deadline_ms) {
-    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+// Handles millis() rollover while waiting for the current motion to settle.
+bool stage_has_settled(
+    const MetalDetectorActionController *controller,
+    uint32_t now_ms) {
+    return static_cast<int32_t>(
+        now_ms - controller->stage_complete_ms) >= 0;
+}
+
+void store_result(
+    MetalDetectorActionController *controller,
+    StatusCode code,
+    uint8_t detail) {
+    controller->result_code = code;
+    controller->result_detail = detail;
+}
+
+void wait_for_stage(
+    MetalDetectorActionController *controller,
+    MetalDetectorActionStage stage,
+    uint32_t now_ms,
+    uint32_t settle_ms) {
+    controller->stage = stage;
+    controller->stage_complete_ms = now_ms + settle_ms;
 }
 
 // Retains a result until the shared UART can accept it.
@@ -25,16 +45,22 @@ void queue_result(
     StatusCode code,
     uint8_t detail) {
     controller->stage = METAL_ACTION_IDLE;
-    controller->result_code = code;
-    controller->result_detail = detail;
+    store_result(controller, code, detail);
     controller->report_pending = true;
 }
 
-// Starts a fresh detector window.
-bool begin_sample(MetalDetectorActionController *controller) {
+// Starts a fresh detector window and enters its polling stage.
+bool start_sample(
+    MetalDetectorActionController *controller,
+    MetalDetectorActionStage sampling_stage,
+    const char *start_message) {
     const esp_err_t error =
         metal_detector_driver_begin_sample(controller->detector);
-    if (error == ESP_OK) return true;
+    if (error == ESP_OK) {
+        controller->stage = sampling_stage;
+        Serial.println(start_message);
+        return true;
+    }
 
     Serial.printf(
         "# Metal detector sample start failed (%s)\n",
@@ -48,11 +74,96 @@ void start_empty_claw_retract(
     uint32_t now_ms,
     StatusCode result_code,
     uint8_t result_detail) {
-    controller->result_code = result_code;
-    controller->result_detail = result_detail;
+    store_result(controller, result_code, result_detail);
     servo_set_angle(&rock_lift_servo, ROCK_LIFT_SEMI_LOWERED_ANGLE);
-    controller->stage = METAL_ACTION_WAITING_FOR_CLEARANCE;
-    controller->stage_complete_ms = now_ms + kLiftSettleMs;
+    wait_for_stage(
+        controller,
+        METAL_ACTION_WAITING_FOR_CLEARANCE,
+        now_ms,
+        kLiftSettleMs);
+}
+
+// Releases a centered rock at ground level before the empty-claw retract.
+void start_ground_release(
+    MetalDetectorActionController *controller,
+    uint32_t now_ms,
+    StatusCode result_code,
+    uint8_t result_detail) {
+    store_result(controller, result_code, result_detail);
+    servo_set_position(&rock_claw_servo, SERVO_POSITION_A);
+    wait_for_stage(
+        controller,
+        METAL_ACTION_WAITING_FOR_GROUND_RELEASE,
+        now_ms,
+        kClawSettleMs);
+}
+
+// Polls either sample type and starts the matching completion/recovery path.
+void update_sample(
+    MetalDetectorActionController *controller,
+    uint32_t now_ms,
+    bool setting_baseline) {
+    MetalDetectorSample sample = {};
+    esp_err_t error = metal_detector_driver_poll_sample(
+        controller->detector, &sample);
+    if (error == ESP_ERR_NOT_FINISHED) return;
+
+    if (error == ESP_OK && setting_baseline) {
+        error = metal_detector_driver_set_baseline(
+            controller->detector, &sample);
+    }
+
+    if (error != ESP_OK) {
+        Serial.printf(
+            "# Metal detector sample failed (%s)\n",
+            esp_err_to_name(error));
+        if (setting_baseline) {
+            start_empty_claw_retract(
+                controller,
+                now_ms,
+                STATUS_FAULT,
+                CMD_METAL_SET_BASELINE);
+        } else {
+            start_ground_release(
+                controller,
+                now_ms,
+                STATUS_FAULT,
+                CMD_METAL_READ);
+        }
+        return;
+    }
+
+    if (setting_baseline) {
+        queue_result(
+            controller,
+            STATUS_ACTION_COMPLETE,
+            STATUS_DETAIL_METAL_BASELINE_SET);
+        return;
+    }
+
+    store_result(
+        controller,
+        STATUS_ACTION_COMPLETE,
+        sample.detected
+            ? STATUS_DETAIL_METAL_DETECTED
+            : STATUS_DETAIL_METAL_NOT_DETECTED);
+    if (sample.detected) {
+        servo_set_position(&rock_lift_servo, SERVO_POSITION_B);
+        wait_for_stage(
+            controller,
+            METAL_ACTION_WAITING_FOR_FULL_LIFT,
+            now_ms,
+            kLiftSettleMs);
+        Serial.println("# Metal detected; lifting centered rock");
+        return;
+    }
+
+    start_ground_release(
+        controller,
+        now_ms,
+        STATUS_ACTION_COMPLETE,
+        STATUS_DETAIL_METAL_NOT_DETECTED);
+    Serial.println("# No metal detected; opening claw");
 }
 
 }  // namespace
@@ -107,8 +218,11 @@ void metal_detector_action_controller_start(
 
     if (command->opcode == CMD_METAL_SET_BASELINE) {
         servo_set_angle(&rock_lift_servo, ROCK_LIFT_SEMI_LOWERED_ANGLE);
-        controller->stage = METAL_ACTION_WAITING_FOR_SEMI_LOWER;
-        controller->stage_complete_ms = millis() + kLiftSettleMs;
+        wait_for_stage(
+            controller,
+            METAL_ACTION_WAITING_FOR_SEMI_LOWER,
+            millis(),
+            kLiftSettleMs);
         Serial.println("# Rock arm semi-lowering before baseline");
         return;
     }
@@ -120,8 +234,11 @@ void metal_detector_action_controller_start(
     }
 
     servo_set_position(&rock_lift_servo, SERVO_POSITION_A);
-    controller->stage = METAL_ACTION_WAITING_FOR_LOWER;
-    controller->stage_complete_ms = millis() + kLiftSettleMs;
+    wait_for_stage(
+        controller,
+        METAL_ACTION_WAITING_FOR_LOWER,
+        millis(),
+        kLiftSettleMs);
     Serial.println("# Rock arm lowering to sample");
 }
 
@@ -130,103 +247,110 @@ bool metal_detector_action_controller_update(
     uint32_t now_ms) {
     if (controller == nullptr) return false;
 
-    if (controller->stage == METAL_ACTION_WAITING_FOR_SEMI_LOWER &&
-        deadline_reached(now_ms, controller->stage_complete_ms)) {
-        servo_set_position(&rock_claw_servo, SERVO_POSITION_A);
-        controller->stage = METAL_ACTION_WAITING_FOR_CLAW_OPEN;
-        controller->stage_complete_ms = now_ms + kClawSettleMs;
-        Serial.println("# Rock claw opening");
-    } else if (controller->stage == METAL_ACTION_WAITING_FOR_CLAW_OPEN &&
-               deadline_reached(now_ms, controller->stage_complete_ms)) {
-        if (begin_sample(controller)) {
-            controller->stage = METAL_ACTION_SAMPLING_BASELINE;
-            Serial.println("# Metal detector setting baseline");
-        } else {
-            start_empty_claw_retract(
-                controller,
-                now_ms,
-                STATUS_FAULT,
-                CMD_METAL_SET_BASELINE);
-        }
-    } else if (controller->stage == METAL_ACTION_WAITING_FOR_LOWER &&
-               deadline_reached(now_ms, controller->stage_complete_ms)) {
-        if (begin_sample(controller)) {
-            controller->stage = METAL_ACTION_SAMPLING_ROCK;
-            Serial.println("# Metal detector sampling rock");
-        } else {
-            start_empty_claw_retract(
-                controller,
-                now_ms,
-                STATUS_FAULT,
-                CMD_METAL_READ);
-        }
-    } else if (controller->stage == METAL_ACTION_WAITING_FOR_CLEARANCE &&
-               deadline_reached(now_ms, controller->stage_complete_ms)) {
-        servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
-        controller->stage = METAL_ACTION_WAITING_FOR_CLAW_CLOSE;
-        controller->stage_complete_ms = now_ms + kClawSettleMs;
-        Serial.println("# Closing rock claw above pickup position");
-    } else if (controller->stage == METAL_ACTION_WAITING_FOR_CLAW_CLOSE &&
-               deadline_reached(now_ms, controller->stage_complete_ms)) {
-        servo_set_position(&rock_lift_servo, SERVO_POSITION_B);
-        controller->stage = METAL_ACTION_WAITING_FOR_FULL_LIFT;
-        controller->stage_complete_ms = now_ms + kLiftSettleMs;
-        Serial.println("# Rock arm lifting fully");
-    } else if (controller->stage == METAL_ACTION_WAITING_FOR_FULL_LIFT &&
-               deadline_reached(now_ms, controller->stage_complete_ms)) {
-        queue_result(
-            controller,
-            controller->result_code,
-            controller->result_detail);
-    }
+    switch (controller->stage) {
+        case METAL_ACTION_IDLE:
+            break;
 
-    if (controller->stage == METAL_ACTION_SAMPLING_BASELINE ||
-        controller->stage == METAL_ACTION_SAMPLING_ROCK) {
-        const bool setting_baseline =
-            controller->stage == METAL_ACTION_SAMPLING_BASELINE;
-        MetalDetectorSample sample = {};
-        esp_err_t error = metal_detector_driver_poll_sample(
-            controller->detector, &sample);
-        if (error != ESP_ERR_NOT_FINISHED) {
-            if (error == ESP_OK && setting_baseline) {
-                error = metal_detector_driver_set_baseline(
-                    controller->detector, &sample);
-            }
+        case METAL_ACTION_WAITING_FOR_SEMI_LOWER:
+            if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_claw_servo, SERVO_POSITION_A);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_CLAW_OPEN,
+                now_ms,
+                kClawSettleMs);
+            Serial.println("# Rock claw opening");
+            break;
 
-            if (error != ESP_OK) {
-                Serial.printf(
-                    "# Metal detector sample failed (%s)\n",
-                    esp_err_to_name(error));
+        case METAL_ACTION_WAITING_FOR_CLAW_OPEN:
+            if (!stage_has_settled(controller, now_ms)) break;
+            if (!start_sample(
+                    controller,
+                    METAL_ACTION_SAMPLING_BASELINE,
+                    "# Metal detector setting baseline")) {
                 start_empty_claw_retract(
                     controller,
                     now_ms,
                     STATUS_FAULT,
-                    setting_baseline ? CMD_METAL_SET_BASELINE : CMD_METAL_READ);
-            } else if (setting_baseline) {
-                queue_result(
-                    controller,
-                    STATUS_ACTION_COMPLETE,
-                    STATUS_DETAIL_METAL_BASELINE_SET);
-            } else {
-                controller->result_code = STATUS_ACTION_COMPLETE;
-                controller->result_detail = sample.detected
-                    ? STATUS_DETAIL_METAL_DETECTED
-                    : STATUS_DETAIL_METAL_NOT_DETECTED;
-                if (sample.detected) {
-                    servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
-                    controller->stage = METAL_ACTION_WAITING_FOR_CLAW_CLOSE;
-                    controller->stage_complete_ms = now_ms + kClawSettleMs;
-                    Serial.println("# Metal detected; closing rock claw");
-                } else {
-                    start_empty_claw_retract(
-                        controller,
-                        now_ms,
-                        STATUS_ACTION_COMPLETE,
-                        STATUS_DETAIL_METAL_NOT_DETECTED);
-                    Serial.println("# No metal detected; lifting clear of rock");
-                }
+                    CMD_METAL_SET_BASELINE);
             }
-        }
+            break;
+
+        case METAL_ACTION_SAMPLING_BASELINE:
+            update_sample(controller, now_ms, true);
+            break;
+
+        case METAL_ACTION_WAITING_FOR_LOWER:
+            if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_CENTERING_CLAW_CLOSE,
+                now_ms,
+                kClawSettleMs);
+            Serial.println("# Rock claw closing to center rock");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_CENTERING_CLAW_CLOSE:
+            if (!stage_has_settled(controller, now_ms)) break;
+            if (!start_sample(
+                    controller,
+                    METAL_ACTION_SAMPLING_ROCK,
+                    "# Metal detector sampling centered rock")) {
+                start_ground_release(
+                    controller,
+                    now_ms,
+                    STATUS_FAULT,
+                    CMD_METAL_READ);
+            }
+            break;
+
+        case METAL_ACTION_SAMPLING_ROCK:
+            update_sample(controller, now_ms, false);
+            break;
+
+        case METAL_ACTION_WAITING_FOR_GROUND_RELEASE:
+            if (!stage_has_settled(controller, now_ms)) break;
+            start_empty_claw_retract(
+                controller,
+                now_ms,
+                controller->result_code,
+                controller->result_detail);
+            Serial.println("# Rock released; lifting to semi-lowered state");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_CLEARANCE:
+            if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_CLAW_CLOSE,
+                now_ms,
+                kClawSettleMs);
+            Serial.println("# Closing rock claw at semi-lowered state");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_CLAW_CLOSE:
+            if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_lift_servo, SERVO_POSITION_B);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_FULL_LIFT,
+                now_ms,
+                kLiftSettleMs);
+            Serial.println("# Rock arm lifting fully");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_FULL_LIFT:
+            if (!stage_has_settled(controller, now_ms)) break;
+            if (controller->result_detail == STATUS_DETAIL_METAL_DETECTED) {
+                Serial.println("# Metal rock lifted; keeping claw closed");
+            }
+            queue_result(
+                controller,
+                controller->result_code,
+                controller->result_detail);
+            break;
     }
 
     if (!controller->report_pending) return false;

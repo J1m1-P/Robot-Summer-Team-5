@@ -1,8 +1,8 @@
 /* Declares pulse-counter sampling and threshold detection for a metal detector oscillator. */
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "driver/gpio.h"
 #include "driver/pcnt.h"
@@ -34,7 +34,7 @@ typedef struct {
     float detect_threshold;
 } MetalDetectorConfig;
 
-/* Samples and runtime state --------------------------------------------- */
+/* Samples and runtime state ------------------------------------------------ */
 
 // One complete, time-normalized detector measurement.
 typedef struct {
@@ -67,7 +67,9 @@ typedef struct {
 bool metal_detector_driver_config_is_valid(const MetalDetectorConfig *config);
 
 // Configures the ESP32 pulse counter for the detector input.
-esp_err_t metal_detector_driver_init(MetalDetectorDriver *detector, const MetalDetectorConfig *config);
+esp_err_t metal_detector_driver_init(
+    MetalDetectorDriver *detector,
+    const MetalDetectorConfig *config);
 
 // Clears the counter and starts pulse counting.
 esp_err_t metal_detector_driver_start(MetalDetectorDriver *detector);
@@ -75,7 +77,7 @@ esp_err_t metal_detector_driver_start(MetalDetectorDriver *detector);
 // Pauses pulse counting and marks the detector disabled.
 esp_err_t metal_detector_driver_stop(MetalDetectorDriver *detector);
 
-/* Sampling and comparison ----------------------------------------------- */
+/* Sampling and comparison -------------------------------------------------- */
 
 // Clears the counter and starts a new, independent measurement window.
 esp_err_t metal_detector_driver_begin_sample(MetalDetectorDriver *detector);

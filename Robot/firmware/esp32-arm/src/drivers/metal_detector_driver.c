@@ -11,24 +11,10 @@
 #define METAL_DETECTOR_APB_CLK_HZ 80000000UL
 #define METAL_DETECTOR_PCNT_FILTER_MAX_CYCLES 1023
 
-// Checks pcnt resources, pin, limits, sampling, and detection tuning.
-bool metal_detector_driver_config_is_valid(const MetalDetectorConfig *config) {
-    if (config == NULL) return false;
-    if (config->pcnt_unit < 0 || config->pcnt_unit >= PCNT_UNIT_MAX) return false;
-    if (config->pcnt_channel < 0 || config->pcnt_channel >= PCNT_CHANNEL_MAX) return false;
-    if (!GPIO_IS_VALID_GPIO(config->pulse_pin)) return false;
-    if (config->high_limit <= 0 || config->low_limit != 0) return false;
-    if (config->sample_period_ms == 0) return false;
-    if (!isfinite(config->detect_threshold) || config->detect_threshold <= 0.0f) return false;
-    uint64_t filter_cycles =
-        ((uint64_t)config->glitch_filter_ns * METAL_DETECTOR_APB_CLK_HZ + 999999999ULL) /
-        1000000000ULL;
-    if (filter_cycles > METAL_DETECTOR_PCNT_FILTER_MAX_CYCLES) return false;
-    return true;
-}
-
 // Converts a nanosecond glitch filter duration to bounded APB clock cycles.
-static esp_err_t metal_detector_driver_glitch_ns_to_cycles(uint32_t glitch_filter_ns, uint16_t *cycles_out) {
+static esp_err_t glitch_ns_to_cycles(
+    uint32_t glitch_filter_ns,
+    uint16_t *cycles_out) {
     if (cycles_out == NULL) return ESP_ERR_INVALID_ARG;
 
     if (glitch_filter_ns == 0) {
@@ -36,19 +22,20 @@ static esp_err_t metal_detector_driver_glitch_ns_to_cycles(uint32_t glitch_filte
         return ESP_OK;
     }
 
-    uint64_t cycles = ((uint64_t)glitch_filter_ns * METAL_DETECTOR_APB_CLK_HZ + 999999999ULL) / 1000000000ULL;
-
-    if (cycles == 0) cycles = 1;
-
-    if (cycles > METAL_DETECTOR_PCNT_FILTER_MAX_CYCLES) return ESP_ERR_INVALID_ARG;
+    const uint64_t cycles =
+        ((uint64_t)glitch_filter_ns * METAL_DETECTOR_APB_CLK_HZ +
+         999999999ULL) /
+        1000000000ULL;
+    if (cycles > METAL_DETECTOR_PCNT_FILTER_MAX_CYCLES) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     *cycles_out = (uint16_t)cycles;
-
     return ESP_OK;
 }
 
 // Configures the pulse-counter channel to count falling edges only.
-static esp_err_t metal_detector_driver_configure_channel(const MetalDetectorConfig *config) {
+static esp_err_t configure_channel(const MetalDetectorConfig *config) {
     pcnt_config_t pcnt_config = {
         .pulse_gpio_num = config->pulse_pin,
         .ctrl_gpio_num = PCNT_PIN_NOT_USED,
@@ -62,20 +49,48 @@ static esp_err_t metal_detector_driver_configure_channel(const MetalDetectorConf
         .hctrl_mode = PCNT_MODE_KEEP,
 
         .counter_h_lim = config->high_limit,
-        .counter_l_lim = config->low_limit
+        .counter_l_lim = config->low_limit,
     };
 
     return pcnt_unit_config(&pcnt_config);
 }
 
+// Checks PCNT resources, pin, limits, sampling, and detection tuning.
+bool metal_detector_driver_config_is_valid(const MetalDetectorConfig *config) {
+    if (config == NULL) return false;
+    if (config->pcnt_unit < 0 || config->pcnt_unit >= PCNT_UNIT_MAX) {
+        return false;
+    }
+    if (config->pcnt_channel < 0 ||
+        config->pcnt_channel >= PCNT_CHANNEL_MAX) {
+        return false;
+    }
+    if (!GPIO_IS_VALID_GPIO(config->pulse_pin)) return false;
+    if (config->high_limit <= 0 || config->low_limit != 0) return false;
+    if (config->sample_period_ms == 0) return false;
+    if (!isfinite(config->detect_threshold) ||
+        config->detect_threshold <= 0.0f) {
+        return false;
+    }
+
+    uint16_t filter_cycles = 0;
+    return glitch_ns_to_cycles(
+        config->glitch_filter_ns, &filter_cycles) == ESP_OK;
+}
+
 // Configures the PCNT channel and optional glitch filter for the detector input.
-esp_err_t metal_detector_driver_init(MetalDetectorDriver *detector, const MetalDetectorConfig *config) {
-    if (detector == NULL || !metal_detector_driver_config_is_valid(config)) return ESP_ERR_INVALID_ARG;
+esp_err_t metal_detector_driver_init(
+    MetalDetectorDriver *detector,
+    const MetalDetectorConfig *config) {
+    if (detector == NULL ||
+        !metal_detector_driver_config_is_valid(config)) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     memset(detector, 0, sizeof(*detector));
     detector->config = config;
 
-    esp_err_t err = metal_detector_driver_configure_channel(config);
+    esp_err_t err = configure_channel(config);
     if (err != ESP_OK) return err;
 
     err = pcnt_counter_pause(config->pcnt_unit);
@@ -87,7 +102,8 @@ esp_err_t metal_detector_driver_init(MetalDetectorDriver *detector, const MetalD
     if (config->glitch_filter_ns > 0) {
         uint16_t filter_cycles = 0;
 
-        err = metal_detector_driver_glitch_ns_to_cycles(config->glitch_filter_ns, &filter_cycles);
+        err = glitch_ns_to_cycles(
+            config->glitch_filter_ns, &filter_cycles);
         if (err != ESP_OK) return err;
 
         err = pcnt_set_filter_value(config->pcnt_unit, filter_cycles);
@@ -95,20 +111,20 @@ esp_err_t metal_detector_driver_init(MetalDetectorDriver *detector, const MetalD
 
         err = pcnt_filter_enable(config->pcnt_unit);
         if (err != ESP_OK) return err;
-    }
-    else {
+    } else {
         err = pcnt_filter_disable(config->pcnt_unit);
         if (err != ESP_OK) return err;
     }
 
     detector->initialized = true;
-
     return ESP_OK;
 }
 
 // Clears the hardware counter and resumes counting.
 esp_err_t metal_detector_driver_start(MetalDetectorDriver *detector) {
-    if (detector == NULL || !detector->initialized) return ESP_ERR_INVALID_ARG;
+    if (detector == NULL || !detector->initialized) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     esp_err_t err = pcnt_counter_clear(detector->config->pcnt_unit);
     if (err != ESP_OK) return err;
@@ -118,20 +134,20 @@ esp_err_t metal_detector_driver_start(MetalDetectorDriver *detector) {
 
     detector->enabled = true;
     detector->sampling = false;
-
     return ESP_OK;
 }
 
 // Pauses the hardware counter and marks the detector disabled.
 esp_err_t metal_detector_driver_stop(MetalDetectorDriver *detector) {
-    if (detector == NULL || !detector->initialized) return ESP_ERR_INVALID_ARG;
+    if (detector == NULL || !detector->initialized) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     esp_err_t err = pcnt_counter_pause(detector->config->pcnt_unit);
     if (err != ESP_OK) return err;
 
     detector->enabled = false;
     detector->sampling = false;
-
     return ESP_OK;
 }
 
@@ -173,10 +189,10 @@ esp_err_t metal_detector_driver_poll_sample(
         return ESP_ERR_INVALID_STATE;
     }
 
-    const int64_t now = esp_timer_get_time();
+    const int64_t now_us = esp_timer_get_time();
     const int64_t period_us =
         (int64_t)detector->config->sample_period_ms * 1000;
-    if (now - detector->sample_start_time_us < period_us) {
+    if (now_us - detector->sample_start_time_us < period_us) {
         return ESP_ERR_NOT_FINISHED;
     }
 
@@ -194,7 +210,8 @@ esp_err_t metal_detector_driver_poll_sample(
     if (resume_err != ESP_OK) return resume_err;
     if (raw_count <= 0) return ESP_ERR_INVALID_RESPONSE;
 
-    const uint32_t window_us = (uint32_t)(now - detector->sample_start_time_us);
+    const uint32_t window_us =
+        (uint32_t)(now_us - detector->sample_start_time_us);
     const float frequency_hz =
         (float)raw_count * 1000000.0f / (float)window_us;
 
@@ -231,7 +248,9 @@ esp_err_t metal_detector_driver_set_baseline(
         return ESP_ERR_INVALID_STATE;
     }
     if (sample->count <= 0 || !isfinite(sample->frequency_hz) ||
-        sample->frequency_hz <= 0.0f) return ESP_ERR_INVALID_RESPONSE;
+        sample->frequency_hz <= 0.0f) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
 
     detector->baseline_frequency_hz = sample->frequency_hz;
     detector->baseline_valid = true;
@@ -249,7 +268,5 @@ bool metal_detector_driver_has_baseline(const MetalDetectorDriver *detector) {
 
 // Reports whether the detector hardware counter is running.
 bool metal_detector_driver_is_enabled(const MetalDetectorDriver *detector) {
-    if (detector == NULL || !detector->initialized) return false;
-
-    return detector->enabled;
+    return detector != NULL && detector->initialized && detector->enabled;
 }

@@ -13,9 +13,10 @@ servos. The drivetrain sends two commands after approaching a rock:
 
 1. `CMD_METAL_SET_BASELINE` -- semi-lower the arm, open the claw, and capture
    the no-metal reference.
-2. `CMD_METAL_READ` -- lower the arm and sample the rock. If metal is detected,
-   close the claw and fully lift. Otherwise, lift to the intermediate position,
-   close the empty claw, and then fully lift.
+2. `CMD_METAL_READ` -- fully lower the arm, close the claw to center the rock,
+   and then sample it. If metal is detected, fully lift it and keep the claw
+   closed. Otherwise, open the claw at ground level, lift to the semi-lowered
+   position, close the empty claw, and then fully lift.
 
 ## Hardware
 
@@ -48,8 +49,9 @@ computing them from a datasheet frequency.
   arm and claw settle and the baseline sample succeeds, with detail
   `STATUS_DETAIL_METAL_BASELINE_SET`.
 - `CMD_METAL_READ` -- no value payload. Completion is sent after the arm is
-  fully lifted, with detail `STATUS_DETAIL_METAL_DETECTED` if the rock was
-  picked up, else `STATUS_DETAIL_METAL_NOT_DETECTED`.
+  fully lifted, with detail `STATUS_DETAIL_METAL_DETECTED` if the rock remains
+  held by the closed claw, else `STATUS_DETAIL_METAL_NOT_DETECTED` after the
+  rock is released and the empty claw retracts.
 - PCNT errors, a zero-pulse sample, or a missing baseline reply `STATUS_FAULT`.
   Other arm commands remain available.
 
