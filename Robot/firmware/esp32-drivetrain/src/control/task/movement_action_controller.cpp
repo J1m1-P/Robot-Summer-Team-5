@@ -11,6 +11,7 @@
 
 #include "control/line_following/line_follower.hpp"
 #include <Arduino.h>
+#include "config/pin_map.h"
 #include "control/motion/translator.hpp"
 
 namespace {
@@ -103,8 +104,6 @@ bool action_requires_nonnegative_distance(MovementAction action) {
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE:
         case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE:
-        case MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR:
-        case MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL:
             return true;
         default:
             return false;
@@ -115,6 +114,11 @@ bool action_requires_positive_sweep(MovementAction action) {
     return action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE ||
            action == MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE ||
            action == MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE;
+}
+
+bool action_requires_positive_distance(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR ||
+           action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL;
 }
 
 }  // namespace
@@ -137,10 +141,11 @@ extern "C" void movement_action_controller_notify_locator_contact(
     }
 }
 
-extern "C" void movement_action_controller_notify_solar_panel_contact(
+extern "C" void movement_action_controller_poll_solar_panel_contact(
     MovementActionController *controller) {
     if (controller != nullptr &&
-        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL) {
+        controller->action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL &&
+        digitalRead(PIN_SOLAR_PANEL_MICROSWITCH) == HIGH) {
         controller->solar_panel_contact_detected = true;
     }
 }
@@ -257,6 +262,7 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
         !std::isfinite(action_value) ||
         !std::isfinite(speed) || speed < 0.0f ||
         (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
+        (action_requires_positive_distance(action) && action_value <= 0.0f) ||
         (action_requires_positive_sweep(action) && action_value <= 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -292,7 +298,8 @@ extern "C" bool movement_action_controller_update(
 
     // Movement actions use three controller parameters:
     // action selects the maneuver; action_value is its distance in metres or
-    // rotation in degrees (zero when sensor feedback determines the stop).
+    // rotation in degrees. Contact-driven moves use it as a positive safety
+    // bound and still finish only when their microswitch is pressed.
     // speed is optional in m/s, or rad/s for rotation; zero uses the default.
     switch (controller->action) {
         case MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE:

@@ -360,24 +360,6 @@ void test_arm_fault_stops_sequence() {
     TEST_ASSERT_FALSE(controller->running);
 }
 
-void test_solar_panel_uart_status_notifies_active_approach() {
-    ControllerFixture fixture = {};
-    RobotSequenceController *controller = &fixture.controller;
-    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        movement_action_controller_init(
-            &controller->movement_action_controller,
-            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
-            1.0f));
-
-    queue_status(STATUS_SOLAR_PANEL_CONTACT, STATUS_DETAIL_NONE);
-    deliver_frame(controller, 100);
-
-    TEST_ASSERT_TRUE(
-        controller->movement_action_controller.solar_panel_contact_detected);
-}
-
 void test_update_drains_all_uart_packets_and_updates_pose_once() {
     ControllerFixture fixture = {};
     TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
@@ -473,6 +455,18 @@ void test_movement_action_rejects_invalid_values() {
             &controller,
             MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
             -0.1f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
+            0.0f));
 }
 
 void test_locator_contact_notifies_only_locator_approach() {
@@ -482,7 +476,7 @@ void test_locator_contact_notifies_only_locator_approach() {
         movement_action_controller_init(
             &controller,
             MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
-            0.0f));
+            1.0f));
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
 
     movement_action_controller_notify_locator_contact(&controller);
@@ -496,29 +490,6 @@ void test_locator_contact_notifies_only_locator_approach() {
             90.0f));
     movement_action_controller_notify_locator_contact(&controller);
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
-}
-
-void test_solar_panel_contact_notifies_only_solar_panel_approach() {
-    MovementActionController controller = {};
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        movement_action_controller_init(
-            &controller,
-            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
-            1.0f));
-    TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
-
-    movement_action_controller_notify_solar_panel_contact(&controller);
-    TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
-
-    TEST_ASSERT_EQUAL(
-        ESP_OK,
-        movement_action_controller_init(
-            &controller,
-            MOVEMENT_ACTION_ROTATE,
-            90.0f));
-    movement_action_controller_notify_solar_panel_contact(&controller);
-    TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
 }
 
 void test_tape_distance_actions_route_to_matching_sensor_direction() {
@@ -596,12 +567,10 @@ int main(int, char **) {
     RUN_TEST(test_sequence_waits_for_arm_then_starts_first_action);
     RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
     RUN_TEST(test_arm_fault_stops_sequence);
-    RUN_TEST(test_solar_panel_uart_status_notifies_active_approach);
     RUN_TEST(test_update_drains_all_uart_packets_and_updates_pose_once);
     RUN_TEST(test_blocking_movement_services_inputs_without_recursive_step_update);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_locator_contact_notifies_only_locator_approach);
-    RUN_TEST(test_solar_panel_contact_notifies_only_solar_panel_approach);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();

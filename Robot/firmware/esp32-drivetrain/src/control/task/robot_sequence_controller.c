@@ -61,9 +61,9 @@ static const RobotSequenceStep kRobotSequence[] = {
     // Teletubbies / Rock Path
 
     // Going to rock 1
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 0.05, 0.5}, 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.40, 0.4}, 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.03, 0.2}, 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_DISTANCE}, 0.05, 0.5},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.40, 0.4},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.03, 0.2},
 
 
     // Scan at start
@@ -279,13 +279,17 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
      
     // /*------------------------ Solar Panel Code Below ------------------------*/
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.30f, 0.3f},   // move back to solar panel
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},    // rotate so spikes are aligned
-    // // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.31f},                                   // move claw to position in Y
-    // // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.9f},                                   // move claw to position in X
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                   // move claw to position in Y
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                   // move claw to position in X
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.5f, 0.25f},   // move and remove cover
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.25f, 0.4f},           // move back to solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                   // rotate so hook is aligned
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.2f},                                         // move claw to position in Z (individual testing)
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.9f},                                         // move claw to position in X (individual testing)
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.06f},                                           // move claw to position in Z
+    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                            // move claw to position in X
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.25f},           // move in front of solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL}, 1.0f, 0.2f},   // move left up to 1 m or until the solar-panel switch is pressed
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.4f, 0.25f},            // pull solar panel cover away
 };
 
 static const size_t kRobotSequenceLength =
@@ -433,12 +437,6 @@ static void handle_sequence_frame(
         if (status.code == STATUS_LOCATOR_CONTACT) {
             controller->locator_contact_pending = true;
             movement_action_controller_notify_locator_contact(
-                &controller->movement_action_controller);
-            return;
-        }
-
-        if (status.code == STATUS_SOLAR_PANEL_CONTACT) {
-            movement_action_controller_notify_solar_panel_contact(
                 &controller->movement_action_controller);
             return;
         }
@@ -709,6 +707,11 @@ esp_err_t robot_sequence_controller_update(
     // Always service communication and pose, even after the sequence stops.
     const esp_err_t service_error = service_inputs(controller, now_ms);
     if (service_error != ESP_OK) return service_error;
+
+    // Blocking precision moves re-enter this update every 5 ms, so polling
+    // here makes the local microswitch part of the same control cycle.
+    movement_action_controller_poll_solar_panel_contact(
+        &controller->movement_action_controller);
 
     // A blocking movement calls this function from its own control loop.
     // That nested call services inputs above, then stops here.

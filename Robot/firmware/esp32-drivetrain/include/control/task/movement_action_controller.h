@@ -65,7 +65,8 @@ esp_err_t movement_action_controller_init(
     float action_value);
 
 // Prepares an action with an optional movement speed. Translation and tape
-// actions use m/s; rotation actions use rad/s. Zero selects the default.
+// actions use m/s; rotation actions use rad/s. Zero speed selects the default.
+// Microswitch-driven moves require a positive maximum distance.
 esp_err_t movement_action_controller_init_with_speed(
     MovementActionController *controller,
     MovementAction action,
@@ -100,8 +101,8 @@ void movement_action_controller_set_precision_move_context(
 void movement_action_controller_notify_locator_contact(
     MovementActionController *controller);
 
-// Called when the arm ESP reports that the solar-panel microswitch was pressed.
-void movement_action_controller_notify_solar_panel_contact(
+// Polls and latches the drivetrain's local solar-panel microswitch.
+void movement_action_controller_poll_solar_panel_contact(
     MovementActionController *controller);
 
 // Anchors subsequent precision actions to one world-frame sequence origin.
