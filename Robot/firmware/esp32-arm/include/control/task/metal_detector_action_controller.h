@@ -16,15 +16,17 @@ enum MetalDetectorActionStage : uint8_t {
     METAL_ACTION_WAITING_FOR_ARM_LOWER,
     METAL_ACTION_WAITING_FOR_ARM_CLAW_OPEN,
 
-    // Read path: baseline, close, read position, and sample.
+    // Read path: baseline, preread close, read position, and sample.
     METAL_ACTION_SAMPLING_BASELINE,
-    METAL_ACTION_WAITING_FOR_BASELINE_CLAW_CLOSE,
+    METAL_ACTION_WAITING_FOR_PREREAD_POSITION,
+    METAL_ACTION_WAITING_FOR_PREREAD_CLAW_CLOSE,
     METAL_ACTION_WAITING_FOR_READ_POSITION,
 
     METAL_ACTION_SAMPLING_ROCK,
 
-    // No-metal/read-fault recovery: down, close, then up.
+    // No-metal/read-fault recovery: down, open, close, then up.
     METAL_ACTION_WAITING_FOR_DOWN_POSITION,
+    METAL_ACTION_WAITING_FOR_DOWN_CLAW_OPEN,
     METAL_ACTION_WAITING_FOR_UP_CLAW_CLOSE,
     METAL_ACTION_WAITING_FOR_FULL_LIFT,
 };

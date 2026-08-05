@@ -13,9 +13,11 @@ servos. A read command performs the complete rock workflow:
 
 1. Move the arm down and open the claw.
 2. Capture a fresh no-metal baseline.
-3. Close the claw, move to the read position, and sample the rock.
+3. Move to the preread position, close the claw, then move to the read
+   position and sample the rock.
 4. If metal is detected, keep the claw closed and lift to up.
-5. If no metal is detected, move down, close the claw, and then lift to up.
+5. If no metal is detected, move down, open and close the claw, and then lift
+   to up.
 
 After a positive detection, subsequent `CMD_METAL_READ` commands report the
 positive result immediately and do not repeat the claw workflow. The latch is
