@@ -407,6 +407,6 @@ bool follow_tape_until_all_channels_average_heading(
     if (average_heading_rad_out == nullptr) return false;
     return follow_tape_impl(
         ctx, Direction::PX, speed_mps, StopCondition::ALL_CHANNELS_ON, 0.0f,
-        timeout_s, TapeFollowMode::FRONT_BACK_ALIGNED,
+        timeout_s, TapeFollowMode::SINGLE_SENSOR,
         TapeMarkerSensor::AUTO, average_heading_rad_out);
 }
