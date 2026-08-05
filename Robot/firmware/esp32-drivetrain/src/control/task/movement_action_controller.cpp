@@ -49,6 +49,13 @@ constexpr TapeStopSpec kFrontLeftTapeStopSpec = {
     // During a CCW sweep, the left detector reaches the tape first.
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_3,
 };
+constexpr TapeStopSpec kFrontCenterTapeStopSpec = {
+    .sensor_mask = 1U << 0,  // front/PX sensor
+    .required_sensor_count = 1,
+    .channel_mask = (1U << TAPE_SENSOR_CHANNEL_1) |
+                    (1U << TAPE_SENSOR_CHANNEL_2),
+    .required_channel_count = 2,
+};
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
 PrecisionMoveContext *g_precision_move_ctx = nullptr;
@@ -135,6 +142,40 @@ bool follow_tape_action(
                 kPrecisionTimeoutS) != ESP_OK) {
             return false;
         }
+    }
+    sync_planned_pose();
+    return true;
+}
+
+bool follow_tape_average_heading_action(LineFollowerContext *context,
+                                        float speed_mps) {
+    float average_heading_rad = 0.0f;
+    if (!follow_tape_until_all_channels_average_heading(
+            context, speed_mps, kTapeFollowTimeoutS,
+            &average_heading_rad)) {
+        return false;
+    }
+
+    // First let the endpoint settle without changing its measured heading.
+    if (g_precision_move_ctx == nullptr) return false;
+    const PrecisionMoveTarget settle_target = {};
+    if (precision_move(g_precision_move_ctx, &settle_target,
+                       kPrecisionTimeoutS) != ESP_OK) {
+        return false;
+    }
+
+    // Rotate in place to the averaged world-frame heading. precision_move()
+    // also re-anchors the pose to this exact heading when it completes.
+    const Pose endpoint = pose_tracker_get_pose(
+        context->sequence_controller->pose_tracker);
+    const PrecisionMoveTarget heading_target = {
+        .world_goal_enabled = true,
+        .world_goal = {
+            endpoint.x_m, endpoint.y_m, average_heading_rad},
+    };
+    if (precision_move(g_precision_move_ctx, &heading_target,
+                       kPrecisionTimeoutS) != ESP_OK) {
+        return false;
     }
     sync_planned_pose();
     return true;
@@ -514,6 +555,14 @@ extern "C" bool movement_action_controller_update(
             }
             return false;
 
+        case MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON_AVERAGE_HEADING:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_average_heading_action(
+                    g_line_follower_ctx,
+                    speed_or_default(controller->speed, kTapeFollowSpeedMps));
+            }
+            return false;
+
         case MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT:
             if (g_line_follower_ctx != nullptr) {
                 return follow_tape_action(
@@ -647,6 +696,18 @@ extern "C" bool movement_action_controller_update(
             return precision_action(
                 0.0f, kTapeSeekMaxDistanceM, 0.0f,
                 &kFrontLeftTapeStopSpec,
+                speed_or_default(
+                    controller->speed,
+                    controller->action_value > 0.0f
+                        ? controller->action_value : kPrecisionVyMps));
+
+        // Strafe in +Y until both center channels on the PX/front module are
+        // active. action_value retains the existing convention here: a
+        // positive value overrides the default strafe speed.
+        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_CENTER_TAPE:
+            return precision_action(
+                0.0f, kTapeSeekMaxDistanceM, 0.0f,
+                &kFrontCenterTapeStopSpec,
                 speed_or_default(
                     controller->speed,
                     controller->action_value > 0.0f

@@ -63,6 +63,14 @@ float wrap(float a) {
 constexpr float kApproachRampDistanceM = 0.03f;
 
 constexpr float kMinRampSpeedMps = 0.1f;
+constexpr float kHeadingWindowStartFromEndM = 0.13f;
+constexpr float kHeadingWindowEndFromEndM = 0.03f;
+constexpr size_t kHeadingWindowCapacity = 512;
+
+struct HeadingSample {
+    float distance_m;
+    float heading_rad;
+};
 
 struct DirectionInfo {
     int sensor_index;
@@ -130,11 +138,44 @@ bool AllChannelsOn(const TapeSensor *sensor) {
            sensor->channel_2 && sensor->channel_3;
 }
 
+bool CircularMeanHeading(const HeadingSample *samples, size_t sample_count,
+                         float endpoint_distance_m, float *heading_out) {
+    if (samples == nullptr || sample_count == 0 || heading_out == nullptr) {
+        return false;
+    }
+
+    float sine_sum = 0.0f;
+    float cosine_sum = 0.0f;
+    size_t selected = 0;
+    const float window_min = endpoint_distance_m -
+        kHeadingWindowStartFromEndM;
+    const float window_max = endpoint_distance_m -
+        kHeadingWindowEndFromEndM;
+    for (size_t i = 0; i < sample_count; ++i) {
+        if (samples[i].distance_m < window_min ||
+            samples[i].distance_m > window_max) {
+            continue;
+        }
+        sine_sum += std::sin(samples[i].heading_rad);
+        cosine_sum += std::cos(samples[i].heading_rad);
+        ++selected;
+    }
+    if (selected == 0 ||
+        (std::fabs(sine_sum) < 1.0e-6f &&
+         std::fabs(cosine_sum) < 1.0e-6f)) {
+        return false;
+    }
+    *heading_out = std::atan2(sine_sum, cosine_sum);
+    return std::isfinite(*heading_out);
+}
+
 }  // namespace
 
-bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
-                  StopCondition stop_type, float stop_value, float timeout_s,
-                  TapeFollowMode mode, TapeMarkerSensor marker_sensor) {
+static bool follow_tape_impl(
+    LineFollowerContext *ctx, Direction dir, float speed_mps,
+    StopCondition stop_type, float stop_value, float timeout_s,
+    TapeFollowMode mode, TapeMarkerSensor marker_sensor,
+    float *average_heading_rad_out) {
     if (ctx == nullptr || ctx->drivetrain == nullptr ||
         ctx->sequence_controller == nullptr ||
         ctx->sequence_controller->pose_tracker == nullptr ||
@@ -167,6 +208,8 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
     float search_start_heading_rad = 0.0f;
     float smoothed_omega = 0.0f;
     Pose previous_pose = pose_tracker_get_pose(controller->pose_tracker);
+    HeadingSample heading_samples[kHeadingWindowCapacity] = {};
+    size_t heading_sample_count = 0;
     StallEscalation stall = {};
 
     while (true) {
@@ -195,6 +238,16 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
             current_pose.y_m - previous_pose.y_m);
         cumulative_distance_m += step_distance_m;
         previous_pose = current_pose;
+        if (average_heading_rad_out != nullptr) {
+            if (heading_sample_count == kHeadingWindowCapacity) {
+                for (size_t i = 1; i < heading_sample_count; ++i) {
+                    heading_samples[i - 1] = heading_samples[i];
+                }
+                --heading_sample_count;
+            }
+            heading_samples[heading_sample_count++] = {
+                cumulative_distance_m, current_pose.heading_rad};
+        }
 
         // This stop condition applies to the sensor module used to follow
         // the current direction: front for PX, back for MX, and side for PY.
@@ -202,6 +255,12 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         // immediate on the first sample where all four channels are on tape.
         if (stop_type == StopCondition::ALL_CHANNELS_ON &&
             AllChannelsOn(ctx->sensors[steer.sensor_index])) {
+            if (average_heading_rad_out != nullptr &&
+                !CircularMeanHeading(heading_samples, heading_sample_count,
+                                     cumulative_distance_m,
+                                     average_heading_rad_out)) {
+                return Abort(false);
+            }
             return Abort(true);
         }
 
@@ -333,4 +392,21 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
         const bool result = Abort(true);
         return result;
     }
+}
+
+bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
+                 StopCondition stop_type, float stop_value, float timeout_s,
+                 TapeFollowMode mode, TapeMarkerSensor marker_sensor) {
+    return follow_tape_impl(ctx, dir, speed_mps, stop_type, stop_value,
+                            timeout_s, mode, marker_sensor, nullptr);
+}
+
+bool follow_tape_until_all_channels_average_heading(
+    LineFollowerContext *ctx, float speed_mps, float timeout_s,
+    float *average_heading_rad_out) {
+    if (average_heading_rad_out == nullptr) return false;
+    return follow_tape_impl(
+        ctx, Direction::PX, speed_mps, StopCondition::ALL_CHANNELS_ON, 0.0f,
+        timeout_s, TapeFollowMode::FRONT_BACK_ALIGNED,
+        TapeMarkerSensor::AUTO, average_heading_rad_out);
 }

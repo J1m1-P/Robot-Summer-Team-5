@@ -243,7 +243,8 @@ static const RobotSequenceStep kRobotSequence[] = {
     // /* Go back on main tape and move to habitat pickup */
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE}, 170.0f, 1.5f},          // Rotate back onto main tape
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.1f, 0.4f},               // Follow fast on tape
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Slow down for final approach
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON_AVERAGE_HEADING}, 0.0f, 0.2f}, // Slow down and settle heading
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_CENTER_TAPE}, 0.0f, 0.2f},         // Strafe until PX center channels align
 
     // /* Go off the tape for the habitats 3 and 4*/
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 10.0f, 0.3f},            // Angular Adjustment

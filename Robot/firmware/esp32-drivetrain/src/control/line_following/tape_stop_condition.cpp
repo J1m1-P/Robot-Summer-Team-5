@@ -4,18 +4,20 @@
 
 namespace {
 
-bool sensor_channel_active(const TapeSensor *sensor, uint8_t channel_mask) {
+bool sensor_channel_active(const TapeSensor *sensor, uint8_t channel_mask,
+                           uint8_t required_channel_count) {
     if (sensor == nullptr) return false;
     const bool channels[TAPE_SENSOR_CHANNEL_COUNT] = {
         sensor->channel_0, sensor->channel_1,
         sensor->channel_2, sensor->channel_3,
     };
+    int active_count = 0;
     for (int channel = 0; channel < TAPE_SENSOR_CHANNEL_COUNT; ++channel) {
         if ((channel_mask & (1U << channel)) != 0U && channels[channel]) {
-            return true;
+            ++active_count;
         }
     }
-    return false;
+    return active_count >= required_channel_count;
 }
 
 bool sensor_mask_active(
@@ -25,7 +27,8 @@ bool sensor_mask_active(
     int active_count = 0;
     for (int index = 0; index < TAPE_SENSOR_MODULE_COUNT; ++index) {
         if ((spec->sensor_mask & (1U << index)) != 0U &&
-            sensor_channel_active(sensors[index], channel_mask)) {
+            sensor_channel_active(sensors[index], channel_mask,
+                                  spec->required_channel_count)) {
             ++active_count;
         }
     }
@@ -43,6 +46,9 @@ bool tape_stop_spec_is_valid(const TapeStopSpec *spec) {
             __builtin_popcount(static_cast<unsigned>(spec->sensor_mask)) ||
         spec->channel_mask == 0U ||
         (spec->channel_mask & ~((1U << TAPE_SENSOR_CHANNEL_COUNT) - 1U)) != 0U ||
+        spec->required_channel_count == 0U ||
+        spec->required_channel_count >
+            __builtin_popcount(static_cast<unsigned>(spec->channel_mask)) ||
         spec->gap_edge_channel_mask == 0U ||
         (spec->gap_edge_channel_mask &
             ~((1U << TAPE_SENSOR_CHANNEL_COUNT) - 1U)) != 0U ||
