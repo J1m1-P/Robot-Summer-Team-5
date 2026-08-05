@@ -9,14 +9,18 @@ and compares that frequency against a previously sampled baseline. A large
 enough deviation from the baseline is reported as a detection.
 
 The action controller combines detector samples with the rock lift and claw
-servos. The drivetrain sends two commands after approaching a rock:
+servos. A read command performs the complete rock workflow:
 
-1. `CMD_METAL_SET_BASELINE` -- semi-lower the arm, open the claw, and capture
-   the no-metal reference.
-2. `CMD_METAL_READ` -- fully lower the arm, close the claw to center the rock,
-   and then sample it. If metal is detected, fully lift it and keep the claw
-   closed. Otherwise, open the claw at ground level, lift to the semi-lowered
-   position, close the empty claw, and then fully lift.
+1. Move the arm down and open the claw.
+2. Capture a fresh no-metal baseline.
+3. Close the claw, move to the read position, and sample the rock.
+4. If metal is detected, keep the claw closed and lift to up.
+5. If no metal is detected, move down, close the claw, and then lift to up.
+
+After a positive detection, subsequent `CMD_METAL_READ` commands report the
+positive result immediately and do not repeat the claw workflow. The latch is
+cleared when the arm controller is reinitialized.
+
 
 ## Hardware
 
@@ -41,25 +45,20 @@ computing them from a datasheet frequency.
 | `include/config/metal_detector_config.h` / `src/config/metal_detector_config.c` | Pin, PCNT limits, sample window, and threshold tuning. |
 | `include/control/task/metal_detector_action_controller.h` / `.cpp` | Runs the staged rock-servo and detector workflow, then queues the completion reply. |
 | `src/main.cpp` | Initializes and starts the detector driver; the action controller captures the pose-correct baseline. |
-| `src/control/task/arm_action_dispatcher.cpp` | Routes the two metal detector opcodes to the action controller alongside Tower/Habitat/Pi. |
+| `src/control/task/arm_action_dispatcher.cpp` | Routes the metal detector read command to the action controller alongside Tower/Habitat/Pi. |
 
 ## Wire Protocol
 
-- `CMD_METAL_SET_BASELINE` -- no value payload. Completion is sent after the
-  arm and claw settle and the baseline sample succeeds, with detail
-  `STATUS_DETAIL_METAL_BASELINE_SET`.
-- `CMD_METAL_READ` -- no value payload. Completion is sent after the arm is
-  fully lifted, with detail `STATUS_DETAIL_METAL_DETECTED` if the rock remains
-  held by the closed claw, else `STATUS_DETAIL_METAL_NOT_DETECTED` after the
-  rock is released and the empty claw retracts.
-- PCNT errors, a zero-pulse sample, or a missing baseline reply `STATUS_FAULT`.
+- `CMD_METAL_READ` -- no value payload. The command establishes a fresh
+  baseline before sampling and completes after the arm is fully lifted. The
+  claw is closed and settled before every movement to the up position.
+- PCNT errors or a zero-pulse sample reply `STATUS_FAULT`.
   Other arm commands remain available.
 
 ## Known Limitations
 
-- **Not yet wired into any sequence.** `robot_sequence_controller.c` does not
-  send either opcode today, but its completion logic accepts both explicit
-  read outcomes when the two steps are added after a rock approach.
+- The drivetrain test sequence currently issues three stationary read commands
+  with five-second delays between them.
 - **GPIO 45 is an ESP32-S3 strapping pin.** Confirm the detector output is not
   driving an unsafe strap level during reset, or move the signal to a wiring-
   approved non-strapping GPIO.

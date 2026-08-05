@@ -262,10 +262,6 @@ esp_err_t metal_detector_driver_set_baseline(
     return ESP_OK;
 }
 
-bool metal_detector_driver_has_baseline(const MetalDetectorDriver *detector) {
-    return detector != NULL && detector->initialized && detector->baseline_valid;
-}
-
 // Reports whether the detector hardware counter is running.
 bool metal_detector_driver_is_enabled(const MetalDetectorDriver *detector) {
     return detector != NULL && detector->initialized && detector->enabled;

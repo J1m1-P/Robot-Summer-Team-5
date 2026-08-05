@@ -45,6 +45,7 @@ typedef struct {
 } RobotSequenceStep;
 
 static const RobotSequenceStep kRobotSequence[] = {
+#if 0  // Original full-course sequence disabled for stationary rock-read testing.
     /* Arm Homing Sequence. Use homing blocks and 
     position habitat claws just before the start line */
 
@@ -305,6 +306,14 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.3f, 0.25f},            // pull solar panel cover away
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.2f, 0.25f},            // pull solar panel cover away
+#endif
+
+    // Stationary rock-read test: each read owns its baseline and claw workflow.
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, 5.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, 5.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 };
 
 static const size_t kRobotSequenceLength =
@@ -492,18 +501,11 @@ static void handle_sequence_frame(
             status.code == STATUS_ACTION_COMPLETE &&
             (status.detail == STATUS_DETAIL_METAL_DETECTED ||
              status.detail == STATUS_DETAIL_METAL_NOT_DETECTED);
-        const bool metal_baseline_complete =
-            step->type == ROBOT_STEP_ARM &&
-            step->action.arm == CMD_METAL_SET_BASELINE &&
-            status.code == STATUS_ACTION_COMPLETE &&
-            status.detail == step_expected_detail;
         const bool fixed_detail_complete =
             step->type == ROBOT_STEP_ARM &&
             step->action.arm != CMD_METAL_READ &&
-            step->action.arm != CMD_METAL_SET_BASELINE &&
             status.detail == step_expected_detail;
-        step_complete = metal_read_complete || metal_baseline_complete ||
-            fixed_detail_complete;
+        step_complete = metal_read_complete || fixed_detail_complete;
         if (step->type == ROBOT_STEP_ARM) {
             SEQUENCE_DIAGNOSTIC_LOG(
                 "# t=%lu Arm completion %s: step=%u received_detail=%u "
