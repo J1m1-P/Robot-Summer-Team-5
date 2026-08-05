@@ -117,19 +117,10 @@ float wrap(float a) {
 constexpr float kAlignWeights[4] = {-3.0f, -1.0f, 1.0f, 3.0f};
 constexpr float kAlignErrorTol = 0.3f;  // channels considered centered below this
 constexpr float kAlignSettleS = 0.15f;  // must stay centered this long to finish
-// Filters the discrete, channel-quantized error before it's differentiated
-// (avoids derivative kick on channel-bit steps) and smooths the commanded
-// omega, matching the line follower's EMA treatment of the same sensors.
 constexpr float kAlignEmaAlpha = 0.4f;
-constexpr float kAlignOmegaEmaAlpha = 0.15f;
-constexpr BoundedPidConfig kAlignPidConfig = {
-    .proportional_gain = 0.8f,
-    .integral_gain = 0.0f,
-    .derivative_gain = 0.05f,
-    .integral_limit = 0.0f,
-    .correction_min = -1.0f,
-    .correction_max = 1.0f,
-};
+constexpr float kAlignSweepHalfAngleRad =
+    15.0f * static_cast<float>(M_PI) / 180.0f;
+constexpr float kAlignSweepOmegaRadS = 0.4f;
 
 int AlignSensorIndex(Direction dir) {
     switch (dir) {
@@ -711,10 +702,15 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
 
     const int64_t t0 = esp_timer_get_time();
     FixedRateGate gate = {kCtrlPeriodUs, t0};
-    BoundedPidState pid_state = {};
     float settled_s = 0.0f;
     float filtered_error = 0.0f;
-    float smoothed_omega = 0.0f;
+
+    const Pose start_pose = pose_tracker_get_pose(
+        context->sequence_controller->pose_tracker);
+    if (!std::isfinite(start_pose.heading_rad)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    bool sweeping_ccw = true;
 
     auto stop = [&]() { drivetrain_stop(context->drivetrain); };
 
@@ -747,28 +743,45 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
             return ESP_FAIL;
         }
 
-        float error = 0.0f;
-        if (!ComputeAlignError(sensor, on_gap, &error)) {
+        const Pose current_pose = pose_tracker_get_pose(
+            context->sequence_controller->pose_tracker);
+        if (!std::isfinite(current_pose.heading_rad)) {
+            stop();
+            return ESP_ERR_INVALID_STATE;
+        }
+        const float heading_delta = wrap(
+            current_pose.heading_rad - start_pose.heading_rad);
+        if (sweeping_ccw && heading_delta >= kAlignSweepHalfAngleRad) {
+            sweeping_ccw = false;
+        } else if (!sweeping_ccw &&
+                   heading_delta <= -kAlignSweepHalfAngleRad) {
             stop();
             return ESP_FAIL;
         }
-        filtered_error = kAlignEmaAlpha * error + (1.0f - kAlignEmaAlpha) * filtered_error;
 
-        if (std::fabs(filtered_error) < kAlignErrorTol) {
-            settled_s += dt;
-            if (settled_s >= kAlignSettleS) {
-                stop();
-                return ESP_OK;
+        float error = 0.0f;
+        if (ComputeAlignError(sensor, on_gap, &error)) {
+            filtered_error = kAlignEmaAlpha * error +
+                (1.0f - kAlignEmaAlpha) * filtered_error;
+
+            if (std::fabs(filtered_error) < kAlignErrorTol) {
+                settled_s += dt;
+                if (settled_s >= kAlignSettleS) {
+                    stop();
+                    return ESP_OK;
+                }
+            } else {
+                settled_s = 0.0f;
             }
         } else {
+            // The tape may be between channels or temporarily out of view
+            // during the search. Keep sweeping instead of failing on this
+            // sample; only the end of the complete search is a failure.
             settled_s = 0.0f;
         }
 
-        const float omega_raw = bounded_pid_update(
-            &pid_state, &kAlignPidConfig, filtered_error, dt);
-        smoothed_omega = kAlignOmegaEmaAlpha * omega_raw +
-            (1.0f - kAlignOmegaEmaAlpha) * smoothed_omega;
-        const float omega = smoothed_omega;
+        const float omega = sweeping_ccw
+            ? kAlignSweepOmegaRadS : -kAlignSweepOmegaRadS;
         const float vx = omega * pivot_y_m;
         const float vy = -omega * pivot_x_m;
 

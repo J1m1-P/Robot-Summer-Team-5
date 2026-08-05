@@ -19,6 +19,7 @@ namespace {
 constexpr float kTapeFollowSpeedMps = 0.35f;
 constexpr float kSideTowerFollowSpeedMps = 0.15f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
+constexpr float kTapeAlignTimeoutS = 3.0f;
 constexpr float kLocatorApproachSpeedMps = 0.10f;
 constexpr float kPrecisionVxMps = 0.2f;
 constexpr float kPrecisionVyMps = 0.15f;
@@ -535,9 +536,41 @@ extern "C" bool movement_action_controller_update(
             }
             return false;
             
-        // use action_value to determine whether to use lateral one or lateral two stop condition
-        case MOVEMENT_ACTION_MX_TAPE_STRAFE_ALIGN:
-            return false;
+        case MOVEMENT_ACTION_MX_TAPE_PIVOT_ALIGN:
+            if (g_precision_move_ctx == nullptr ||
+                g_precision_move_ctx->drivetrain == nullptr ||
+                g_precision_move_ctx->sequence_controller == nullptr) {
+#if ROBOT_MOTION_DIAGNOSTICS
+                std::printf("# tape alignment rejected: missing precision context\n");
+#endif
+                return false;
+            }
+            {
+                const TapeAlignContext align_context = {
+                    .drivetrain = g_precision_move_ctx->drivetrain,
+                    .sequence_controller =
+                        g_precision_move_ctx->sequence_controller,
+                    .sensors = {
+                        g_precision_move_ctx->sensors[0],
+                        g_precision_move_ctx->sensors[1],
+                        g_precision_move_ctx->sensors[2],
+                    },
+                };
+                const esp_err_t align_error = align_on_tape(
+                    &align_context,
+                    Direction::PX,
+                    Direction::MX,
+                    false,
+                    kTapeAlignTimeoutS);
+                const bool success = align_error == ESP_OK;
+#if ROBOT_MOTION_DIAGNOSTICS
+                std::printf(
+                    "# tape alignment result: success=%u error=%d\n",
+                    success ? 1U : 0U, (int)align_error);
+#endif
+                if (success) sync_planned_pose();
+                return success;
+            }
 
         // positive action value is forward, negative is backward
         case MOVEMENT_ACTION_GO_X_DISTANCE:

@@ -50,8 +50,10 @@ align_on_tape(&align_ctx, /*travel_dir=*/Direction::PY,
 ```
 
 `on_gap` must match the preceding stop: `false` after `LATERAL_ONE` and `true`
-after `RISE_TWO`. The feedback error is EMA-filtered before PID and the
-output omega is EMA-smoothed, matching `follow_tape()` steering.
+after `RISE_TWO`. The maneuver searches for the centered feature by pivoting
+CCW through 15 degrees and then CW through 15 degrees at 0.4 rad/s. Missing
+feedback channels are tolerated during the sweep; the action succeeds as
+soon as the selected feature remains centered for the settle interval.
 
 ## Sequence integration
 
