@@ -9,7 +9,7 @@
 namespace {
 
 // Required delay between staged lift and claw movements.
-constexpr uint32_t kServoDelayMs = 200;
+constexpr uint32_t kServoDelayMs = 500;
 
 ServoDriver rock_lift_servo = {};
 ServoDriver rock_claw_servo = {};
@@ -126,13 +126,13 @@ void update_sample(
     }
 
     if (controller->stage == METAL_ACTION_SAMPLING_BASELINE) {
-        servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
+        servo_set_angle(&rock_lift_servo, ROCK_LIFT_PREREAD_ANGLE);
         wait_for_stage(
             controller,
-            METAL_ACTION_WAITING_FOR_BASELINE_CLAW_CLOSE,
+            METAL_ACTION_WAITING_FOR_PREREAD_POSITION,
             now_ms,
-        kServoDelayMs);
-        Serial.println("# Baseline set; closing claw before read position");
+            kServoDelayMs);
+        Serial.println("# Baseline set; moving arm to preread position");
         return;
     }
 
@@ -269,7 +269,18 @@ bool metal_detector_action_controller_update(
             update_sample(controller, now_ms);
             break;
 
-        case METAL_ACTION_WAITING_FOR_BASELINE_CLAW_CLOSE:
+        case METAL_ACTION_WAITING_FOR_PREREAD_POSITION:
+            if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_claw_servo, SERVO_POSITION_B);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_PREREAD_CLAW_CLOSE,
+                now_ms,
+                kServoDelayMs);
+            Serial.println("# Arm at preread position; closing claw");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_PREREAD_CLAW_CLOSE:
             if (!stage_has_settled(controller, now_ms)) break;
             servo_set_angle(&rock_lift_servo, ROCK_LIFT_READ_ANGLE);
             wait_for_stage(
@@ -277,7 +288,7 @@ bool metal_detector_action_controller_update(
                 METAL_ACTION_WAITING_FOR_READ_POSITION,
                 now_ms,
                 kServoDelayMs);
-            Serial.println("# Rock claw closed; moving arm to read position");
+            Serial.println("# Preread claw closed; moving arm to read position");
             break;
 
         case METAL_ACTION_WAITING_FOR_READ_POSITION:
@@ -300,12 +311,23 @@ bool metal_detector_action_controller_update(
 
         case METAL_ACTION_WAITING_FOR_DOWN_POSITION:
             if (!stage_has_settled(controller, now_ms)) break;
+            servo_set_position(&rock_claw_servo, SERVO_POSITION_A);
+            wait_for_stage(
+                controller,
+                METAL_ACTION_WAITING_FOR_DOWN_CLAW_OPEN,
+                now_ms,
+                kServoDelayMs);
+            Serial.println("# Rock absent; opening claw at down position");
+            break;
+
+        case METAL_ACTION_WAITING_FOR_DOWN_CLAW_OPEN:
+            if (!stage_has_settled(controller, now_ms)) break;
             start_up_after_claw_close(
                 controller,
                 now_ms,
                 controller->result_code,
                 controller->result_detail);
-            Serial.println("# Rock absent; closing claw at down position");
+            Serial.println("# Rock absent; closing claw before lifting");
             break;
 
         case METAL_ACTION_WAITING_FOR_UP_CLAW_CLOSE:
