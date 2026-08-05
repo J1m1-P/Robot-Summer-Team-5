@@ -94,9 +94,6 @@ esp_err_t metal_detector_driver_set_baseline(
     MetalDetectorDriver *detector,
     const MetalDetectorSample *sample);
 
-// Reports whether a valid no-metal reference has been captured.
-bool metal_detector_driver_has_baseline(const MetalDetectorDriver *detector);
-
 // Reports whether the detector hardware counter is running.
 bool metal_detector_driver_is_enabled(const MetalDetectorDriver *detector);
 
