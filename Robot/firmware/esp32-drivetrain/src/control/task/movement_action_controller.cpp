@@ -124,7 +124,9 @@ bool follow_tape_action(
     float timeout_s,
     TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO) {
     const TapeFollowMode follow_mode =
-        direction == Direction::PX || direction == Direction::MX
+        stop_condition == StopCondition::ALL_CHANNELS_ON
+            ? TapeFollowMode::SINGLE_SENSOR
+            : direction == Direction::PX || direction == Direction::MX
             ? TapeFollowMode::FRONT_BACK_ALIGNED
             : TapeFollowMode::SINGLE_SENSOR;
     if (!follow_tape(

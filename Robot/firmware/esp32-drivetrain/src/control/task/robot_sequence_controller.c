@@ -177,7 +177,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},  
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 1.05f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE}, 0.0f, 0.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.15f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON_AVERAGE_HEADING}, 0.0f, 0.15f},
 
 
     /* Go off the tape and go for the habitats 1 and 2 */ 
