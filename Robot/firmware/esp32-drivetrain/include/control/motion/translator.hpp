@@ -33,6 +33,19 @@ esp_err_t precision_move(const PrecisionMoveContext *context,
                          const PrecisionMoveTarget *target,
                          float timeout_s);
 
+// Body-axis drive for exactly duration_s, then stops: the along-track
+// distance is open-loop speed * time (no odometry goal is tracked on that
+// axis, unlike precision_move), but the perpendicular (cross-track) axis and
+// heading are closed-loop corrected against odometry so the robot travels
+// straight in the direction (vx_mps, vy_mps) was pointing at the start
+// instead of drifting off course. Services communication and pose each cycle
+// via robot_sequence_controller_update. Blocks until duration_s elapses, and
+// always stops the drivetrain.
+esp_err_t timed_move(const PrecisionMoveContext *context,
+                     float vx_mps,
+                     float vy_mps,
+                     float duration_s);
+
 struct TapeAlignContext {
     Drivetrain *drivetrain;
     RobotSequenceController *sequence_controller;

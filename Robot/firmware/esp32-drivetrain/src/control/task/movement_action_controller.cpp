@@ -164,6 +164,19 @@ bool action_requires_positive_distance(MovementAction action) {
            action == MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL;
 }
 
+bool action_requires_positive_time(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_X_TIME ||
+           action == MOVEMENT_ACTION_GO_Y_TIME;
+}
+
+// These actions use speed's sign to select drive direction instead of the
+// usual zero-means-default convention, so it must be nonzero but may be
+// negative.
+bool action_allows_signed_speed(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_X_TIME ||
+           action == MOVEMENT_ACTION_GO_Y_TIME;
+}
+
 }  // namespace
 
 extern "C" void movement_action_controller_set_line_follower_context(
@@ -324,6 +337,27 @@ bool precision_action(
     return success;
 }
 
+bool timed_action(float vx_body, float vy_body, float duration_s) {
+    if (g_precision_move_ctx == nullptr ||
+        g_precision_move_ctx->sequence_controller == nullptr) {
+#if ROBOT_MOTION_DIAGNOSTICS
+        std::printf("# timed action rejected: missing precision context\n");
+#endif
+        return false;
+    }
+    const esp_err_t move_error = timed_move(
+        g_precision_move_ctx, vx_body, vy_body, duration_s);
+    const bool success = move_error == ESP_OK;
+#if ROBOT_MOTION_DIAGNOSTICS
+    std::printf(
+        "# timed action result: success=%u error=%d vx=%.3f vy=%.3f "
+        "duration=%.3f\n",
+        success ? 1U : 0U, (int)move_error, vx_body, vy_body, duration_s);
+#endif
+    if (success) sync_planned_pose();
+    return success;
+}
+
 extern "C" esp_err_t movement_action_controller_init(
     MovementActionController *controller,
     MovementAction action,
@@ -337,13 +371,17 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
     MovementAction action,
     float action_value,
     float speed) {
+    const bool signed_speed_action = action_allows_signed_speed(action);
     if (controller == NULL ||
         (unsigned int)action >= (unsigned int)MOVEMENT_ACTION_MAX ||
         !std::isfinite(action_value) ||
-        !std::isfinite(speed) || speed < 0.0f ||
+        !std::isfinite(speed) ||
+        (!signed_speed_action && speed < 0.0f) ||
+        (signed_speed_action && speed == 0.0f) ||
         (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
         (action_requires_positive_distance(action) && action_value <= 0.0f) ||
-        (action_requires_positive_sweep(action) && action_value <= 0.0f)) {
+        (action_requires_positive_sweep(action) && action_value <= 0.0f) ||
+        (action_requires_positive_time(action) && action_value <= 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -544,6 +582,16 @@ extern "C" bool movement_action_controller_update(
                 controller->dx_body_m, controller->dy_body_m,
                 controller->delta_heading_rad, nullptr,
                 speed_or_default(controller->speed, kPrecisionVxMps));
+
+        // action_value is the drive duration in seconds; speed is a signed
+        // body-axis velocity in m/s (sign selects direction).
+        case MOVEMENT_ACTION_GO_X_TIME:
+            return timed_action(
+                controller->speed, 0.0f, controller->action_value);
+
+        case MOVEMENT_ACTION_GO_Y_TIME:
+            return timed_action(
+                0.0f, controller->speed, controller->action_value);
 
         // action_value is the cruise speed in m/s; 0 keeps the default speed.
         case MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE:

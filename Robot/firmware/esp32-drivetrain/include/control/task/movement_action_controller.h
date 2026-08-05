@@ -43,13 +43,23 @@ typedef enum {
     MOVEMENT_ACTION_GO_PX_DISTANCE,
     MOVEMENT_ACTION_GENERAL_MOTION,
     MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON,
+    // Open-loop, time-based body-axis drive: no odometry goal is tracked, and
+    // action_value/speed mean duration/signed velocity instead of the usual
+    // distance/unsigned speed. See the struct fields below.
+    MOVEMENT_ACTION_GO_X_TIME,
+    MOVEMENT_ACTION_GO_Y_TIME,
     MOVEMENT_ACTION_MAX,
 } MovementAction;
 
 typedef struct {
     MovementAction action;
+    // Distance in metres, rotation in degrees, or -- for
+    // MOVEMENT_ACTION_GO_X_TIME/GO_Y_TIME -- the drive duration in seconds
+    // (must be positive).
     float action_value;
-    // Translation speed in m/s, or angular speed in rad/s for rotation.
+    // Translation speed in m/s, or angular speed in rad/s for rotation. For
+    // MOVEMENT_ACTION_GO_X_TIME/GO_Y_TIME this is instead a signed body-axis
+    // velocity in m/s (sign selects direction; must be nonzero).
     float speed;
     bool locator_contact_detected;
     bool solar_panel_contact_detected;
