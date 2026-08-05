@@ -592,6 +592,107 @@ esp_err_t precision_move(
     }
 }
 
+esp_err_t timed_move(
+    const PrecisionMoveContext *context,
+    float vx_mps,
+    float vy_mps,
+    float duration_s) {
+    if (context == nullptr || context->drivetrain == nullptr ||
+        context->sequence_controller == nullptr ||
+        context->sequence_controller->pose_tracker == nullptr ||
+        !std::isfinite(vx_mps) || !std::isfinite(vy_mps) ||
+        !std::isfinite(duration_s) || duration_s <= 0.0f) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    PoseTracker *pose_tracker = context->sequence_controller->pose_tracker;
+    const Pose start = pose_tracker_get_pose(pose_tracker);
+    if (!std::isfinite(start.x_m) || !std::isfinite(start.y_m) ||
+        !std::isfinite(start.heading_rad)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Travel is body-relative, so the commanded direction is fixed in the
+    // start heading's frame. Correct drift perpendicular to that direction
+    // (cross-track) and hold the start heading, but never touch the
+    // along-track component -- that stays open-loop speed*time by design.
+    const float command_speed = std::hypot(vx_mps, vy_mps);
+    const bool has_direction = command_speed > 1.0e-6f;
+    const float along_x = has_direction ? vx_mps / command_speed : 0.0f;
+    const float along_y = has_direction ? vy_mps / command_speed : 0.0f;
+    const float perp_x = -along_y;
+    const float perp_y = along_x;
+
+    const int64_t t0 = esp_timer_get_time();
+    FixedRateGate gate = {kCtrlPeriodUs, t0};
+    auto stop = [&]() { drivetrain_stop(context->drivetrain); };
+
+    while (true) {
+        const int64_t now = esp_timer_get_time();
+        if (static_cast<float>(now - t0) / 1.0e6f >= duration_s) {
+            stop();
+            return ESP_OK;
+        }
+
+        int64_t dt_us = 0;
+        if (!gate.Ready(now, &dt_us)) {
+            delay(1);
+            continue;
+        }
+        const float dt = static_cast<float>(dt_us) / 1.0e6f;
+        if (!std::isfinite(dt) || dt <= 0.0f || dt > kMaxDt) {
+            stop();
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        const esp_err_t pose_err = robot_sequence_controller_update(
+            context->sequence_controller, static_cast<uint32_t>(now / 1000));
+        if (pose_err != ESP_OK || !context->sequence_controller->running) {
+            stop();
+            return pose_err != ESP_OK ? pose_err : ESP_ERR_INVALID_STATE;
+        }
+
+        const Pose cur = pose_tracker_get_pose(pose_tracker);
+        if (!std::isfinite(cur.x_m) || !std::isfinite(cur.y_m) ||
+            !std::isfinite(cur.heading_rad)) {
+            stop();
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        float cmd_vx = vx_mps;
+        float cmd_vy = vy_mps;
+        if (has_direction) {
+            // Displacement since start, resolved into the start heading's
+            // body frame so it can be split into along-track/cross-track.
+            const float c0 = std::cos(start.heading_rad);
+            const float s0 = std::sin(start.heading_rad);
+            const float world_dx = cur.x_m - start.x_m;
+            const float world_dy = cur.y_m - start.y_m;
+            const float disp_body_x = c0 * world_dx + s0 * world_dy;
+            const float disp_body_y = -s0 * world_dx + c0 * world_dy;
+            const float cross_track_error =
+                disp_body_x * perp_x + disp_body_y * perp_y;
+            const float correction = clamp(
+                -cross_track_error * kPositionGain,
+                -kMinRampSpeedMps, kMinRampSpeedMps);
+            cmd_vx += correction * perp_x;
+            cmd_vy += correction * perp_y;
+        }
+        const float heading_error = wrap(start.heading_rad - cur.heading_rad);
+        const float cmd_omega = clamp(
+            heading_error * kHeadingGain, -kMotionOmegaRadS, kMotionOmegaRadS);
+
+        const esp_err_t command_err = drivetrain_set_advanced_body_velocity(
+            context->drivetrain, cmd_vx, cmd_vy, cmd_omega);
+        const esp_err_t update_err = command_err == ESP_OK
+            ? drivetrain_update(context->drivetrain, esp_timer_get_time())
+            : command_err;
+        if (update_err != ESP_OK) {
+            stop();
+            return update_err;
+        }
+    }
+}
+
 esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
                         Direction feedback_dir, bool on_gap, float timeout_s) {
     if (context == nullptr || context->drivetrain == nullptr ||
