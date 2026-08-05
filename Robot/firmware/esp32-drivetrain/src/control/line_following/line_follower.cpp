@@ -66,10 +66,12 @@ constexpr float kMinRampSpeedMps = 0.1f;
 constexpr float kHeadingWindowStartFromEndM = 0.13f;
 constexpr float kHeadingWindowEndFromEndM = 0.03f;
 constexpr size_t kHeadingWindowCapacity = 512;
+constexpr size_t kHeadingRegressionPointCount = 5;
 
 struct HeadingSample {
     float distance_m;
-    float heading_rad;
+    float x_m;
+    float y_m;
 };
 
 struct DirectionInfo {
@@ -138,34 +140,83 @@ bool AllChannelsOn(const TapeSensor *sensor) {
            sensor->channel_2 && sensor->channel_3;
 }
 
-bool CircularMeanHeading(const HeadingSample *samples, size_t sample_count,
-                         float endpoint_distance_m, float *heading_out) {
+bool RegressionHeading(const HeadingSample *samples, size_t sample_count,
+                       float endpoint_distance_m, float *heading_out) {
     if (samples == nullptr || sample_count == 0 || heading_out == nullptr) {
         return false;
     }
 
-    float sine_sum = 0.0f;
-    float cosine_sum = 0.0f;
-    size_t selected = 0;
     const float window_min = endpoint_distance_m -
         kHeadingWindowStartFromEndM;
     const float window_max = endpoint_distance_m -
         kHeadingWindowEndFromEndM;
-    for (size_t i = 0; i < sample_count; ++i) {
-        if (samples[i].distance_m < window_min ||
-            samples[i].distance_m > window_max) {
-            continue;
+
+    // Pick a few discrete points at even distances through the window. The
+    // control loop samples much more densely, but fitting every sample would
+    // overweight any period where the loop was delayed or the robot moved
+    // slowly.
+    HeadingSample points[kHeadingRegressionPointCount] = {};
+    for (size_t point = 0; point < kHeadingRegressionPointCount; ++point) {
+        const float target_distance = window_min +
+            (window_max - window_min) *
+            static_cast<float>(point) /
+            static_cast<float>(kHeadingRegressionPointCount - 1);
+        size_t best_index = sample_count;
+        float best_error = INFINITY;
+        for (size_t i = 0; i < sample_count; ++i) {
+            if (samples[i].distance_m < window_min ||
+                samples[i].distance_m > window_max) {
+                continue;
+            }
+            const float error = std::fabs(samples[i].distance_m -
+                                          target_distance);
+            if (error < best_error) {
+                best_error = error;
+                best_index = i;
+            }
         }
-        sine_sum += std::sin(samples[i].heading_rad);
-        cosine_sum += std::cos(samples[i].heading_rad);
-        ++selected;
+        if (best_index == sample_count) return false;
+        points[point] = samples[best_index];
     }
-    if (selected == 0 ||
-        (std::fabs(sine_sum) < 1.0e-6f &&
-         std::fabs(cosine_sum) < 1.0e-6f)) {
+
+    float mean_x = 0.0f;
+    float mean_y = 0.0f;
+    for (const HeadingSample &point : points) {
+        mean_x += point.x_m;
+        mean_y += point.y_m;
+    }
+    mean_x /= static_cast<float>(kHeadingRegressionPointCount);
+    mean_y /= static_cast<float>(kHeadingRegressionPointCount);
+
+    // Principal-axis linear regression: unlike y = mx + b, this also works
+    // when the world-frame path is close to vertical.
+    float covariance_xx = 0.0f;
+    float covariance_xy = 0.0f;
+    float covariance_yy = 0.0f;
+    for (const HeadingSample &point : points) {
+        const float dx = point.x_m - mean_x;
+        const float dy = point.y_m - mean_y;
+        covariance_xx += dx * dx;
+        covariance_xy += dx * dy;
+        covariance_yy += dy * dy;
+    }
+    if (covariance_xx + covariance_yy < 1.0e-10f) {
         return false;
     }
-    *heading_out = std::atan2(sine_sum, cosine_sum);
+
+    float heading = 0.5f * std::atan2(
+        2.0f * covariance_xy, covariance_xx - covariance_yy);
+
+    // A regression line has no direction. Choose the sign that points from
+    // the earliest sampled point toward the latest one.
+    const float travel_x = points[kHeadingRegressionPointCount - 1].x_m -
+        points[0].x_m;
+    const float travel_y = points[kHeadingRegressionPointCount - 1].y_m -
+        points[0].y_m;
+    if (std::cos(heading) * travel_x + std::sin(heading) * travel_y < 0.0f) {
+        heading += static_cast<float>(M_PI);
+    }
+    *heading_out = wrap(heading);
     return std::isfinite(*heading_out);
 }
 
@@ -246,7 +297,7 @@ static bool follow_tape_impl(
                 --heading_sample_count;
             }
             heading_samples[heading_sample_count++] = {
-                cumulative_distance_m, current_pose.heading_rad};
+                cumulative_distance_m, current_pose.x_m, current_pose.y_m};
         }
 
         // This stop condition applies to the sensor module used to follow
@@ -256,9 +307,9 @@ static bool follow_tape_impl(
         if (stop_type == StopCondition::ALL_CHANNELS_ON &&
             AllChannelsOn(ctx->sensors[steer.sensor_index])) {
             if (average_heading_rad_out != nullptr &&
-                !CircularMeanHeading(heading_samples, heading_sample_count,
-                                     cumulative_distance_m,
-                                     average_heading_rad_out)) {
+                !RegressionHeading(heading_samples, heading_sample_count,
+                                   cumulative_distance_m,
+                                   average_heading_rad_out)) {
                 return Abort(false);
             }
             return Abort(true);

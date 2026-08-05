@@ -151,10 +151,10 @@ bool follow_tape_action(
 
 bool follow_tape_average_heading_action(LineFollowerContext *context,
                                         float speed_mps) {
-    float average_heading_rad = 0.0f;
+    float regression_heading_rad = 0.0f;
     if (!follow_tape_until_all_channels_average_heading(
             context, speed_mps, kTapeFollowTimeoutS,
-            &average_heading_rad)) {
+            &regression_heading_rad)) {
         return false;
     }
 
@@ -166,14 +166,14 @@ bool follow_tape_average_heading_action(LineFollowerContext *context,
         return false;
     }
 
-    // Rotate in place to the averaged world-frame heading. precision_move()
+    // Rotate in place to the regression world-frame heading. precision_move()
     // also re-anchors the pose to this exact heading when it completes.
     const Pose endpoint = pose_tracker_get_pose(
         context->sequence_controller->pose_tracker);
     const PrecisionMoveTarget heading_target = {
         .world_goal_enabled = true,
         .world_goal = {
-            endpoint.x_m, endpoint.y_m, average_heading_rad},
+            endpoint.x_m, endpoint.y_m, regression_heading_rad},
     };
     if (precision_move(g_precision_move_ctx, &heading_target,
                        kPrecisionTimeoutS) != ESP_OK) {

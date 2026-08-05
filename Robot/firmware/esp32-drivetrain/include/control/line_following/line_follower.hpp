@@ -47,9 +47,9 @@ bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                   TapeFollowMode mode = TapeFollowMode::SINGLE_SENSOR,
                   TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO);
 
-// PX tape-follow variant that returns the circular-mean world heading sampled
-// from 13 cm to 3 cm before the all-channels endpoint. The caller is
-// responsible for applying that heading after the tape-follow stop.
+// PX tape-follow variant that returns the world heading of a regression line
+// fitted through five discrete pose samples from 13 cm to 3 cm before the
+// all-channels endpoint. The caller applies that heading after the stop.
 bool follow_tape_until_all_channels_average_heading(
     LineFollowerContext *ctx, float speed_mps, float timeout_s,
     float *average_heading_rad_out);
