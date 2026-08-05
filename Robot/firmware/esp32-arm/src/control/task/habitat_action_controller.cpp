@@ -191,6 +191,26 @@ void start_habitat_action(
             start_message = "# Semi-closing right Habitat claw";
             break;
 
+        case CMD_HABITAT_SEMI_OPEN_LEFT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_left_servo,
+                HABITAT_LEFT_CLAW_SEMI_OPEN_ANGLE);
+            start_message = "# Semi-opening left Habitat claw";
+            break;
+
+        case CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW:
+            controller->action_is_timed = true;
+            controller->action_complete_ms =
+                millis() + kClawServoSettleMs;
+            servo_set_angle(
+                &habitat_right_servo,
+                HABITAT_RIGHT_CLAW_SEMI_OPEN_ANGLE);
+            start_message = "# Semi-opening right Habitat claw";
+            break;
+
         default:
             return;
     }
@@ -224,7 +244,9 @@ bool habitat_action_controller_accepts(CommandOpcode command) {
     return (command >= CMD_HABITAT_HOME &&
             command <= CMD_HABITAT_CLOSE_RIGHT_CLAW) ||
         command == CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW ||
-        command == CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW;
+        command == CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW ||
+        command == CMD_HABITAT_SEMI_OPEN_LEFT_CLAW ||
+        command == CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW;
 }
 
 bool habitat_action_controller_is_busy(

@@ -65,6 +65,10 @@ ActionStatusDetail arm_action_status_detail(CommandOpcode command) {
             return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
         case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_OPEN;
+        case CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_OPEN;
         case CMD_METAL_SET_BASELINE:
             return STATUS_DETAIL_METAL_BASELINE_SET;
         default:

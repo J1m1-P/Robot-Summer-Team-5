@@ -321,6 +321,10 @@ extern "C" ActionStatusDetail arm_action_status_detail(
             return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
         case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_OPEN;
+        case CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_OPEN;
         default:
             return STATUS_DETAIL_NONE;
     }
@@ -770,6 +774,8 @@ void test_habitat_actions_have_unique_completion_details() {
         CMD_HABITAT_CLOSE_RIGHT_CLAW,
         CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
         CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
+        CMD_HABITAT_SEMI_OPEN_LEFT_CLAW,
+        CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW,
     };
 
     for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);
