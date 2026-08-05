@@ -27,7 +27,7 @@ TapeFollowMode last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
 TapeMarkerSensor last_marker_sensor = TapeMarkerSensor::AUTO;
 bool service_during_follow = false;
 uint32_t fake_millis = 0;
-int solar_panel_switch_level = HIGH;
+int solar_panel_switch_level = LOW;
 uint8_t configured_switch_pin = UINT8_MAX;
 uint8_t configured_switch_mode = 0;
 int attached_interrupt = -1;
@@ -321,6 +321,10 @@ extern "C" ActionStatusDetail arm_action_status_detail(
             return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED;
         case CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW:
             return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED;
+        case CMD_HABITAT_SEMI_OPEN_LEFT_CLAW:
+            return STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_OPEN;
+        case CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW:
+            return STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_OPEN;
         default:
             return STATUS_DETAIL_NONE;
     }
@@ -344,7 +348,7 @@ void setUp() {
     last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
     last_marker_sensor = TapeMarkerSensor::AUTO;
     service_during_follow = false;
-    solar_panel_switch_level = HIGH;
+    solar_panel_switch_level = LOW;
     configured_switch_pin = UINT8_MAX;
     configured_switch_mode = 0;
     attached_interrupt = -1;
@@ -410,6 +414,19 @@ void test_non_odometry_frames_do_not_advance_movement_steps() {
     deliver_frame(controller, 103);
     TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
     TEST_ASSERT_TRUE(controller->locator_contact_pending);
+
+    solar_panel_switch_level = LOW;
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller->movement_action_controller,
+            MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
+            1.0f));
+    queue_status(STATUS_SOLAR_PANEL_CONTACT, STATUS_DETAIL_NONE);
+    deliver_frame(controller, 104);
+    TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
+    TEST_ASSERT_TRUE(
+        controller->movement_action_controller.solar_panel_contact_detected);
 }
 
 void test_arm_fault_stops_sequence() {
@@ -447,7 +464,7 @@ void test_blocking_movement_services_inputs_without_recursive_step_update() {
     TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
 
     fixture.controller.waiting_for_arm_ready = false;
-    fixture.controller.current_step = 4;  // first tape-follow step
+    fixture.controller.current_step = 5;  // first enabled movement step
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
@@ -465,7 +482,7 @@ void test_blocking_movement_services_inputs_without_recursive_step_update() {
         robot_sequence_controller_update(&fixture.controller, 100));
     TEST_ASSERT_EQUAL_UINT32(1, follow_tape_calls);
     TEST_ASSERT_EQUAL_UINT32(2, pose_update_count);
-    TEST_ASSERT_EQUAL_UINT32(5, fixture.controller.current_step);
+    TEST_ASSERT_EQUAL_UINT32(6, fixture.controller.current_step);
 }
 
 void test_movement_action_rejects_invalid_values() {
@@ -558,12 +575,12 @@ void test_locator_contact_notifies_only_locator_approach() {
     TEST_ASSERT_FALSE(controller.locator_contact_detected);
 }
 
-void test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback() {
+void test_solar_panel_switch_is_active_high_with_interrupt_and_poll_fallback() {
     movement_action_controller_init_solar_panel_switch();
     TEST_ASSERT_EQUAL_UINT8(PIN_SOLAR_PANEL_MICROSWITCH, configured_switch_pin);
     TEST_ASSERT_EQUAL_UINT8(INPUT_PULLUP, configured_switch_mode);
     TEST_ASSERT_EQUAL(PIN_SOLAR_PANEL_MICROSWITCH, attached_interrupt);
-    TEST_ASSERT_EQUAL(FALLING, attached_interrupt_mode);
+    TEST_ASSERT_EQUAL(RISING, attached_interrupt_mode);
     TEST_ASSERT_NOT_NULL(attached_interrupt_handler);
 
     MovementActionController controller = {};
@@ -575,16 +592,17 @@ void test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback() {
             1.0f));
     TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
 
-    // HIGH is the inactive pull-up level and must not stop the movement.
+    // The normally-closed released switch grounds the input.
     movement_action_controller_poll_solar_panel_contact(&controller);
     TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
 
-    // A LOW level is contact, even if the edge interrupt was missed.
-    solar_panel_switch_level = LOW;
+    // Pressing the switch opens the circuit and INPUT_PULLUP reads HIGH. The
+    // polling fallback must catch it even if the interrupt was missed.
+    solar_panel_switch_level = HIGH;
     movement_action_controller_poll_solar_panel_contact(&controller);
     TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
 
-    // An already-closed switch must also latch before motion begins.
+    // An already-pressed switch must also latch before motion begins.
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
@@ -593,14 +611,15 @@ void test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback() {
             1.0f));
     TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
 
-    // Reinitialize released, then verify the one-shot falling-edge path.
-    solar_panel_switch_level = HIGH;
+    // Reinitialize released, then verify the one-shot rising-edge path.
+    solar_panel_switch_level = LOW;
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init(
             &controller,
             MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL,
             1.0f));
+    solar_panel_switch_level = HIGH;
     attached_interrupt_handler();
     movement_action_controller_poll_solar_panel_contact(&controller);
     TEST_ASSERT_TRUE(controller.solar_panel_contact_detected);
@@ -610,7 +629,7 @@ void test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback() {
         ESP_OK,
         movement_action_controller_init(
             &controller, MOVEMENT_ACTION_ROTATE, 90.0f));
-    solar_panel_switch_level = LOW;
+    solar_panel_switch_level = HIGH;
     movement_action_controller_poll_solar_panel_contact(&controller);
     TEST_ASSERT_FALSE(controller.solar_panel_contact_detected);
 }
@@ -625,7 +644,7 @@ void test_solar_panel_movement_uses_py_bound_and_requires_contact() {
     precision_move_requires_external_stop = true;
 
     MovementActionController controller = {};
-    solar_panel_switch_level = HIGH;
+    solar_panel_switch_level = LOW;
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init_with_speed(
@@ -634,7 +653,7 @@ void test_solar_panel_movement_uses_py_bound_and_requires_contact() {
             1.0f,
             0.2f));
 
-    // Reaching the 1 m safety bound without LOW contact is a failure.
+    // Reaching the 1 m safety bound without HIGH contact is a failure.
     TEST_ASSERT_FALSE(movement_action_controller_update(&controller));
     TEST_ASSERT_EQUAL_UINT32(1, precision_move_calls);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, last_precision_target.dx_body_m);
@@ -646,8 +665,8 @@ void test_solar_panel_movement_uses_py_bound_and_requires_contact() {
         last_precision_target.external_stop_requested);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 15.0f, last_precision_timeout_s);
 
-    // An active-low contact makes the same bounded +Y move succeed.
-    solar_panel_switch_level = LOW;
+    // A pressed, active-HIGH contact makes the bounded +Y move succeed.
+    solar_panel_switch_level = HIGH;
     TEST_ASSERT_EQUAL(
         ESP_OK,
         movement_action_controller_init_with_speed(
@@ -755,6 +774,8 @@ void test_habitat_actions_have_unique_completion_details() {
         CMD_HABITAT_CLOSE_RIGHT_CLAW,
         CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
         CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
+        CMD_HABITAT_SEMI_OPEN_LEFT_CLAW,
+        CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW,
     };
 
     for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]);
@@ -779,7 +800,7 @@ int main(int, char **) {
     RUN_TEST(test_blocking_movement_services_inputs_without_recursive_step_update);
     RUN_TEST(test_movement_action_rejects_invalid_values);
     RUN_TEST(test_locator_contact_notifies_only_locator_approach);
-    RUN_TEST(test_solar_panel_switch_is_active_low_with_interrupt_and_poll_fallback);
+    RUN_TEST(test_solar_panel_switch_is_active_high_with_interrupt_and_poll_fallback);
     RUN_TEST(test_solar_panel_movement_uses_py_bound_and_requires_contact);
     RUN_TEST(test_rotation_corrects_to_planned_absolute_heading_without_position_move);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);

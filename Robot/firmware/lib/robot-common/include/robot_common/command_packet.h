@@ -66,6 +66,11 @@ typedef enum {
     CMD_METAL_SET_BASELINE,
     CMD_METAL_READ,
 
+    // Additional Habitat Tasks
+    // Appended to preserve every existing command value on the wire.
+    CMD_HABITAT_SEMI_OPEN_LEFT_CLAW,
+    CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW,
+
     CMD_MAX
 } CommandOpcode;
 

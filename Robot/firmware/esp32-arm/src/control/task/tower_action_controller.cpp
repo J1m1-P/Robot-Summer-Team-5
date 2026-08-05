@@ -189,42 +189,42 @@ static void start_tower_action(
 
         case CMD_TOWER_CLOSE_LEFT_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_left_servo, "close");
             start_message = "# Tower closing left claw";
             break;
 
         case CMD_TOWER_OPEN_LEFT_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_left_servo, "open");
             start_message = "# Tower opening left claw";
             break;
 
         case CMD_TOWER_CLOSE_MIDDLE_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_middle_servo, "close");
             start_message = "# Tower closing middle claw";
             break;
 
         case CMD_TOWER_OPEN_MIDDLE_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_middle_servo, "open");
             start_message = "# Tower opening middle claw";
             break;
         
         case CMD_TOWER_CLOSE_RIGHT_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_right_servo, "close");
             start_message = "# Tower closing right claw";
             break;
         
         case CMD_TOWER_OPEN_RIGHT_CLAW:
             controller->action_is_timed = true;
-            controller->action_complete_ms = millis() + kRotateServoSettleMs;
+            controller->action_complete_ms = millis() + kClawServoSettleMs;
             servo_set_position_by_name(&tower_right_servo, "open");
             start_message = "# Tower opening right claw";
             break;
