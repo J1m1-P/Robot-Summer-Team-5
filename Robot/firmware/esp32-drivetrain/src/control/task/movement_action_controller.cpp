@@ -703,17 +703,17 @@ extern "C" bool movement_action_controller_update(
                     controller->action_value > 0.0f
                         ? controller->action_value : kPrecisionVyMps));
 
-        // Strafe in +Y until both center channels on the PX/front module are
-        // active. action_value retains the existing convention here: a
-        // positive value overrides the default strafe speed.
-        case MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_CENTER_TAPE:
+        // Strafe in signed Y until both center channels on the PX/front
+        // module are active. action_value selects direction; speed controls
+        // the magnitude.
+        case MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE:
             return precision_action(
-                0.0f, kTapeSeekMaxDistanceM, 0.0f,
+                0.0f,
+                controller->action_value < 0.0f
+                    ? -kTapeSeekMaxDistanceM : kTapeSeekMaxDistanceM,
+                0.0f,
                 &kFrontCenterTapeStopSpec,
-                speed_or_default(
-                    controller->speed,
-                    controller->action_value > 0.0f
-                        ? controller->action_value : kPrecisionVyMps));
+                speed_or_default(controller->speed, kPrecisionVyMps));
 
         // action_value is the CW sweep bound in degrees (clamped to the
         // wrap-safe maximum).
