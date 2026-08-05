@@ -173,17 +173,17 @@ static const RobotSequenceStep kRobotSequence[] = {
      {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Follow to habitat pickup
     */
 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.3f, 0.4f},  
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},  
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 1.05f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE}, 0.0f, 0.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.15f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.3f, 0.4f},  
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},  
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 1.05f, 0.4f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE}, 0.0f, 0.2f},
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.15f},
 
 
-    /* Go off the tape and go for the habitats 1 and 2 */ 
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -8.0f, 0.3f},            // Angular adjustment
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.205f, 0.3f},   // Move sideways to the habitats
+    // /* Go off the tape and go for the habitats 1 and 2 */ 
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -8.0f, 0.3f},            // Angular adjustment
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
+    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.205f, 0.3f},   // Move sideways to the habitats
 
     /* Pick up the habitats 1 and 2 */
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.78f},                                   // lower claw
@@ -194,13 +194,12 @@ static const RobotSequenceStep kRobotSequence[] = {
     /* Move to the habitat base from 1 and 2 */
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 150.0f, 1.0f},          // Turn around
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.08f},                                    // Lower habitats
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.3f},    // Ram habitat base
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_TIME}, 2.2f, 0.1f},    // Ram habitat base
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.03f, 0.2f},    // Move forward
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_TIME}, 2.5f, 0.1f},    // Ram habitat base
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.05f, 0.2f},    // Move back
 
     /* Placedown habitat 1*/
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.032f},                                    // Raise habitats
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.035f, 0.2f},    // Move forward
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                                    // Raise habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.055f, 0.2f},    // Move forward
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.92f},                                     // Move habitats sideways
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.1f},                                    // Lower habitats
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},                            // Drop habitat 1
@@ -212,69 +211,63 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.92f},                                      // Push habitat
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.15f},    // Move backwards
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.92f},                                      // Move habitat in position
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.02f},                                    // Lower habitats
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.1f},                                    // Lower habitats
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Drop habitat 2
     {ROBOT_STEP_DELAY, {0}, 0.5f},
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.1f},                                    // Raise habitats
     
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.04f, 0.15f},    // Move away from base
+    /* Go back onto the tape */
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.15f},    // Move away from base
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 20.0f, 1.0f},          // Turn a little
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE}, 0.0f, 0.2f},          // Turn around
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.0f},          // Turn halfway
 
+    /* Rehome the two steppers */
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.92f},                                     // Rehome X
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.41f},                                     // Rehome Z
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE}, 140.0f, 1.0f},          // Turn onto main tape
 
+    /* Go back on main tape and move to habitat pickup */
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Slow down for final approach
 
-    // /* Rehome the two steppers */
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.55},                                     // Rehome X
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.33},                                     // Rehome Z
+    /* Go off the tape for the habitats 3 and 4*/
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 7.0f, 0.3f},            // Angular Adjustment
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, -0.19f, 0.3f},   // Move sideways to habitats
 
-    // /* Go back on main tape and move to habitat pickup */
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE}, 170.0f, 1.5f},          // Rotate back onto main tape
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.1f, 0.4f},               // Follow fast on tape
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON}, 0.0f, 0.2f},  // Slow down for final approach
+    /* Pick up the habitats */
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                                   // lower claw
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.07f, 0.05f},   // Move forward
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},                           // Close claws
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.1f},                                    // raise claw
 
-    // /* Go off the tape for the habitats 3 and 4*/
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 10.0f, 0.3f},            // Angular Adjustment
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.3f},   // Back off
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, -0.19f, 0.3f},   // Move sideways to habitats
+    /* Move to the habitat base with habitats 3 and 4 */
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.15f, 0.3f},                        // Move left
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.85f, 0.4f},                       // Back up from habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -45.0f, 1.0f},                              // Adjust angle
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.3f},                         // Move forward fast
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.08f},                                                       // lower habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_TIME}, 2.5f, 0.1f},                             // Ram habitat base
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.05f, 0.2f},                       // Move back
 
-    // /* Pick up the habitats */
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.68f},                                   // lower claw
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.07f, 0.05f},   // Move forward
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},                           // Close claws
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                                    // raise claw
+    /* Placedown habitat 3*/
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.35f},                                    // Raise habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.055f, 0.2f},    // Move forward
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.92f},                                     // Move habitats sideways
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.1f},                                    // Lower habitats
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},                            // Drop habitat 1
+    {ROBOT_STEP_DELAY, {0}, 0.5f},
 
-    // /* Move to the habitat base with habitats 3 and 4 */
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.15f, 0.4f},                       // Back up from habitats
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 90.0f, 1.5f},                               // Rotate
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE}, 0.0f, 0.2f},                 // Go back to main tape
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 1.0},                                                          // Position habitats
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_HABITAT_FRONT}, 0.0f, 0.15f}, // Move in front of habitat base
-
-    // // PLACEDOWN Sequence 3
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -2.0f, 0.5f},               // Angular adjustment
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.015f, 0.2f},      // Forward/backward adjustment
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.2f},     // Sideways adjustment (if needed)
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Drop habitat 3
-    // {ROBOT_STEP_DELAY, {0}, 0.5f},
-
-    // // PLACEDOWN Sequence 4
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.3f},       // Back off
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.3f},       // Move sideways to habitat push position
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.35},                                        // Move claw sidways
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.2f},        // Move back forwards
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f},                      // Semi close left claw
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.25},                                        // Push habitat 3
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.2f},       // Back off
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.1f, 0.3f},      // Move sideways
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.01f, 0.2f},       // Move forwards
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f},                           // Drop habitat 4
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Open claws
-
-
-    // // PLACEDOWN Sequence 4
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.6},    
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -1.5},    
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.1f, 0.17f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_RIGHT_CLAW}, 0.0f}, 
-    // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f}, 
+    /* Placedown habitat 4*/
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.1f},                                    // Raise habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.15f},    // Move forward
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.92f},                                      // Push habitat
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.02f, 0.15f},    // Move backwards
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, 0.92f},                                      // Move habitat in position
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.1f},                                    // Lower habitats
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_OPEN_LEFT_CLAW}, 0.0f},                            // Drop habitat 2
+    {ROBOT_STEP_DELAY, {0}, 0.5f},
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.1f},                                    // Raise claws
      
     // /*------------------------ Solar Panel Code Below ------------------------*/
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_CLOSE_CLAWS}, 0.0f},
