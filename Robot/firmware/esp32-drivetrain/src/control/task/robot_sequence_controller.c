@@ -113,22 +113,22 @@ static const RobotSequenceStep kRobotSequence[] = {
 
     // ----------------------------- Tower Code -----------------------------
 
-    // // Move to the tower pieces
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 120.0f, 2.0f}, // rotate until side tape
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f}, // tape follow to pickup
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.25f},  // forward/backward adjustment
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.15f},   // left/right adjustment
+    // Move to the tower pieces
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE}, 120.0f, 2.0f}, // rotate until side tape
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_SIDE_TAPE_FOLLOW_UNTIL_TOWER}, 0.0f, 0.15f}, // tape follow to pickup
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.25f},  // forward/backward adjustment
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.15f},   // left/right adjustment
 
-    // // Pick up the tower pieces 
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},                 // lower claw
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},     // close claws
-    // // {ROBOT_STEP_DELAY, {0}, 0.5f},
-    // // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.01f},           
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.40f},           
-    // // {ROBOT_STEP_DELAY, {0}, 0.5f},
-    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
-    // // // TODO: Do following arm steps in parallel with movement to save time
-    // //{ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
+    // Pick up the tower pieces 
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, -0.30f},                 // lower claw
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_CLOSE_ALL_CLAWS}, 0.0f},     // close claws
+    // {ROBOT_STEP_DELAY, {0}, 0.5f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.01f},           
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.40f},           
+    // {ROBOT_STEP_DELAY, {0}, 0.5f},
+    {ROBOT_STEP_ARM, {.arm = CMD_TOWER_ROTATE_VERTICAL}, 0.0f},
+    // // TODO: Do following arm steps in parallel with movement to save time
+    //{ROBOT_STEP_ARM, {.arm = CMD_TOWER_Z}, 0.30f},
 
     // Move to the tower base
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.02f, 0.35f},
