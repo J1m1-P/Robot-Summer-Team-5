@@ -54,11 +54,15 @@ struct TapeAlignContext {
 
 // Pivots the robot about `travel_dir`'s guide sensor -- approximated at that
 // sensor's axle centerpoint from the drivetrain's X-drive geometry -- so it
-// stays roughly in place while the body rotates. The correction is driven by
-// a second, independently chosen sensor (`feedback_dir`'s sensor), since the
-// guide sensor is already on the feature and can't itself reveal body skew:
-// the maneuver ends once the tape (or, when `on_gap` is true, the gap between
-// two tape edges) is centered on the feedback sensor. Blocks until centered
-// or timeout.
+// stays roughly in place while the body rotates at `sweep_omega_rad_s`.
+// `pivot_distance_override_m` may move that pivot farther from the robot
+// center for one caller; zero preserves the drivetrain geometry. The
+// correction is driven by a second, independently chosen sensor
+// (`feedback_dir`'s sensor), since the guide sensor is already on the feature
+// and can't itself reveal body skew: the maneuver ends once the tape (or, when
+// `on_gap` is true, the gap between two tape edges) is centered on the feedback
+// sensor. Blocks until centered or timeout.
 esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
-                        Direction feedback_dir, bool on_gap, float timeout_s);
+                        Direction feedback_dir, bool on_gap,
+                        float sweep_omega_rad_s, float timeout_s,
+                        float pivot_distance_override_m = 0.0f);

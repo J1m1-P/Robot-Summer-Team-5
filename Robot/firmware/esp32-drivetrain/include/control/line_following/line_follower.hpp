@@ -12,6 +12,10 @@ enum class Direction { PX, MX, PY };
 // front and back modules together and is valid for PX/MX travel.
 enum class TapeFollowMode { SINGLE_SENSOR, FRONT_BACK_ALIGNED };
 
+// STANDARD preserves origin/main tuning. HABITAT_APPROACH is reserved for
+// MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON.
+enum class TapeFollowTuningProfile { STANDARD, HABITAT_APPROACH };
+
 // Selects which module detects a marker while another module follows tape.
 enum class TapeMarkerSensor { AUTO, FRONT, BACK, SIDE };
 
@@ -45,7 +49,9 @@ struct LineFollowerContext {
 bool follow_tape(LineFollowerContext *ctx, Direction dir, float speed_mps,
                   StopCondition stop_type, float stop_value, float timeout_s,
                   TapeFollowMode mode = TapeFollowMode::SINGLE_SENSOR,
-                  TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO);
+                  TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO,
+                  TapeFollowTuningProfile tuning_profile =
+                      TapeFollowTuningProfile::STANDARD);
 
 // PX tape-follow variant that returns the world heading of a regression line
 // fitted through five discrete pose samples from 13 cm to 3 cm before the
