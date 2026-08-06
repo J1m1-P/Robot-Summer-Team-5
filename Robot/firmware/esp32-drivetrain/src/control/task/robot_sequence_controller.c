@@ -67,25 +67,23 @@ static const RobotSequenceStep kRobotSequence[] = {
     // ----------------------------- Teletubbies / Rock Path -----------------------------
     // Search rock 1
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.15f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.03f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.05f, 0.15f},
     //{ROBOT_STEP_DELAY, {0}, 3.0f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 2.0f},
  
     // Search rock 2
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.14f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 0.8f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.04f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.05f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.4f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 2.0f},
 
     // Search rock 3
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.13f, 0.4f},
@@ -96,7 +94,6 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 2.0f},
 
     // // Search rock 4
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
@@ -104,22 +101,23 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.13f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 0.8f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.05f, 0.2f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.15f},\
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 2.0f},
 
-    // // // Search rock 5
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 2.3f, 0.4f},
-    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    // {ROBOT_STEP_DELAY, {0}, 2.0f},
 
-    // // // Search rock 6
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -90.0f, 0.8f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.4f, 0.3f},
-    // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -45.0f, 0.8f},
-    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
-    // {ROBOT_STEP_DELAY, {0}, 2.0f},
+    // // Search rock 5
+    {ROBOT_STEP_DELAY, {0}, 1.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE}, 140.0f, 1.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 2.3f, 0.4f},
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+
+    // // Search rock 6
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -90.0f, 0.8f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.4f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -45.0f, 0.8f},
+    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
 
     // ----------------------------- Tower Code -----------------------------
 

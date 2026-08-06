@@ -872,12 +872,8 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
             static_cast<int>(last_stop_condition));
         TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.75f, last_stop_value);
         TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.0f, last_follow_timeout_s);
-        const TapeFollowMode expected_mode =
-            directions[index] == Direction::PY
-                ? TapeFollowMode::SINGLE_SENSOR
-                : TapeFollowMode::FRONT_BACK_ALIGNED;
         TEST_ASSERT_EQUAL(
-            static_cast<int>(expected_mode),
+            static_cast<int>(TapeFollowMode::SINGLE_SENSOR),
             static_cast<int>(last_follow_mode));
         TEST_ASSERT_EQUAL(
             static_cast<int>(TapeFollowTuningProfile::STANDARD),

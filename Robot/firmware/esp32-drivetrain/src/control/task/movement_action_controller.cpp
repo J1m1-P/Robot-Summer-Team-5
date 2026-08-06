@@ -126,12 +126,7 @@ bool follow_tape_action(
     TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO,
     TapeFollowTuningProfile tuning_profile =
         TapeFollowTuningProfile::STANDARD) {
-    const TapeFollowMode follow_mode =
-        stop_condition == StopCondition::ALL_CHANNELS_ON
-            ? TapeFollowMode::SINGLE_SENSOR
-            : direction == Direction::PX || direction == Direction::MX
-            ? TapeFollowMode::FRONT_BACK_ALIGNED
-            : TapeFollowMode::SINGLE_SENSOR;
+    const TapeFollowMode follow_mode = TapeFollowMode::SINGLE_SENSOR;
     if (!follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
         follow_mode, marker_sensor, tuning_profile)) {

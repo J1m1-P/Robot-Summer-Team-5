@@ -26,7 +26,10 @@ constexpr float kMinRampSpeedMps = 0.1f;
 // commanded cruise speed (recovers the old fixed distance at the reference
 // speed; extends it proportionally above that).
 constexpr float kApproachRampTimeS = kApproachRampDistanceM / kMinRampSpeedMps;
-constexpr float kMinPrecisionTranslateSpeedMps = 0.05f;
+// Matches kMinRampSpeedMps: the wheel controller's deadband floor is
+// documented at ~0.05 m/s (drivetrain_config.c), so a floor set exactly
+// there has no margin and can fail to break static friction on small moves.
+constexpr float kMinPrecisionTranslateSpeedMps = 0.1f;
 constexpr float kShortMoveNudgeS = 0.05f;
 constexpr float kSettleS = 0.15f;
 // Endpoint correction uses a bounded pulse above the wheel-controller
@@ -35,8 +38,11 @@ constexpr float kSettleS = 0.15f;
 // Use continuous closed-loop travel until the final 10 mm, then apply the
 // bounded nudge correction for settling without making small moves pulse.
 constexpr float kEndpointNudgeBandM = 0.010f;
-constexpr float kEndpointNudgeSpeedMps = 0.10f;
-constexpr float kEndpointNudgePulseS = 0.05f;
+// Raised alongside kEndpointNudgeMinSpeedMps below so the min/max gap stays
+// wide enough for the distance-based taper (comment below) to still do
+// something, instead of the floor swallowing the whole band into a flat speed.
+constexpr float kEndpointNudgeSpeedMps = 0.14f;
+constexpr float kEndpointNudgePulseS = 0.07f;
 constexpr float kEndpointNudgeRampS = 0.005f;
 constexpr float kEndpointNudgePauseS = 0.02f;
 // Pulse peak tapers with remaining distance (full speed at the band's outer
@@ -44,7 +50,10 @@ constexpr float kEndpointNudgePauseS = 0.02f;
 // can't travel further than the residual gap and overshoot it.
 constexpr float kEndpointNudgeGain =
     kEndpointNudgeSpeedMps / kEndpointNudgeBandM;
-constexpr float kEndpointNudgeMinSpeedMps = 0.06f;  // deadband-safe floor
+// Matches kMinRampSpeedMps for the same reason as kMinPrecisionTranslateSpeedMps
+// above: 0.06 m/s left almost no margin over the ~0.05 m/s deadband, so a
+// pulse could fail to move the wheel at all and repeat without progress.
+constexpr float kEndpointNudgeMinSpeedMps = 0.1f;
 constexpr int kMaxCorrectionAttempts = 3;
 constexpr float kPositionGain = 6.0f;
 constexpr float kHeadingGain = 3.0f;
