@@ -29,6 +29,8 @@ typedef struct {
     uint32_t step_deadline_ms;
     bool running;
     bool waiting_for_arm_ready;
+    bool waiting_for_pi_ready;
+    bool pi_ready;
     bool locator_contact_pending;
     bool updating_movement;
     uint8_t last_pi_request_id;
