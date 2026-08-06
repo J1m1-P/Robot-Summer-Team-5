@@ -12,22 +12,22 @@
 enum MetalDetectorActionStage : uint8_t {
     METAL_ACTION_IDLE = 0,
 
-    // Baseline path.
-    METAL_ACTION_WAITING_FOR_SEMI_LOWER,
-    METAL_ACTION_WAITING_FOR_CLAW_OPEN,
-    METAL_ACTION_SAMPLING_BASELINE,
+    // Arm-down and baseline path for a read.
+    METAL_ACTION_WAITING_FOR_ARM_LOWER,
+    METAL_ACTION_WAITING_FOR_ARM_CLAW_OPEN,
 
-    // Rock centering and sampling path.
-    METAL_ACTION_WAITING_FOR_LOWER,
-    METAL_ACTION_WAITING_FOR_CENTERING_CLAW_CLOSE,
+    // Read path: baseline, preread close, read position, and sample.
+    METAL_ACTION_SAMPLING_BASELINE,
+    METAL_ACTION_WAITING_FOR_PREREAD_POSITION,
+    METAL_ACTION_WAITING_FOR_PREREAD_CLAW_CLOSE,
+    METAL_ACTION_WAITING_FOR_READ_POSITION,
+
     METAL_ACTION_SAMPLING_ROCK,
 
-    // No-metal and read-fault recovery begins by releasing at ground level.
-    METAL_ACTION_WAITING_FOR_GROUND_RELEASE,
-
-    // Continue no-metal/read-fault recovery with an empty claw.
-    METAL_ACTION_WAITING_FOR_CLEARANCE,
-    METAL_ACTION_WAITING_FOR_CLAW_CLOSE,
+    // No-metal/read-fault recovery: down, open, close, then up.
+    METAL_ACTION_WAITING_FOR_DOWN_POSITION,
+    METAL_ACTION_WAITING_FOR_DOWN_CLAW_OPEN,
+    METAL_ACTION_WAITING_FOR_UP_CLAW_CLOSE,
     METAL_ACTION_WAITING_FOR_FULL_LIFT,
 };
 
@@ -39,6 +39,7 @@ struct MetalDetectorActionController {
     StatusCode result_code;
     uint8_t result_detail;
     bool report_pending;
+    bool positive_detection_made;
 };
 
 // Connects the controller and initializes the rock lift and claw servos.
@@ -47,14 +48,14 @@ void metal_detector_action_controller_init(
     UartLink *drivetrain_uart,
     MetalDetectorDriver *detector);
 
-// Returns true for the baseline and rock-sampling commands.
+// Returns true for supported rock-sampling commands.
 bool metal_detector_action_controller_accepts(CommandOpcode command);
 
 // Returns true while the workflow is moving, sampling, or reporting.
 bool metal_detector_action_controller_is_busy(
     const MetalDetectorActionController *controller);
 
-// Starts the baseline or rock-sampling workflow for one accepted command.
+// Starts the rock-sampling workflow for one accepted command.
 void metal_detector_action_controller_start(
     MetalDetectorActionController *controller,
     const CommandPacket *command);

@@ -73,11 +73,12 @@ typedef enum {
     STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_CLOSED,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_CLOSED,
     STATUS_DETAIL_METAL_DETECTED,
-    // Appended to preserve every existing detail value on the wire.
-    STATUS_DETAIL_METAL_BASELINE_SET,
-    STATUS_DETAIL_METAL_NOT_DETECTED,
+    // Value 38 was the retired baseline-complete detail.
+    STATUS_DETAIL_METAL_NOT_DETECTED = 39,
     STATUS_DETAIL_HABITAT_LEFT_CLAW_SEMI_OPEN,
     STATUS_DETAIL_HABITAT_RIGHT_CLAW_SEMI_OPEN,
+    STATUS_DETAIL_METAL_ARMED,
+    STATUS_DETAIL_METAL_DISARMED,
 } ActionStatusDetail;
 
 // Maps fixed-result arm commands to their completion detail. Metal reads use
