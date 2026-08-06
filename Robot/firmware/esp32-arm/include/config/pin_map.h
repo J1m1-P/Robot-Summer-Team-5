@@ -8,8 +8,8 @@
 #define PIN_SERVO_TOWER_LEFT_PWM        4
 #define PIN_SERVO_TOWER_MIDDLE_PWM      5
 #define PIN_SERVO_TOWER_RIGHT_PWM       6
-#define PIN_SERVO_ROCK_LIFT_PWM         7
-#define PIN_SERVO_ROCK_CLAW_PWM         8
+#define PIN_SERVO_ROCK_CLAW_PWM         7
+#define PIN_SERVO_ROCK_LIFT_PWM         8
 
 // Solar Panel Microswitch
 // TODO: unassigned -- pick a free GPIO and confirm against the actual wiring

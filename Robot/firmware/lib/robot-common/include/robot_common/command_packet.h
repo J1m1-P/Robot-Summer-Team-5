@@ -62,14 +62,17 @@ typedef enum {
     CMD_HABITAT_SEMI_CLOSE_LEFT_CLAW,
     CMD_HABITAT_SEMI_CLOSE_RIGHT_CLAW,
 
-    // Metal Detector
-    CMD_METAL_SET_BASELINE,
-    CMD_METAL_READ,
+    // Metal Detector. Value 34 was the retired baseline command.
+    CMD_METAL_READ = 35,
 
     // Additional Habitat Tasks
     // Appended to preserve every existing command value on the wire.
     CMD_HABITAT_SEMI_OPEN_LEFT_CLAW,
     CMD_HABITAT_SEMI_OPEN_RIGHT_CLAW,
+
+    // Metal Detector lifecycle
+    CMD_METAL_ARM,
+    CMD_METAL_DISARM,
 
     CMD_MAX
 } CommandOpcode;
