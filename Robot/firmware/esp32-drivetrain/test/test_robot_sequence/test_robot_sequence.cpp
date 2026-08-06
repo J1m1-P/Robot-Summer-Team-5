@@ -73,6 +73,14 @@ bool follow_tape(LineFollowerContext *context, Direction direction, float speed_
     return true;
 }
 
+bool follow_tape_until_all_channels_average_heading(
+    LineFollowerContext *, float, float, float *average_heading_rad_out) {
+    if (average_heading_rad_out != nullptr) {
+        *average_heading_rad_out = 0.0f;
+    }
+    return true;
+}
+
 namespace {
 
 PacketFrame queued_packets[16] = {};
@@ -233,6 +241,11 @@ esp_err_t precision_move(
             ? ESP_OK
             : ESP_ERR_TIMEOUT;
     }
+    return ESP_OK;
+}
+
+esp_err_t timed_move(
+    const PrecisionMoveContext *, float, float, float) {
     return ESP_OK;
 }
 
@@ -464,6 +477,43 @@ void test_non_odometry_frames_do_not_advance_movement_steps() {
     TEST_ASSERT_EQUAL_UINT32(0, controller->current_step);
     TEST_ASSERT_TRUE(
         controller->movement_action_controller.solar_panel_contact_detected);
+}
+
+void test_pi_scan_waits_100ms_before_metal_detection() {
+    ControllerFixture fixture = {};
+    RobotSequenceController *controller = &fixture.controller;
+    TEST_ASSERT_EQUAL(ESP_OK, initialize(&fixture));
+
+    PrecisionMoveContext precision_context = {
+        .sequence_controller = controller,
+    };
+    movement_action_controller_set_precision_move_context(&precision_context);
+    controller->waiting_for_arm_ready = false;
+    controller->current_step = 11;  // movement immediately before first scan
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init_with_speed(
+            &controller->movement_action_controller,
+            MOVEMENT_ACTION_GO_Y_DISTANCE,
+            -0.05f,
+            0.15f));
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK, robot_sequence_controller_update(controller, 100));
+    TEST_ASSERT_EQUAL_UINT32(13, controller->current_step);
+    TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_PI_SCAN_TELETUBBIES, sent_commands[0]);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK, robot_sequence_controller_update(controller, 199));
+    TEST_ASSERT_EQUAL_UINT32(13, controller->current_step);
+    TEST_ASSERT_EQUAL_UINT32(1, sent_command_count);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK, robot_sequence_controller_update(controller, 200));
+    TEST_ASSERT_EQUAL_UINT32(14, controller->current_step);
+    TEST_ASSERT_EQUAL_UINT32(2, sent_command_count);
+    TEST_ASSERT_EQUAL(CMD_METAL_READ, sent_commands[1]);
 }
 
 void test_arm_fault_stops_sequence() {
@@ -937,6 +987,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_sequence_waits_for_arm_then_starts_first_action);
     RUN_TEST(test_non_odometry_frames_do_not_advance_movement_steps);
+    RUN_TEST(test_pi_scan_waits_100ms_before_metal_detection);
     RUN_TEST(test_arm_fault_stops_sequence);
     RUN_TEST(test_update_drains_all_uart_packets_and_updates_pose_once);
     RUN_TEST(test_blocking_movement_services_inputs_without_recursive_step_update);

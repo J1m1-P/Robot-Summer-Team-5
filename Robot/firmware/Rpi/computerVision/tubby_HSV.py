@@ -95,8 +95,8 @@ MAX_ASPECT = 3.0
 # ── answering one scan request ────────────────────────────────────────────────
 # Same numbers as tubby_detector_simple.py on purpose -- keeps the two
 # detectors comparable when running them back-to-back.
-SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request
-SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before flashing
+SCAN_BURST_FRAMES   = 1    # one picture per scan request
+SCAN_MIN_VOTES      = 1    # the single picture must contain a detection
 FLASH_COUNT         = 2    # ADJUST: flashes fired once a winner is voted
 TARGETS_TO_FIND     = 2    # only two teletubbies exist — leave at 2
 
@@ -320,7 +320,7 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
 
 def handle_scan_request_simple(request_id, parameter):
     """
-    Sample a short burst of frames, vote on the best not-yet-flashed target,
+    Capture one picture and select the best not-yet-flashed target,
     and flash it immediately -- no centering check, no cross-request chase
     tracking, since every call either flashes on the spot or reports
     NOT_FOUND/CAMERA_FAULT. `parameter` is decoded but unused (reserved by

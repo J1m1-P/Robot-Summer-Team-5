@@ -8,7 +8,7 @@
 
 namespace {
 
-constexpr uint32_t kLiftSettleMs = 250;
+constexpr uint32_t kLiftSettleMs = 100;
 constexpr uint32_t kClawSettleMs = 100;
 
 ServoDriver rock_lift_servo = {};
@@ -80,7 +80,7 @@ void start_empty_claw_retract(
         controller,
         METAL_ACTION_WAITING_FOR_CLEARANCE,
         now_ms,
-        kLiftSettleMs);
+        50);
 }
 
 // Releases a centered rock at ground level before the empty-claw retract.
@@ -95,7 +95,7 @@ void start_ground_release(
         controller,
         METAL_ACTION_WAITING_FOR_GROUND_RELEASE,
         now_ms,
-        kClawSettleMs);
+        50);
 }
 
 // Polls either sample type and starts the matching completion/recovery path.
@@ -153,7 +153,7 @@ void update_sample(
             controller,
             METAL_ACTION_WAITING_FOR_FULL_LIFT,
             now_ms,
-            kLiftSettleMs);
+            200);
         Serial.println("# Metal detected; lifting centered rock");
         return;
     }
@@ -238,7 +238,7 @@ void metal_detector_action_controller_start(
         controller,
         METAL_ACTION_WAITING_FOR_LOWER,
         millis(),
-        kLiftSettleMs);
+        50);
     Serial.println("# Rock arm lowering to sample");
 }
 
@@ -258,7 +258,7 @@ bool metal_detector_action_controller_update(
                 controller,
                 METAL_ACTION_WAITING_FOR_CLAW_OPEN,
                 now_ms,
-                kClawSettleMs);
+                50);
             Serial.println("# Rock claw opening");
             break;
 

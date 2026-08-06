@@ -2,12 +2,10 @@
 Teletubby Detector — SIMPLE FLASH MODE.
 FLOW
   IDLE      Camera runs, no YOLO; state/detections print to the console.
-  SCANNING  Vote presence across SCAN_BURST_FRAMES (needs SCAN_MIN_VOTES to
-            count -- only one teletubby is ever in frame at a time, so this
-            just filters out single-frame noise, not competing candidates).
-            Identity (which character it is) is ignored entirely -- every
-            detection is treated as the same one "teletubby" class. A solid
-            detection is flashed immediately and counted, then reports
+  SCANNING  Inspect one camera frame for a teletubby. Identity (which
+            character it is) is ignored entirely -- every detection is
+            treated as the same one "teletubby" class.
+            A detection is flashed immediately and counted, then reports
             ALL_FOUND (TARGETS_TO_FIND flashed) or plain OK. One report per
             request, then back to IDLE.
 
@@ -62,8 +60,8 @@ IMGSZ       = 640         # ADJUST: 320 / 480 / 640 — smaller = faster, less a
 DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── answering one scan request ────────────────────────────────────────────────
-SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request (well under the ESP's 15s timeout)
-SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before flashing
+SCAN_BURST_FRAMES   = 1    # one picture per scan request
+SCAN_MIN_VOTES      = 1    # the single picture must contain a detection
 FLASH_COUNT         = 2    # ADJUST: flashes fired once a winner is voted
 TARGETS_TO_FIND     = 2    # only two teletubbies exist — leave at 2
 
@@ -201,8 +199,8 @@ def handle_scan_request_simple(request_id, parameter):
     """
     global found_count
 
-    # CHUNK 1 — sample a short burst of frames and count how many of them
-    # had at least one detection (identity doesn't matter, just presence).
+    # CHUNK 1 — capture one picture and check it for a detection (identity doesn't
+    # matter, just presence).
     frames_seen = 0
     frames_read = 0
     for _ in range(SCAN_BURST_FRAMES):
@@ -216,14 +214,13 @@ def handle_scan_request_simple(request_id, parameter):
             frames_seen += 1
         _report_state("SCANNING", pick_target(dets))
 
-    # CHUNK 2 — the camera itself never produced a usable frame this burst.
+    # CHUNK 2 — the camera did not produce a usable picture.
     if frames_read == 0:
         print(f"[SCAN #{request_id}] camera unavailable")
         send_report(request_id, PI_RESULT_CAMERA_FAULT)
         return
 
-    # CHUNK 3 — a detection only counts once it showed up in SCAN_MIN_VOTES
-    # separate frames, filtering out single-frame noise.
+    # CHUNK 3 — the single picture must contain a detection.
     if frames_seen < SCAN_MIN_VOTES:
         print(f"[SCAN #{request_id}] no detection (found so far={found_count})")
         send_report(request_id, PI_RESULT_NOT_FOUND)

@@ -26,6 +26,7 @@ static const uint32_t kActionTimeoutMs = 15000;
 // Replace this conversion after measuring camera steering on the robot.
 #define PLACEHOLDER_VISION_ERROR_TO_DEGREES 45.0f
 #define WIGGLE_DISTANCE 10.0f
+#define PI_SCAN_DELAY_SECONDS 0.1f
 
 typedef enum {
     ROBOT_STEP_MOVEMENT = 0,
@@ -66,32 +67,35 @@ static const RobotSequenceStep kRobotSequence[] = {
     // ----------------------------- Teletubbies / Rock Path -----------------------------
     // Search rock 1
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.15f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.05f, 0.15f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.06f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.5f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.05f, 0.3f},
     //{ROBOT_STEP_DELAY, {0}, 3.0f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, PI_SCAN_DELAY_SECONDS},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
  
     // Search rock 2
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.14f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 0.8f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.05f, 0.3f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.285f, 0.5f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.14f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 180.0f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.05f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.5f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, PI_SCAN_DELAY_SECONDS},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     
     // Search rock 3
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.13f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.13f, 0.5f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -90.0f, 0.8f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.02f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.08f, 0.3f},
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -30.0f, 0.8f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, PI_SCAN_DELAY_SECONDS},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 
     // // Search rock 4
@@ -101,14 +105,15 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 0.8f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.05f, 0.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.15f},\
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.15f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_DELAY, {0}, PI_SCAN_DELAY_SECONDS},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 
     // // Search rock 5
     {ROBOT_STEP_DELAY, {0}, 1.0f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE_CCW_UNTIL_FRONT_TAPE}, 140.0f, 1.0f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 2.7f, 0.4f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 2.7f, 0.6f},
     // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     
     // // // Search rock 6
@@ -634,6 +639,13 @@ static esp_err_t start_robot_step(
 
     controller->step_deadline_ms = now_ms + kActionTimeoutMs;
     controller->running = true;
+
+    // The Pi owns the scan after accepting this command, so it does not block
+    // the drivetrain sequence. The following delay gives the camera time to
+    // capture before metal detection starts.
+    if (step->type == ROBOT_STEP_PI_SCAN) {
+        advance_sequence(controller, now_ms);
+    }
     return ESP_OK;
 }
 

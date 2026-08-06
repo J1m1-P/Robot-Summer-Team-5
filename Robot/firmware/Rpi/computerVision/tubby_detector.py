@@ -6,9 +6,8 @@ script only answers — it never drives the robot.
 
 FLOW
   IDLE      Camera runs, no YOLO; state/detections print to the console.
-  SCANNING  Vote each identity across SCAN_BURST_FRAMES (needs SCAN_MIN_VOTES
-            to win, so near-equidistant targets can't split each other's
-            votes). A centered winner (|error| < ALIGN_THRESHOLD) gets
+  SCANNING  Inspect one camera frame and select the closest-to-center identity.
+            A centered winner (|error| < ALIGN_THRESHOLD) gets
             flashed and added to `visited`, then reports ALL_FOUND
             (TARGETS_TO_FIND flashed), REPOSITION (a second unflashed target
             was also seen — ESP turns back for it), or done. One report per
@@ -67,8 +66,8 @@ IMGSZ       = 320         # ADJUST: 320 / 480 / 640 — smaller = faster, less a
 DETECT_CONF = 0.5         # ADJUST: min YOLO confidence
 
 # ── answering one scan request ────────────────────────────────────────────────
-SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request (well under the ESP's 15s timeout)
-SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before PI_RESULT_OK
+SCAN_BURST_FRAMES   = 1    # one picture per scan request
+SCAN_MIN_VOTES      = 1    # the single picture must contain a detection
 ALIGN_THRESHOLD     = 0.08 # ADJUST: |mean error| below this = "centered" -> flash
 FLASH_COUNT         = 2    # ADJUST: flashes fired once centered
 CHASE_STALE_SECONDS = 10.0 # ADJUST: gap before a same-identity chase is treated as new
@@ -219,15 +218,14 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
 
 def handle_scan_request(request_id, parameter):
     """
-    Sample a short burst of frames, vote on the best not-yet-flashed target,
+    Capture one picture and select the best not-yet-flashed target,
     flash it if it's already centered, and send back exactly one report.
     `parameter` is decoded but unused (reserved by the wire format for future
     per-scan tuning).
     """
     global _chase_identity, _chase_saw_second, _chase_last_call_time
 
-    # Vote per identity across the burst rather than per-frame-closest, so two
-    # near-equidistant targets can't split each other's votes (see docstring).
+    # Track each identity independently, then choose the closest-to-center one.
     seen_counts = Counter()
     err_by_id = defaultdict(list)
     frames_read = 0
