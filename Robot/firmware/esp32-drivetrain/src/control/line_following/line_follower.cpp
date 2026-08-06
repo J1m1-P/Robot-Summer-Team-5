@@ -60,21 +60,19 @@ constexpr LineFollowerTuning kStandardTuning = {
 // Values preserved from the current new-habitat working copy.
 constexpr LineFollowerTuning kHabitatApproachTuning = {
     .control_period_us = 5000,  // 200 Hz
-    .front_weights = {-3.0f, -1.0f, 1.0f, 3.0f},
-    .back_weights = {-3.0f, -1.0f, 1.0f, 3.0f},
+    .front_weights = {-5.0f, -2.0f, 2.0f, 5.0f},
+    .back_weights = {-5.0f, -1.0f, 1.0f, 5.0f},
     .steering_pid = {
         .proportional_gain = 5.0f,
         .integral_gain = 0.0f,
         .derivative_gain = 0.15f,
         .integral_limit = 0.0f,
         .correction_min = -2.0f,
-        // Positive omega is CCW/left. Keep full right authority while
-        // limiting left steering during the habitat approach.
-        .correction_max = 0.8f,
+        .correction_max = 2.0f,
     },
-    .error_ema_alpha = 1.0f,
-    .error_deadband = 0.25f,
-    .omega_ema_alpha = 1.0f,
+    .error_ema_alpha = 0.6f,
+    .error_deadband = 0.0f,
+    .omega_ema_alpha = 0.3f,
     .two_sensor_lateral_gain = 0.25f,
     .max_lateral_correction_mps = 0.25f,
     .search_omega_rad_s = 2.0f,
