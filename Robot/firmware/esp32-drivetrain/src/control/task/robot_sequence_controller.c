@@ -385,7 +385,15 @@ static bool service_pi_report(
         return true;
     }
 
-    // Link, camera, and request failures stop the sequence.
+    // The arm gave up waiting on the Pi -- move on instead of stalling the
+    // whole sequence on one unanswered scan.
+    if (report.result == PI_RESULT_TIMEOUT) {
+        printf("# Pi scan: timed out waiting for Pi response, skipping\n");
+        return true;
+    }
+
+    // Camera, link, and request failures are real errors, not timeouts --
+    // still stop the sequence for those.
     if (report.result != PI_RESULT_OK) {
         enter_fault(controller, "Pi scan failed", ESP_FAIL);
         return false;
@@ -814,13 +822,13 @@ esp_err_t robot_sequence_controller_update(
     if (deadline_reached(now_ms, controller->step_deadline_ms)) {
         SEQUENCE_DIAGNOSTIC_LOG(
             "# t=%lu Sequence step timeout: index=%u type=%u elapsed_ms=%u "
-            "deadline_ms=%lu\n",
+            "deadline_ms=%lu -- skipping to next step\n",
             (unsigned long)now_ms,
             (unsigned)controller->current_step,
             (unsigned)step->type,
             (unsigned)(now_ms - controller->step_started_ms),
             (unsigned long)controller->step_deadline_ms);
-        enter_fault(controller, "robot step timed out", ESP_ERR_TIMEOUT);
+        advance_sequence(controller, now_ms);
     }
     return ESP_OK;
 }
