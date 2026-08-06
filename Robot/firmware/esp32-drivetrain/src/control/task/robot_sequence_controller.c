@@ -182,7 +182,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.2f},                   // Back off
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.03f, 0.2f},                    // Move sideways to the habitats
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE}, 0.2f, 0.1f},            // Move sideways to the habitats
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.19f, 0.25f},                   // Move sideways to the habitats
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_DISTANCE}, 0.195f, 0.25f},                   // Move sideways to the habitats
 
     /* Pick up the habitats 1 and 2 */
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.78f},                                   // lower claw
@@ -191,7 +191,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.1f},                                    // Raise habitats
 
     /* Move to the habitat base */
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 150.0f, 1.5f},          // Turn around
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 145.0f, 1.5f},          // Turn around
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.08f},                                   // Lower habitats
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_TIME}, 2.75f, 0.1f},         // Ram habitat base
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.05f, 0.2f},   // Move back
@@ -218,7 +218,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     /* Rehome the two steppers */
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.06f, 0.15f},  // Move away from base
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.92f},                                   // Rehome X
-    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.20f},                                    // Rehome Z
+    {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, -0.22f},                                    // Rehome Z
 
     /*------------------------ Solar Panel Code Below ------------------------*/
     /* Go back onto the tape and go to solar panel */
@@ -231,7 +231,9 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_X}, -0.3f},                                            // move claw to position in X
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_PY_UNTIL_SOLAR_PANEL}, 1.0f, 0.2f},   // move left up to 1m or until the solar-panel switch is pressed
     {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},                                            // adjust to hook
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.4f, 0.3f},            // pull solar panel cover away
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.1f, 0.3f},            // pull solar panel cover away
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -10.0f, 1.5f},                           // rotate to face solar panel
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.2f, 0.3f},   
 
     /*------------------------- Habitats 3 and 4 Code Below ------------------------*/
     /* Home the arm, go back onto the tape*/
