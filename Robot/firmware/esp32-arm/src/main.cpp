@@ -157,7 +157,27 @@ void setup() {
     delay(1000);  // Allow one second before starting the robot sequence.
 }
 
+namespace {
+// Temporary: flags any loop() iteration that took unusually long, to check
+// whether something (e.g. the Serial.println below) is blocking the arm's
+// main loop during a real run. Revert once the CMD_METAL_READ stall
+// investigation is resolved.
+uint32_t last_loop_start_ms = 0;
+}  // namespace
+
 void loop() {
+    const uint32_t loop_start_ms = millis();
+    if (last_loop_start_ms != 0) {
+        const uint32_t loop_gap_ms = loop_start_ms - last_loop_start_ms;
+        if (loop_gap_ms > 20) {
+            Serial.printf(
+                "# t=%lu LOOP STALL: %lu ms since previous loop() start\n",
+                (unsigned long)loop_start_ms,
+                (unsigned long)loop_gap_ms);
+        }
+    }
+    last_loop_start_ms = loop_start_ms;
+
     stepper_update(&tower_x_stepper);
     stepper_update(&tower_z_stepper);
     stepper_update(&habitat_x_stepper);

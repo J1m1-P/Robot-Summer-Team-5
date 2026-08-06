@@ -69,9 +69,10 @@ static const RobotSequenceStep kRobotSequence[] = {
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.05f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, 0.03f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.05f, 0.3f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.03f, 0.3f},
     //{ROBOT_STEP_DELAY, {0}, 3.0f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 2.0f},
  
     // Search rock 2
@@ -83,6 +84,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 2.0f},
 
     // Search rock 3
@@ -93,15 +95,18 @@ static const RobotSequenceStep kRobotSequence[] = {
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -30.0f, 0.8f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 2.0f},
 
     // // Search rock 4
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.19f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.13f, 0.3f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 0.8f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.06f, 0.3f},
     {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     {ROBOT_STEP_DELAY, {0}, 2.0f},
 
     // // // Search rock 5
@@ -334,6 +339,14 @@ static void enter_fault(
         (unsigned)controller->current_step,
         reason,
         esp_err_to_name(error));
+    printf(
+        "# Arm UART link stats: sent=%lu received=%lu overwritten=%lu "
+        "checksum_errors=%lu parse_errors=%lu\n",
+        (unsigned long)controller->arm_uart->packets_sent,
+        (unsigned long)controller->arm_uart->packets_received,
+        (unsigned long)controller->arm_uart->packets_overwritten,
+        (unsigned long)controller->arm_uart->checksum_errors,
+        (unsigned long)controller->arm_uart->parse_errors);
 }
 
 static esp_err_t start_robot_step(

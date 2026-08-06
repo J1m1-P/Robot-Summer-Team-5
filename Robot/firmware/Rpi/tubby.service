@@ -39,5 +39,12 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
+# Power the Pi off once tubby_simple.py finishes on its own (exit 0), but not
+# after a crash -- SERVICE_RESULT is only "success" on a clean exit, so a
+# crash still falls through to Restart=on-failure above instead of powering
+# off mid-retry. The leading "+" runs this with full (root) privileges,
+# bypassing the User=/Group= above, since poweroff needs root.
+ExecStopPost=+/bin/bash -c 'if [ "$SERVICE_RESULT" = "success" ]; then systemctl poweroff; fi'
+
 [Install]
 WantedBy=local-fs.target

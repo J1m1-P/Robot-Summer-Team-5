@@ -12,7 +12,11 @@ WIRE (robot_common/pi_action_packet.h) -- identical to tubby_detector.py.
   ESP->Pi PI_REQUEST: request_id, action, parameter (unused).
   Pi->ESP PI_REPORT:  request_id, result, target_id, horizontal_error
                       (always 0 here), confidence_percent.
-  ALL_FOUND is a flag, not a detection: horizontal_error is ignored.
+  Once both targets are found, later scan requests are just answered
+  PI_RESULT_NOT_FOUND instead of a one-shot ALL_FOUND -- every later scan
+  step in the drivetrain's route stays a normal, already-handled result
+  instead of a special case it has to know about. The Pi shuts itself down
+  after SHUTDOWN_AFTER_REQUESTS total scan requests regardless of outcome.
 """
 
 import os
@@ -31,7 +35,6 @@ from uart_link import (
     PI_RESULT_OK,
     PI_RESULT_NOT_FOUND,
     PI_RESULT_CAMERA_FAULT,
-    PI_RESULT_ALL_FOUND,
 )   # the ESP32 serial link
 
 try:
@@ -70,6 +73,8 @@ SCAN_BURST_FRAMES   = 5    # ADJUST: frames sampled per request (well under the 
 SCAN_MIN_VOTES      = 3    # ADJUST: burst frames that must agree before flashing
 FLASH_COUNT         = 2    # ADJUST: flashes fired once a winner is voted
 TARGETS_TO_FIND     = 2    # only two teletubbies exist — leave at 2
+SHUTDOWN_AFTER_REQUESTS = 6   # ADJUST: total scan requests serviced (found or
+                              # not) before the Pi exits on its own
 
 # ── training image collection ─────────────────────────────────────────────────
 # Saves raw camera frames to disk (no YOLO inference) while IDLE, for building
@@ -232,6 +237,9 @@ print(f"[startup] warmup done in {time.time() - _warmup_start:.2f}s")
 
 # Count of teletubbies flashed so far (identity is never tracked).
 found_count = 0
+# Count of scan requests serviced so far, found or not -- drives the
+# SHUTDOWN_AFTER_REQUESTS safety net below.
+scan_request_count = 0
 
 
 def pick_target(detections):
@@ -314,56 +322,66 @@ def send_report(request_id, result, target_id=0, horizontal_error=0.0,
         confidence_percent=confidence_percent)
 
 
+def _drain_flash_and_shutdown(reason, code=0):
+    """Finish any queued flash pulses then exit. Blocking is fine here --
+    control_loop won't get another tick to service them once we shut down,
+    and we're exiting either way."""
+    time.sleep(0.1)  # give the last report a moment to actually go out first
+    while _flash_state != "idle" or _flash_pulses_pending:
+        _service_flash()
+        time.sleep(0.03)
+    print(f"[control_loop] {reason} — shutting down")
+    _shutdown(code)
+
+
 def handle_scan_request_simple(request_id, parameter):
     """
     Vote presence across a short burst of frames and flash immediately if
     solid -- no centering, no identity, one report per call. `parameter` is
     decoded but unused (reserved for future per-scan tuning).
+
+    Once both targets are found, later requests skip detection entirely and
+    just reply PI_RESULT_NOT_FOUND. The Pi shuts itself down after
+    SHUTDOWN_AFTER_REQUESTS total scan requests, found or not.
     """
-    global found_count
+    global found_count, scan_request_count
+    scan_request_count += 1
 
-    # Sample the burst, counting frames with at least one detection.
-    frames_seen = 0
-    frames_read = 0
-    for _ in range(SCAN_BURST_FRAMES):
-        ok, frame = cap.read()
-        if not ok:
-            continue
-        frames_read += 1
-        _maybe_collect_image(frame)
-        dets = yolo_detect_all(frame, frame.shape[1])
-        if dets:
-            frames_seen += 1
-        _report_state("SCANNING", pick_target(dets))
-
-    # Camera never produced a usable frame this burst.
-    if frames_read == 0:
-        print(f"[SCAN #{request_id}] camera unavailable")
-        send_report(request_id, PI_RESULT_CAMERA_FAULT)
-        return
-
-    # Not enough of the burst agreed -- treat as noise, not a detection.
-    if frames_seen < SCAN_MIN_VOTES:
-        print(f"[SCAN #{request_id}] no detection (found so far={found_count})")
-        send_report(request_id, PI_RESULT_NOT_FOUND)
-        return
-
-    confidence_percent = round(100 * frames_seen / SCAN_BURST_FRAMES)
-
-    # Detection locked in: flash and count it. Relies on the caller only
-    # requesting one scan per physical teletubby.
-    for _ in range(FLASH_COUNT):
-        flash_once()
-    found_count += 1
-    print(f"[SCAN #{request_id}] flashed teletubby #{found_count} conf={confidence_percent}%")
-
-    # Tell the ESP whether that was the last target.
     if found_count >= TARGETS_TO_FIND:
-        # Nothing left to search for — the ESP moves on to Tower pickup.
-        result = PI_RESULT_ALL_FOUND
-        print(f"[SCAN #{request_id}] all {TARGETS_TO_FIND} targets flashed")
+        print(f"[SCAN #{request_id}] all targets already found, replying not-found")
+        result, confidence_percent = PI_RESULT_NOT_FOUND, 0
     else:
-        result = PI_RESULT_OK
+        # Sample the burst, counting frames with at least one detection.
+        frames_seen = 0
+        frames_read = 0
+        for _ in range(SCAN_BURST_FRAMES):
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            frames_read += 1
+            _maybe_collect_image(frame)
+            dets = yolo_detect_all(frame, frame.shape[1])
+            if dets:
+                frames_seen += 1
+            _report_state("SCANNING", pick_target(dets))
+
+        if frames_read == 0:
+            # Camera never produced a usable frame this burst.
+            print(f"[SCAN #{request_id}] camera unavailable")
+            result, confidence_percent = PI_RESULT_CAMERA_FAULT, 0
+        elif frames_seen < SCAN_MIN_VOTES:
+            # Not enough of the burst agreed -- treat as noise, not a detection.
+            print(f"[SCAN #{request_id}] no detection (found so far={found_count})")
+            result, confidence_percent = PI_RESULT_NOT_FOUND, 0
+        else:
+            # Detection locked in: flash and count it. Relies on the caller
+            # only requesting one scan per physical teletubby.
+            confidence_percent = round(100 * frames_seen / SCAN_BURST_FRAMES)
+            for _ in range(FLASH_COUNT):
+                flash_once()
+            found_count += 1
+            print(f"[SCAN #{request_id}] flashed teletubby #{found_count} conf={confidence_percent}%")
+            result = PI_RESULT_OK
 
     send_report(
         request_id, result,
@@ -371,17 +389,9 @@ def handle_scan_request_simple(request_id, parameter):
         horizontal_error=0.0,
         confidence_percent=confidence_percent)
 
-    if result == PI_RESULT_ALL_FOUND:
-        # Give the report a moment to actually go out over the wire first.
-        time.sleep(0.1)
-        # control_loop won't get another tick to service the queued flash
-        # pulses once we shut down, so drain them here. Blocking is fine --
-        # we're exiting either way.
-        while _flash_state != "idle" or _flash_pulses_pending:
-            _service_flash()
-            time.sleep(0.03)
-        print("[control_loop] all targets found — shutting down")
-        _shutdown(0)
+    print(f"[SCAN #{request_id}] {scan_request_count}/{SHUTDOWN_AFTER_REQUESTS} scan requests serviced")
+    if scan_request_count >= SHUTDOWN_AFTER_REQUESTS:
+        _drain_flash_and_shutdown("scan request budget used up")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
