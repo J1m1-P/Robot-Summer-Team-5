@@ -1,9 +1,18 @@
 [Unit]
 Description=Teletubby YOLO detector
-# Don't start until the base system + devices are up. The camera (/dev/video0)
-# is a USB device that may enumerate a beat after boot, so we also sleep below.
-After=multi-user.target
-Wants=multi-user.target
+# Only needs the local disk (venv + model files) and device nodes (serial,
+# GPIO, USB camera) -- not networking, cloud-init, or console login. A plain
+# service unit auto-gets Requires=/After=basic.target, which on this Pi is
+# gated behind the whole cloud-init chain (~3s) via sysinit.target --
+# DefaultDependencies=no drops that implicit pull-in so only the explicit
+# After=local-fs.target below applies (see `systemd-analyze critical-chain
+# tubby.service`). We re-add the shutdown ordering by hand since opting out
+# also drops that.
+DefaultDependencies=no
+After=local-fs.target
+Requires=local-fs.target
+Conflicts=shutdown.target
+Before=shutdown.target
 
 [Service]
 Type=simple
@@ -11,8 +20,13 @@ User=admin5
 Group=admin5
 WorkingDirectory=/home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision
 
-# Give the USB webcam + ESP32 UART a moment to enumerate before we grab them.
-ExecStartPre=/bin/sleep 8
+# Wait for the USB webcam to actually enumerate before starting, instead of a
+# blind sleep. USB cameras get a stable symlink under /dev/v4l/by-id/ that only
+# exists once the device is plugged in and ready -- so we poll for any *video*
+# node there, every 0.5s for up to 60s, and start the instant it appears.
+# (We deliberately do NOT wait on /dev/video0: on the Pi that's an internal
+# device that's always present and is NOT the webcam.)
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 120); do ls /dev/v4l/by-id/*video* >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
 
 # Use the venv's python directly (no need to "source activate").
 ExecStart=/home/admin5/robotSummer/ComputerVision/venv/bin/python /home/admin5/robotSummer/Robot-Summer-Team-5/Robot/firmware/Rpi/computerVision/tubby_simple.py
@@ -25,5 +39,12 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
+# Power the Pi off once tubby_simple.py finishes on its own (exit 0), but not
+# after a crash -- SERVICE_RESULT is only "success" on a clean exit, so a
+# crash still falls through to Restart=on-failure above instead of powering
+# off mid-retry. The leading "+" runs this with full (root) privileges,
+# bypassing the User=/Group= above, since poweroff needs root.
+ExecStopPost=+/bin/bash -c 'if [ "$SERVICE_RESULT" = "success" ]; then systemctl poweroff; fi'
+
 [Install]
-WantedBy=multi-user.target
+WantedBy=local-fs.target
