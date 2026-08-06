@@ -22,7 +22,7 @@ from ultralytics import YOLO
 
 
 # ── Inputs / knobs ────────────────────────────────────────────────────────────
-PT_MODEL = r"E:\runs\exp-5.pt"
+PT_MODEL = r"E:\runs\exp-6.pt"
 
 # DECISION 1 — input size. This is your biggest FPS lever on the Pi.
 #   640: full accuracy, ~2-5 FPS on Pi 4. Start here.
@@ -38,7 +38,7 @@ IMGSZ = 640   # TODO: confirm 640, or set 320 after benchmarking on the Pi.
 HALF = True
 
 # The folder export() produces (printed when it runs). It sits next to best.pt.
-NCNN_DIR = r"E:\runs\exp-5_ncnn_model"
+NCNN_DIR = r"E:\runs\exp-6_ncnn_model"
 
 # Confidence sanity_check() runs both models at -- matches the 0.5 default
 # used elsewhere in this codebase (tubby_detector.py's DETECT_CONF), so the
@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
     # Step 2: once export has produced the folder and you've filled in
     # TEST_IMAGES, comment out export() above and uncomment this to vet it:
-    sanity_check(NCNN_DIR, TEST_IMAGES)
+     sanity_check(NCNN_DIR, TEST_IMAGES)
 
 
 # ── Wiring it into detector_final.py (do this AFTER sanity_check passes) ───────

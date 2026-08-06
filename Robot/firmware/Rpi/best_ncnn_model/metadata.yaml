@@ -1,6 +1,6 @@
-description: Ultralytics best model trained on E:\ENPH253\TeletubbyImages\Labeled3\data.yaml
+description: Ultralytics YOLO26n model trained on /datasets/tubbies2-bed45c75/data.yaml
 author: Ultralytics
-date: '2026-08-03T14:33:56.426866-07:00'
+date: '2026-08-04T18:21:46.617521-07:00'
 version: 8.4.114
 license: AGPL-3.0 License (https://ultralytics.com/license)
 docs: https://docs.ultralytics.com
@@ -12,10 +12,8 @@ imgsz:
 - 640
 - 640
 names:
-  0: DP
-  1: LL
-  2: PO
-  3: TW
+  0: .video_frames
+  1: Teletubby
 args:
   batch: 1
   quantize: 16
