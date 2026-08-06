@@ -70,7 +70,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.78f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.05f, 0.15f},
     //{ROBOT_STEP_DELAY, {0}, 3.0f},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
  
     // Search rock 2
@@ -81,7 +81,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, -0.35f, 0.4f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.04f, 0.2f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.5f, 0.4f},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
     
     // Search rock 3
@@ -91,7 +91,7 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.08f, 0.3f},
     //{ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, -30.0f, 0.8f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_PX_TAPE_FOLLOW_DISTANCE}, 0.55f, 0.4f},
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 
     // // Search rock 4
@@ -101,8 +101,8 @@ static const RobotSequenceStep kRobotSequence[] = {
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.33f, 0.4f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_ROTATE}, 51.0f, 0.8f},
     {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.05f, 0.2f},
-    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.15f},\
-    {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
+    {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.1f, 0.15f},
+    // {ROBOT_STEP_PI_SCAN, {.arm = CMD_PI_SCAN_TELETUBBIES}, 0.0f},
     {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 
     // // Search rock 5
@@ -480,18 +480,12 @@ static void handle_sequence_frame(
             status.code == STATUS_ACTION_COMPLETE &&
             (status.detail == STATUS_DETAIL_METAL_DETECTED ||
              status.detail == STATUS_DETAIL_METAL_NOT_DETECTED);
-        const bool metal_baseline_complete =
-            step->type == ROBOT_STEP_ARM &&
-            step->action.arm == CMD_METAL_SET_BASELINE &&
-            status.code == STATUS_ACTION_COMPLETE &&
-            status.detail == step_expected_detail;
         const bool fixed_detail_complete =
             step->type == ROBOT_STEP_ARM &&
             step->action.arm != CMD_METAL_READ &&
-            step->action.arm != CMD_METAL_SET_BASELINE &&
+            status.code == STATUS_ACTION_COMPLETE &&
             status.detail == step_expected_detail;
-        step_complete = metal_read_complete || metal_baseline_complete ||
-            fixed_detail_complete;
+        step_complete = metal_read_complete || fixed_detail_complete;
         if (step->type == ROBOT_STEP_ARM) {
             SEQUENCE_DIAGNOSTIC_LOG(
                 "# t=%lu Arm completion %s: step=%u received_detail=%u "
