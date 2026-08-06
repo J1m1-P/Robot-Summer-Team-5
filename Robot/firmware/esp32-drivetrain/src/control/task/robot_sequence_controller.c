@@ -292,14 +292,13 @@ static const RobotSequenceStep kRobotSequence[] = {
     // {ROBOT_STEP_ARM, {.arm = CMD_HABITAT_Z}, 0.08f},
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_X_DISTANCE}, 0.3f, 0.25f},            // pull solar panel cover away
     // {ROBOT_STEP_MOVEMENT, {.movement = MOVEMENT_ACTION_GO_Y_DISTANCE}, -0.2f, 0.25f},            // pull solar panel cover away
-#endif
 
-    // Stationary rock-read test: each read owns its baseline and claw workflow.
-    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 5.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
-    {ROBOT_STEP_DELAY, {0}, 5.0f},
-    {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
+    // // Stationary rock-read test: each read owns its baseline and claw workflow.
+    // {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
+    // {ROBOT_STEP_DELAY, {0}, 5.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
+    // {ROBOT_STEP_DELAY, {0}, 5.0f},
+    // {ROBOT_STEP_ARM, {.arm = CMD_METAL_READ}, 0.0f},
 };
 
 static const size_t kRobotSequenceLength =
