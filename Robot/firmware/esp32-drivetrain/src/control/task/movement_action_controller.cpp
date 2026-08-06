@@ -20,6 +20,7 @@ constexpr float kTapeFollowSpeedMps = 0.35f;
 constexpr float kSideTowerFollowSpeedMps = 0.15f;
 constexpr float kTapeFollowTimeoutS = 30.0f;
 constexpr float kTapeAlignTimeoutS = 3.0f;
+constexpr float kMxTapePivotDistanceM = 0.5f;
 constexpr float kLocatorApproachSpeedMps = 0.10f;
 constexpr float kPrecisionVxMps = 0.2f;
 constexpr float kPrecisionVyMps = 0.15f;
@@ -48,6 +49,13 @@ constexpr TapeStopSpec kFrontLeftTapeStopSpec = {
     // Front channels run from absolute right (0) to absolute left (3).
     // During a CCW sweep, the left detector reaches the tape first.
     .channel_mask = 1U << TAPE_SENSOR_CHANNEL_3,
+};
+constexpr TapeStopSpec kFrontCenterTapeStopSpec = {
+    .sensor_mask = 1U << 0,  // front/PX sensor
+    .required_sensor_count = 1,
+    .channel_mask = (1U << TAPE_SENSOR_CHANNEL_1) |
+                    (1U << TAPE_SENSOR_CHANNEL_2),
+    .required_channel_count = 2,
 };
 
 LineFollowerContext *g_line_follower_ctx = nullptr;
@@ -115,14 +123,18 @@ bool follow_tape_action(
     StopCondition stop_condition,
     float distance_m,
     float timeout_s,
-    TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO) {
+    TapeMarkerSensor marker_sensor = TapeMarkerSensor::AUTO,
+    TapeFollowTuningProfile tuning_profile =
+        TapeFollowTuningProfile::STANDARD) {
     const TapeFollowMode follow_mode =
-        direction == Direction::PX || direction == Direction::MX
+        stop_condition == StopCondition::ALL_CHANNELS_ON
+            ? TapeFollowMode::SINGLE_SENSOR
+            : direction == Direction::PX || direction == Direction::MX
             ? TapeFollowMode::FRONT_BACK_ALIGNED
             : TapeFollowMode::SINGLE_SENSOR;
     if (!follow_tape(
         context, direction, speed_mps, stop_condition, distance_m, timeout_s,
-        follow_mode, marker_sensor)) {
+        follow_mode, marker_sensor, tuning_profile)) {
         return false;
     }
 
@@ -135,6 +147,40 @@ bool follow_tape_action(
                 kPrecisionTimeoutS) != ESP_OK) {
             return false;
         }
+    }
+    sync_planned_pose();
+    return true;
+}
+
+bool follow_tape_average_heading_action(LineFollowerContext *context,
+                                        float speed_mps) {
+    float regression_heading_rad = 0.0f;
+    if (!follow_tape_until_all_channels_average_heading(
+            context, speed_mps, kTapeFollowTimeoutS,
+            &regression_heading_rad)) {
+        return false;
+    }
+
+    // First let the endpoint settle without changing its measured heading.
+    if (g_precision_move_ctx == nullptr) return false;
+    const PrecisionMoveTarget settle_target = {};
+    if (precision_move(g_precision_move_ctx, &settle_target,
+                       kPrecisionTimeoutS) != ESP_OK) {
+        return false;
+    }
+
+    // Rotate in place to the regression world-frame heading. precision_move()
+    // also re-anchors the pose to this exact heading when it completes.
+    const Pose endpoint = pose_tracker_get_pose(
+        context->sequence_controller->pose_tracker);
+    const PrecisionMoveTarget heading_target = {
+        .world_goal_enabled = true,
+        .world_goal = {
+            endpoint.x_m, endpoint.y_m, regression_heading_rad},
+    };
+    if (precision_move(g_precision_move_ctx, &heading_target,
+                       kPrecisionTimeoutS) != ESP_OK) {
+        return false;
     }
     sync_planned_pose();
     return true;
@@ -168,6 +214,14 @@ bool action_requires_positive_distance(MovementAction action) {
 bool action_requires_positive_time(MovementAction action) {
     return action == MOVEMENT_ACTION_GO_X_TIME ||
            action == MOVEMENT_ACTION_GO_Y_TIME;
+}
+
+bool action_requires_nonzero_direction(MovementAction action) {
+    return action == MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE;
+}
+
+bool action_requires_positive_speed(MovementAction action) {
+    return action == MOVEMENT_ACTION_MX_TAPE_PIVOT_ALIGN;
 }
 
 // These actions use speed's sign to select drive direction instead of the
@@ -379,10 +433,12 @@ extern "C" esp_err_t movement_action_controller_init_with_speed(
         !std::isfinite(speed) ||
         (!signed_speed_action && speed < 0.0f) ||
         (signed_speed_action && speed == 0.0f) ||
+        (action_requires_positive_speed(action) && speed <= 0.0f) ||
         (action_requires_nonnegative_distance(action) && action_value < 0.0f) ||
         (action_requires_positive_distance(action) && action_value <= 0.0f) ||
         (action_requires_positive_sweep(action) && action_value <= 0.0f) ||
-        (action_requires_positive_time(action) && action_value <= 0.0f)) {
+        (action_requires_positive_time(action) && action_value <= 0.0f) ||
+        (action_requires_nonzero_direction(action) && action_value == 0.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -510,7 +566,16 @@ extern "C" bool movement_action_controller_update(
                     Direction::PX,
                     speed_or_default(controller->speed, kTapeFollowSpeedMps),
                     StopCondition::ALL_CHANNELS_ON, 0.0f,
-                    kTapeFollowTimeoutS);
+                    kTapeFollowTimeoutS, TapeMarkerSensor::AUTO,
+                    TapeFollowTuningProfile::HABITAT_APPROACH);
+            }
+            return false;
+
+        case MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON_AVERAGE_HEADING:
+            if (g_line_follower_ctx != nullptr) {
+                return follow_tape_average_heading_action(
+                    g_line_follower_ctx,
+                    speed_or_default(controller->speed, kTapeFollowSpeedMps));
             }
             return false;
 
@@ -558,10 +623,14 @@ extern "C" bool movement_action_controller_update(
                 };
                 const esp_err_t align_error = align_on_tape(
                     &align_context,
+                    // The front/PX module is the fixed pivot. The back/MX
+                    // module only supplies the alignment feedback.
                     Direction::PX,
                     Direction::MX,
                     false,
-                    kTapeAlignTimeoutS);
+                    controller->speed,
+                    kTapeAlignTimeoutS,
+                    kMxTapePivotDistanceM);
                 const bool success = align_error == ESP_OK;
 #if ROBOT_MOTION_DIAGNOSTICS
                 std::printf(
@@ -651,6 +720,21 @@ extern "C" bool movement_action_controller_update(
                     controller->speed,
                     controller->action_value > 0.0f
                         ? controller->action_value : kPrecisionVyMps));
+
+        // Strafe along either Y direction until both center channels on the
+        // PX/front module are active. The sign of action_value selects the
+        // direction; its magnitude retains the legacy fallback-speed
+        // convention when no explicit speed is supplied.
+        case MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE:
+            return precision_action(
+                0.0f,
+                std::copysign(kTapeSeekMaxDistanceM,
+                              controller->action_value),
+                0.0f,
+                &kFrontCenterTapeStopSpec,
+                speed_or_default(
+                    controller->speed,
+                    std::fabs(controller->action_value)));
 
         // action_value is the CW sweep bound in degrees (clamped to the
         // wrap-safe maximum).

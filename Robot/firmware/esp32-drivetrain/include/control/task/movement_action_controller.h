@@ -30,6 +30,8 @@ typedef enum {
     MOVEMENT_ACTION_GO_PX_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_GO_MX_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_GO_PY_UNTIL_FRONT_TAPE,
+    // action_value selects the Y direction: positive is +Y, negative is -Y.
+    MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE,
     // Require a positive maximum sweep in degrees.
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_SIDE_TAPE,
     MOVEMENT_ACTION_ROTATE_CW_UNTIL_FRONT_TAPE,
@@ -43,6 +45,9 @@ typedef enum {
     MOVEMENT_ACTION_GO_PX_DISTANCE,
     MOVEMENT_ACTION_GENERAL_MOTION,
     MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON,
+    // PX tape follow that re-anchors heading to the circular mean measured
+    // 13 cm to 3 cm before the all-channels endpoint.
+    MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON_AVERAGE_HEADING,
     // Open-loop, time-based body-axis drive: no odometry goal is tracked, and
     // action_value/speed mean duration/signed velocity instead of the usual
     // distance/unsigned speed. See the struct fields below.
@@ -75,8 +80,10 @@ esp_err_t movement_action_controller_init(
     float action_value);
 
 // Prepares an action with an optional movement speed. Translation and tape
-// actions use m/s; rotation actions use rad/s. Zero speed selects the default.
-// Microswitch-driven moves require a positive maximum distance.
+// actions use m/s; rotation actions (including tape pivot alignment) use
+// rad/s. Zero speed selects the default except for tape pivot alignment, which
+// requires an explicit positive speed. Microswitch-driven moves require a
+// positive maximum distance.
 esp_err_t movement_action_controller_init_with_speed(
     MovementActionController *controller,
     MovementAction action,

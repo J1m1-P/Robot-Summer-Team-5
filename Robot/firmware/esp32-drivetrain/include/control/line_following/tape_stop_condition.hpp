@@ -16,6 +16,9 @@ struct TapeStopSpec {
     uint8_t sensor_mask = 0;  // which sensor modules to inspect
     uint8_t required_sensor_count = 0;
     uint8_t channel_mask = 1U << TAPE_SENSOR_CHANNEL_0;  // channels to inspect
+    // Number of selected channels that must be active on one sensor. The
+    // default preserves the original any-selected-channel behavior.
+    uint8_t required_channel_count = 1;
     bool stop_on_gap = false;
     uint8_t gap_edge_channel_mask = 1U << TAPE_SENSOR_CHANNEL_1;
     float max_gap_distance_m = 0.08f;

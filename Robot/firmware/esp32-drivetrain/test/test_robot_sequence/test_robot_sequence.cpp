@@ -25,6 +25,8 @@ float last_stop_value = 0.0f;
 float last_follow_timeout_s = 0.0f;
 TapeFollowMode last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
 TapeMarkerSensor last_marker_sensor = TapeMarkerSensor::AUTO;
+TapeFollowTuningProfile last_tuning_profile =
+    TapeFollowTuningProfile::STANDARD;
 bool service_during_follow = false;
 uint32_t fake_millis = 0;
 int solar_panel_switch_level = LOW;
@@ -37,6 +39,13 @@ size_t precision_move_calls = 0;
 PrecisionMoveTarget last_precision_target = {};
 float last_precision_timeout_s = 0.0f;
 bool precision_move_requires_external_stop = false;
+size_t align_on_tape_calls = 0;
+Direction last_align_travel_direction = Direction::MX;
+Direction last_align_feedback_direction = Direction::PX;
+bool last_align_on_gap = true;
+float last_align_sweep_omega_rad_s = 0.0f;
+float last_align_timeout_s = 0.0f;
+float last_align_pivot_distance_override_m = 0.0f;
 Pose current_pose = {};
 
 }  // namespace
@@ -44,7 +53,8 @@ Pose current_pose = {};
 bool follow_tape(LineFollowerContext *context, Direction direction, float speed_mps,
                  StopCondition stop_condition, float stop_value,
                  float timeout_s, TapeFollowMode mode,
-                 TapeMarkerSensor marker_sensor) {
+                 TapeMarkerSensor marker_sensor,
+                 TapeFollowTuningProfile tuning_profile) {
     ++follow_tape_calls;
     last_follow_direction = direction;
     last_follow_speed_mps = speed_mps;
@@ -53,6 +63,7 @@ bool follow_tape(LineFollowerContext *context, Direction direction, float speed_
     last_follow_timeout_s = timeout_s;
     last_follow_mode = mode;
     last_marker_sensor = marker_sensor;
+    last_tuning_profile = tuning_profile;
     if (service_during_follow) {
         TEST_ASSERT_EQUAL(
             ESP_OK,
@@ -225,6 +236,24 @@ esp_err_t precision_move(
     return ESP_OK;
 }
 
+esp_err_t align_on_tape(
+    const TapeAlignContext *,
+    Direction travel_direction,
+    Direction feedback_direction,
+    bool on_gap,
+    float sweep_omega_rad_s,
+    float timeout_s,
+    float pivot_distance_override_m) {
+    ++align_on_tape_calls;
+    last_align_travel_direction = travel_direction;
+    last_align_feedback_direction = feedback_direction;
+    last_align_on_gap = on_gap;
+    last_align_sweep_omega_rad_s = sweep_omega_rad_s;
+    last_align_timeout_s = timeout_s;
+    last_align_pivot_distance_override_m = pivot_distance_override_m;
+    return ESP_OK;
+}
+
 extern "C" bool status_packet_is(const PacketFrame *frame) {
     return frame != nullptr &&
            frame->message_type == PACKET_TYPE_STATUS &&
@@ -347,6 +376,7 @@ void setUp() {
     last_follow_timeout_s = 0.0f;
     last_follow_mode = TapeFollowMode::SINGLE_SENSOR;
     last_marker_sensor = TapeMarkerSensor::AUTO;
+    last_tuning_profile = TapeFollowTuningProfile::STANDARD;
     service_during_follow = false;
     solar_panel_switch_level = LOW;
     configured_switch_pin = UINT8_MAX;
@@ -358,6 +388,13 @@ void setUp() {
     last_precision_target = {};
     last_precision_timeout_s = 0.0f;
     precision_move_requires_external_stop = false;
+    align_on_tape_calls = 0;
+    last_align_travel_direction = Direction::MX;
+    last_align_feedback_direction = Direction::PX;
+    last_align_on_gap = true;
+    last_align_sweep_omega_rad_s = 0.0f;
+    last_align_timeout_s = 0.0f;
+    last_align_pivot_distance_override_m = 0.0f;
     current_pose = {};
     movement_action_controller_set_line_follower_context(nullptr);
     movement_action_controller_set_precision_move_context(nullptr);
@@ -550,6 +587,18 @@ void test_movement_action_rejects_invalid_values() {
             &controller,
             MOVEMENT_ACTION_GO_MX_UNTIL_LOCATOR,
             0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE,
+            0.0f));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_MX_TAPE_PIVOT_ALIGN,
+            0.0f));
 }
 
 void test_locator_contact_notifies_only_locator_approach() {
@@ -719,6 +768,78 @@ void test_rotation_corrects_to_planned_absolute_heading_without_position_move() 
         last_precision_target.world_goal.heading_rad);
 }
 
+void test_front_center_tape_action_supports_both_y_directions() {
+    RobotSequenceController sequence_controller = {};
+    PrecisionMoveContext precision_context = {
+        .sequence_controller = &sequence_controller,
+    };
+    movement_action_controller_set_precision_move_context(&precision_context);
+
+    const float direction_values[] = {0.2f, -0.2f};
+    const float expected_y[] = {1.5f, -1.5f};
+    for (size_t index = 0; index < 2; ++index) {
+        MovementActionController controller = {};
+        TEST_ASSERT_EQUAL(
+            ESP_OK,
+            movement_action_controller_init_with_speed(
+                &controller,
+                MOVEMENT_ACTION_GO_Y_UNTIL_FRONT_CENTER_TAPE,
+                direction_values[index],
+                0.3f));
+        TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+        TEST_ASSERT_EQUAL_UINT32(index + 1, precision_move_calls);
+        TEST_ASSERT_FLOAT_WITHIN(
+            0.001f, expected_y[index], last_precision_target.dy_body_m);
+        TEST_ASSERT_FLOAT_WITHIN(
+            0.001f,
+            index == 0 ? 0.3f : -0.3f,
+            last_precision_target.body_velocity.vy);
+        TEST_ASSERT_TRUE(last_precision_target.tape_stop_enabled);
+        TEST_ASSERT_EQUAL_UINT8(1U << 0,
+                                last_precision_target.tape_stop_spec.sensor_mask);
+        TEST_ASSERT_EQUAL_UINT8(
+            (1U << TAPE_SENSOR_CHANNEL_1) |
+                (1U << TAPE_SENSOR_CHANNEL_2),
+            last_precision_target.tape_stop_spec.channel_mask);
+        TEST_ASSERT_EQUAL_UINT8(
+            2, last_precision_target.tape_stop_spec.required_channel_count);
+    }
+}
+
+void test_tape_pivot_align_uses_action_speed_and_front_axle_pivot() {
+    Drivetrain drivetrain = {};
+    RobotSequenceController sequence_controller = {};
+    PrecisionMoveContext precision_context = {
+        .drivetrain = &drivetrain,
+        .sequence_controller = &sequence_controller,
+    };
+    movement_action_controller_set_precision_move_context(&precision_context);
+
+    MovementActionController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init_with_speed(
+            &controller,
+            MOVEMENT_ACTION_MX_TAPE_PIVOT_ALIGN,
+            0.0f,
+            0.2f));
+    TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+
+    TEST_ASSERT_EQUAL_UINT32(1, align_on_tape_calls);
+    TEST_ASSERT_EQUAL(
+        static_cast<int>(Direction::PX),
+        static_cast<int>(last_align_travel_direction));
+    TEST_ASSERT_EQUAL(
+        static_cast<int>(Direction::MX),
+        static_cast<int>(last_align_feedback_direction));
+    TEST_ASSERT_FALSE(last_align_on_gap);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.001f, 0.2f, last_align_sweep_omega_rad_s);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, last_align_timeout_s);
+    TEST_ASSERT_FLOAT_WITHIN(
+        0.001f, 0.120f, last_align_pivot_distance_override_m);
+}
+
 void test_tape_distance_actions_route_to_matching_sensor_direction() {
     LineFollowerContext context = {};
     movement_action_controller_set_line_follower_context(&context);
@@ -758,7 +879,28 @@ void test_tape_distance_actions_route_to_matching_sensor_direction() {
         TEST_ASSERT_EQUAL(
             static_cast<int>(expected_mode),
             static_cast<int>(last_follow_mode));
+        TEST_ASSERT_EQUAL(
+            static_cast<int>(TapeFollowTuningProfile::STANDARD),
+            static_cast<int>(last_tuning_profile));
     }
+}
+
+void test_all_channels_action_uses_habitat_tuning_profile() {
+    LineFollowerContext context = {};
+    movement_action_controller_set_line_follower_context(&context);
+
+    MovementActionController controller = {};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        movement_action_controller_init(
+            &controller,
+            MOVEMENT_ACTION_PX_TAPE_FOLLOW_UNTIL_ALL_CHANNELS_ON,
+            0.0f));
+    TEST_ASSERT_TRUE(movement_action_controller_update(&controller));
+    TEST_ASSERT_EQUAL_UINT32(1, follow_tape_calls);
+    TEST_ASSERT_EQUAL(
+        static_cast<int>(TapeFollowTuningProfile::HABITAT_APPROACH),
+        static_cast<int>(last_tuning_profile));
 }
 
 void test_habitat_actions_have_unique_completion_details() {
@@ -803,7 +945,10 @@ int main(int, char **) {
     RUN_TEST(test_solar_panel_switch_is_active_high_with_interrupt_and_poll_fallback);
     RUN_TEST(test_solar_panel_movement_uses_py_bound_and_requires_contact);
     RUN_TEST(test_rotation_corrects_to_planned_absolute_heading_without_position_move);
+    RUN_TEST(test_front_center_tape_action_supports_both_y_directions);
+    RUN_TEST(test_tape_pivot_align_uses_action_speed_and_front_axle_pivot);
     RUN_TEST(test_tape_distance_actions_route_to_matching_sensor_direction);
+    RUN_TEST(test_all_channels_action_uses_habitat_tuning_profile);
     RUN_TEST(test_habitat_actions_have_unique_completion_details);
     return UNITY_END();
 }

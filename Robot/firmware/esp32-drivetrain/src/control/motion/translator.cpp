@@ -120,7 +120,6 @@ constexpr float kAlignSettleS = 0.15f;  // must stay centered this long to finis
 constexpr float kAlignEmaAlpha = 0.4f;
 constexpr float kAlignSweepHalfAngleRad =
     15.0f * static_cast<float>(M_PI) / 180.0f;
-constexpr float kAlignSweepOmegaRadS = 0.4f;
 
 int AlignSensorIndex(Direction dir) {
     switch (dir) {
@@ -685,19 +684,39 @@ esp_err_t timed_move(
 }
 
 esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
-                        Direction feedback_dir, bool on_gap, float timeout_s) {
+                        Direction feedback_dir, bool on_gap,
+                        float sweep_omega_rad_s, float timeout_s,
+                        float pivot_distance_override_m) {
     if (context == nullptr || context->drivetrain == nullptr ||
         context->sequence_controller == nullptr ||
         context->sequence_controller->pose_tracker == nullptr ||
         context->sensors[0] == nullptr || context->sensors[1] == nullptr ||
         context->sensors[2] == nullptr ||
-        !std::isfinite(timeout_s) || timeout_s <= 0.0f) {
+        !std::isfinite(sweep_omega_rad_s) || sweep_omega_rad_s <= 0.0f ||
+        !std::isfinite(timeout_s) || timeout_s <= 0.0f ||
+        !std::isfinite(pivot_distance_override_m) ||
+        pivot_distance_override_m < 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
 
     float pivot_x_m = 0.0f, pivot_y_m = 0.0f;
     AlignPivotOffset(context->drivetrain->config->x_drive_kinematics,
                      travel_dir, &pivot_x_m, &pivot_y_m);
+    if (pivot_distance_override_m > 0.0f) {
+        pivot_x_m = 0.0f;
+        pivot_y_m = 0.0f;
+        switch (travel_dir) {
+            case Direction::PX:
+                pivot_x_m = pivot_distance_override_m;
+                break;
+            case Direction::MX:
+                pivot_x_m = -pivot_distance_override_m;
+                break;
+            case Direction::PY:
+                pivot_y_m = pivot_distance_override_m;
+                break;
+        }
+    }
     const TapeSensor *sensor = context->sensors[AlignSensorIndex(feedback_dir)];
 
     const int64_t t0 = esp_timer_get_time();
@@ -781,7 +800,11 @@ esp_err_t align_on_tape(const TapeAlignContext *context, Direction travel_dir,
         }
 
         const float omega = sweeping_ccw
-            ? kAlignSweepOmegaRadS : -kAlignSweepOmegaRadS;
+            ? sweep_omega_rad_s : -sweep_omega_rad_s;
+        // Cancel the velocity omega x pivot_offset that rotation about the
+        // robot center would otherwise give the guide sensor. For the PX
+        // guide sensor this commands vy = -omega * front_sensor_offset,
+        // keeping the front sensor stationary instead of the robot center.
         const float vx = omega * pivot_y_m;
         const float vy = -omega * pivot_x_m;
 

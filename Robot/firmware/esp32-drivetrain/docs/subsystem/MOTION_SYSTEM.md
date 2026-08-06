@@ -46,14 +46,20 @@ sensor (`feedback_dir`) until that sensor is centered:
 ```cpp
 align_on_tape(&align_ctx, /*travel_dir=*/Direction::PY,
               /*feedback_dir=*/Direction::MX,
-              /*on_gap=*/false, /*timeout_s=*/3.0f);
+              /*on_gap=*/false, /*sweep_omega_rad_s=*/0.2f,
+              /*timeout_s=*/3.0f);
 ```
 
 `on_gap` must match the preceding stop: `false` after `LATERAL_ONE` and `true`
 after `RISE_TWO`. The maneuver searches for the centered feature by pivoting
-CCW through 15 degrees and then CW through 15 degrees at 0.4 rad/s. Missing
-feedback channels are tolerated during the sweep; the action succeeds as
-soon as the selected feature remains centered for the settle interval.
+CCW through 15 degrees and then CW through 15 degrees at the supplied angular
+speed. Missing feedback channels are tolerated during the sweep; the action
+succeeds as soon as the selected feature remains centered for the settle
+interval. `MOVEMENT_ACTION_MX_TAPE_PIVOT_ALIGN` passes its sequence
+`action_speed_mps` field through as this angular speed (rad/s), and selects the
+front/PX sensor as the fixed pivot while the back/MX sensor measures skew.
+This action alone overrides the normal `0.100 m` front-axle distance with a
+`0.120 m` pivot distance; other alignments retain the drivetrain geometry.
 
 ## Sequence integration
 
